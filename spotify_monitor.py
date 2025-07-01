@@ -799,25 +799,25 @@ def configcat_on_config_changed(config_data):
         # --- Extract new values from the config_data dictionary ---
         # Use .get() for safe access in case keys or nested structures are missing
         # The final '.get('b', None)' fetches the boolean value, defaulting to None if not found
-        raw_new_send_texts  = config_data.get(TEXTS_FLAG, {}).get('v', {}).get('b', None)
-        raw_new_dz_alerts   = config_data.get(DZ_ALERTS_FLAG, {}).get('v', {}).get('b', None)
-        raw_new_orig_emails = config_data.get(ORIG_EMAILS_FLAG, {}).get('v', {}).get('b', None)
-
+        raw_send_texts  = config_data.get(TEXTS_FLAG, {}).get('v', {}).get('b', None)
+        raw_dz_alerts   = config_data.get(DZ_ALERTS_FLAG, {}).get('v', {}).get('b', None)
+        raw_orig_emails = config_data.get(ORIG_EMAILS_FLAG, {}).get('v', {}).get('b', None)
+ 
         # --- Apply Fallback Logic ---
         # If a value wasn't found in config_data (raw_* is None), keep the existing global value.
         # Otherwise, use the value extracted from config_data.
-        new_send_texts  = SEND_TEXTS if raw_new_send_texts is None else raw_new_send_texts
-        new_dz_alerts   = DZ_ALERTS if raw_new_dz_alerts is None else raw_new_dz_alerts
-        new_orig_emails = ORIG_EMAILS if raw_new_orig_emails is None else raw_new_orig_emails
+        new_send_texts  = SEND_TEXTS if raw_send_texts is None else raw_send_texts
+        new_dz_alerts   = DZ_ALERTS if raw_dz_alerts is None else raw_dz_alerts
+        new_orig_emails = ORIG_EMAILS if raw_orig_emails is None else raw_orig_emails
 
         # --- Log toggled flags (if not suppressed) ---
         if SHOW_CONFIGCAT_FLAGS:
             if SEND_TEXTS != new_send_texts:
-                print(f"\nsendtexts flag toggled to: {new_send_texts}\n") # Or use logit               
+                print(f"\nsendtexts flag toggled to: {new_send_texts}\n")
             if DZ_ALERTS != new_dz_alerts:
-                print(f"\ndz_alerts flag toggled to: {new_dz_alerts}\n") # Or use logit
+                print(f"\ndz_alerts flag toggled to: {new_dz_alerts}\n")
             if ORIG_EMAILS != new_orig_emails:
-                print(f"\norig_emails flag toggled to: {new_orig_emails}\n") # Or use logit
+                print(f"\norig_emails flag toggled to: {new_orig_emails}\n")
 
         # --- Update Global Variables ---
         SEND_TEXTS = new_send_texts
@@ -4286,12 +4286,10 @@ def main():
 
     ## BEGIN SETUP CONFIGCAT - must be after custom log is set up because the error logging routine uses print_to_log
     if JMK_MODE:
-        SDK_KEY = "kcnbCHqgDUmLiqvIhMqs-g/pDdz-kiByUqhJJvBr70pUg"
         hooks = Hooks()
-        #hooks.add_on_client_ready(configcat_on_ready)
-        hooks.add_on_config_changed(configcat_on_config_changed)
+        hooks.add_on_config_changed(configcat_on_config_changed_new)
         hooks.add_on_error(configcat_on_error)
-        client = ConfigCatClient.get(SDK_KEY,
+        client = ConfigCatClient.get(CONFIGCAT_SDK_KEY,
             ConfigCatOptions(
                 polling_mode=PollingMode.auto_poll(poll_interval_seconds=60), hooks=hooks
             )
