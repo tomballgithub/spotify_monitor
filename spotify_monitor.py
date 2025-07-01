@@ -414,6 +414,26 @@ CLIENT_MODEL = 34404
 APP_VERSION = ""
 
 # ---------------------------------------------------------------------
+
+# The following is for using the ConfigCat feature flag service to control features during run-time.
+# The primary way is detailed in the documentation under 'Signal Controls (macOS/Linux/Unix)'
+# This method works for any operating system supported by ConfigCat, which has a free tier sufficient for this.
+
+# Replace with the USERNAME (API Key) and PASSWORD (API Secret) generated in the ConfigCat Dashboard via 'My API Credentials'.
+# The SDK_KEY is is provided via the 'View SDK Key' button.
+CONFIGCAT_USERNAME = ""
+CONFIGCAT_PASSWORD = ""
+CONFIGCAT_SDK_KEY  = ""
+
+# Name of each flag assigned in ConfigCat (it's OK to remove ones you will not use)
+CONFIGCAT_RELOAD_SECRETS      = "reloadSecretsTokens"
+CONFIGCAT_EMAIL_USERS         = "emailUserUpdates"
+CONFIGCAT_EMAIL_SONGS_ALL     = "emailSongsAll"
+CONFIGCAT_EMAIL_SONGS_TRACKED = "emailSongsTracked"
+CONFIGCAT_EMAIL_SONGS_LOOPED  = "emailSongsLooped"
+CONFIGCAT_TIMER_INCREASE      = "increaseInactivityTimer"
+CONFIGCAT_TIMER_DECREASE      = "decreaseInactivityTimer"
+
 """
 
 # -------------------------
@@ -484,6 +504,19 @@ CLEAR_SCREEN = False
 SPOTIFY_INACTIVITY_CHECK_SIGNAL_VALUE = 0
 TOKEN_MAX_RETRIES = 0
 TOKEN_RETRY_TIMEOUT = 0.0
+CONFIGCAT_USERNAME = ""
+CONFIGCAT_PASSWORD = ""
+CONFIGCAT_SDK_KEY  = ""
+CONFIGCAT_RELOAD_SECRETS      = ""
+CONFIGCAT_EMAIL_USERS         = ""
+CONFIGCAT_EMAIL_SONGS_ALL     = ""
+CONFIGCAT_EMAIL_SONGS_TRACKED = ""
+CONFIGCAT_EMAIL_SONGS_LOOPED  = ""
+CONFIGCAT_TIMER_INCREASE      = ""
+CONFIGCAT_TIMER_DECREASE      = ""
+CONFIGCAT_TEXTS               = ""
+CONFIGCAT_DZ_ALERTS           = ""
+CONFIGCAT_ORIG_EMAILS         = ""
 
 JMK_MODE = False
 DISCOVERY_ZONE_FOUND_COUNT = 3
@@ -521,7 +554,8 @@ exec(CONFIG_BLOCK, globals())
 DEFAULT_CONFIG_FILENAME = "spotify_monitor.conf"
 
 # List of secret keys to load from env/config
-SECRET_KEYS = ("REFRESH_TOKEN", "SP_DC_COOKIE", "SMTP_PASSWORD")
+#SECRET_KEYS = ("REFRESH_TOKEN", "SP_DC_COOKIE", "SMTP_PASSWORD")
+SECRET_KEYS = ("REFRESH_TOKEN", "SP_DC_COOKIE", "SMTP_PASSWORD", "SP_DC_COOKIE2", "CONFIGCAT_USERNAME", "CONFIGCAT_PASSWORD", "CONFIGCAT_SDK_KEY", "ACCOUNT_SID", "AUTH_TOKEN")
 
 # Strings removed from track names for generating proper Genius search URLs
 re_search_str = r'remaster|extended|original mix|remix|original soundtrack|radio( |-)edit|\(feat\.|( \(.*version\))|( - .*version)'
@@ -706,15 +740,45 @@ def configcat_on_ready():
     pass
 
 def configcat_on_error(error):
-    print_to_log(f"❌ Error: {error}\n")
-    pass
+    if not str(error).startswith("Request timed out while trying to fetch config JSON"):
+        print_to_log(f"❌ ConfigCat Error: {error}\n")
+
+def configcat_set_flag(flag_id, flag_value):
+    """
+    Retrieves a specific ConfigCat product by its ID.
+    """
+    url = f"https://api.configcat.com/v2/settings/{flag_id}/value"
+
+    # Encode credentials for Basic Authentication
+    credentials = f"{CONFIGCAT_USERNAME}:{CONFIGCAT_PASSWORD}"
+    encoded_credentials = base64.b64encode(credentials.encode()).decode()
+
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "X-CONFIGCAT-SDKKEY": f"{CONFIGCAT_SDK_KEY}",
+        "Authorization": f"Basic {encoded_credentials}"
+    }
+
+    try:
+        response = req.get(url, headers=headers)
+        response.raise_for_status()  # Raise an exception for bad status codes (4xx or 5xx)
+        payload = response.json()
+        payload['defaultValue']['boolValue'] = flag_value
+        response = req.put(url, headers=headers, data=json.dumps(payload))
+
+    except req.exceptions.RequestException as e:
+        print(f"Error setting Configcat feature flag '{flag_id}': {e}")
+        return None
+
+    return(response)
 
 def configcat_on_config_changed(config_data):
     global SEND_TEXTS, DZ_ALERTS, ORIG_EMAILS, USER_ID, SHOW_CONFIGCAT_FLAGS # Needed to modify global variables
 
-    TEXTS_FLAG = "sendtexts" + USER_ID
-    DZ_ALERTS_FLAG = "senddzalerts" + USER_ID
-    ORIG_EMAILS_FLAG = "sendorigemails" + USER_ID
+    TEXTS_FLAG = CONFIGCAT_TEXTS + USER_ID
+    DZ_ALERTS_FLAG = CONFIGCAT_DZ_ALERTS + USER_ID
+    ORIG_EMAILS_FLAG = CONFIGCAT_ORIG_EMAILS + USER_ID
 
     if SHOW_CONFIGCAT_FLAGS:
 #    print(f"🔄 Configuration has changed: {config_data}")
@@ -749,18 +813,83 @@ def configcat_on_config_changed(config_data):
         DZ_ALERTS = new_dz_alerts
         ORIG_EMAILS = new_orig_emails
 
-        if SHOW_CONFIGCAT_FLAGS:
+        if (SHOW_CONFIGCAT_FLAGS and INITIAL_STARTUP) or (SHOW_CONFIGCAT_FLAGS and (raw_send_texts or raw_dz_alerts or raw_orig_emails)):
             print(f"*** Configuration Flags Loaded")
-            print(f"      Discovery Zone alerts : {DZ_ALERTS}")
-            print(f"      Send SMS for updates  : {SEND_TEXTS}")
-            print(f"      Send standard emails  : {ORIG_EMAILS}")
+            print(f"      Discovery Zone alerts : {DZ_ALERTS!s:5} {'  (flag missing via Configcat)' if raw_send_texts is None else ''}")
+            print(f"      Send SMS for updates  : {SEND_TEXTS!s:5} {'  (flag missing via Configcat)' if raw_dz_alerts is None else ''}")
+            print(f"      Send standard emails  : {ORIG_EMAILS!s:5} {'  (flag missing via Configcat)' if raw_orig_emails is None else ''}")
             print("")
 
     except Exception as err: # Catch potential errors during dictionary access
-        logit("Config Data Access Error", readconfigID, logging.ERROR) # Use ERROR level
-        logit(f"Error details: {err}", readconfigID, logging.ERROR)
-        # Optionally re-raise or handle specific errors like KeyError, TypeError
+        print("Config Data Access Error", readconfigID, logging.ERROR) # Use ERROR level
+        print(f"Error details: {err}", readconfigID, logging.ERROR)
 
+def configcat_on_config_changed_new(config_data):    
+    if JMK_MODE:
+        configcat_on_config_changed(config_data)
+        
+    # if SHOW_CONFIGCAT_FLAGS:
+        # print(f"🔄 Configuration has changed: {config_data}")
+        # pass
+
+    try:
+        # --- Extract new values from the config_data dictionary ---
+        # Use .get() for safe access in case keys or nested structures are missing
+        # The final '.get('b', None)' fetches the boolean value, defaulting to None if not found
+        raw_reload         = config_data.get(CONFIGCAT_RELOAD_SECRETS,      {}).get('v', {}).get('b', None)
+        raw_users          = config_data.get(CONFIGCAT_EMAIL_USERS,         {}).get('v', {}).get('b', None)
+        raw_songs_all      = config_data.get(CONFIGCAT_EMAIL_SONGS_ALL,     {}).get('v', {}).get('b', None)
+        raw_songs_tracked  = config_data.get(CONFIGCAT_EMAIL_SONGS_TRACKED, {}).get('v', {}).get('b', None)
+        raw_songs_looped   = config_data.get(CONFIGCAT_EMAIL_SONGS_LOOPED,  {}).get('v', {}).get('b', None)
+        raw_timer_increase = config_data.get(CONFIGCAT_TIMER_INCREASE,      {}).get('v', {}).get('b', None)
+        raw_timer_decrease = config_data.get(CONFIGCAT_TIMER_DECREASE,      {}).get('v', {}).get('b', None)
+
+        if (SHOW_CONFIGCAT_FLAGS and INITIAL_STARTUP) or (SHOW_CONFIGCAT_FLAGS and (raw_reload or raw_users or raw_songs_all or raw_songs_tracked or raw_songs_looped or raw_timer_increase or raw_timer_decrease)):
+            print(f"*** Configuration Flags Loaded")
+            print(f"      Reload Secrets:             {raw_reload}")
+            print(f"      Email user active/inactive: {raw_users}")
+            print(f"      Email on songs, all:        {raw_songs_all}")
+            print(f"      Email on songs, tracked:    {raw_songs_tracked}")
+            print(f"      Email on songs, tracked:    {raw_songs_looped}")
+            print(f"      Increase inactivity timer:  {raw_timer_increase}")
+            print(f"      Increase inactivity timer:  {raw_timer_decrease}")
+            print("")
+
+        if raw_reload:
+            result = configcat_set_flag(CONFIGCAT_RELOAD_SECRETS, False)
+            reload_secrets_signal_handler(f"'Configcat {CONFIGCAT_RELOAD_SECRETS}'", None)
+        
+        if raw_users:
+            result = configcat_set_flag(CONFIGCAT_EMAIL_USERS, False)
+            toggle_active_inactive_notifications_signal_handler(f"'Configcat {CONFIGCAT_EMAIL_USERS}'", None)
+
+        if raw_songs_all:
+            result = configcat_set_flag(CONFIGCAT_EMAIL_SONGS_ALL, False)
+            toggle_song_notifications_signal_handler(f"'Configcat {CONFIGCAT_EMAIL_SONGS_ALL}'", None)
+
+        if raw_songs_tracked:
+            result = configcat_set_flag(CONFIGCAT_EMAIL_SONGS_TRACKED, False)
+            toggle_track_notifications_signal_handler(f"'Configcat {CONFIGCAT_EMAIL_SONGS_TRACKED}'", None)
+
+        if raw_songs_looped:
+            result = configcat_set_flag(CONFIGCAT_EMAIL_SONGS_LOOPED, False)
+            toggle_songs_on_loop_notifications_signal_handler(f"'Configcat {CONFIGCAT_EMAIL_SONGS_LOOPED}'", None)
+
+        if raw_timer_increase:
+            result = configcat_set_flag(CONFIGCAT_TIMER_INCREASE, False)
+            increase_inactivity_check_signal_handler(f"'Configcat {CONFIGCAT_TIMER_INCREASE}'", None)
+
+        if raw_timer_decrease:
+            result = configcat_set_flag(CONFIGCAT_TIMER_DECREASE, False)
+            decrease_inactivity_check_signal_handler(f"'Configcat {CONFIGCAT_TIMER_DECREASE}'", None)
+
+    except Exception as e:
+        print(f"Error during Configcat processing: {e}")
+        return None
+
+    print_cur_ts("Timestamp:\t\t\t")
+
+    return
 
 # Function returning tracks for specific Spotify playlist URI
 def spotify_get_playlist_items(access_token, playlist_uri, fields, limit, offset):
@@ -1194,50 +1323,70 @@ def toggle_active_inactive_notifications_signal_handler(sig, frame):
     global INACTIVE_NOTIFICATION
     ACTIVE_NOTIFICATION = not ACTIVE_NOTIFICATION
     INACTIVE_NOTIFICATION = not INACTIVE_NOTIFICATION
-    sig_name = signal.Signals(sig).name
+    if isinstance(sig, int):
+        sig_name = signal.Signals(sig).name
+    else:
+        sig_name = sig
     print(f"* Signal {sig_name} received")
     print(f"* Email notifications: [active = {ACTIVE_NOTIFICATION}] [inactive = {INACTIVE_NOTIFICATION}]")
-    print_cur_ts("Timestamp:\t\t\t")
+    if isinstance(sig, int):
+        print_cur_ts("Timestamp:\t\t\t")
 
 
 # Signal handler for SIGUSR2 allowing to switch every song email notifications
 def toggle_song_notifications_signal_handler(sig, frame):
     global SONG_NOTIFICATION
     SONG_NOTIFICATION = not SONG_NOTIFICATION
-    sig_name = signal.Signals(sig).name
+    if isinstance(sig, int):
+        sig_name = signal.Signals(sig).name
+    else:
+        sig_name = sig
     print(f"* Signal {sig_name} received")
     print(f"* Email notifications: [every song = {SONG_NOTIFICATION}]")
-    print_cur_ts("Timestamp:\t\t\t")
+    if isinstance(sig, int):
+        print_cur_ts("Timestamp:\t\t\t")
 
 
 # Signal handler for SIGCONT allowing to switch tracked songs email notifications
 def toggle_track_notifications_signal_handler(sig, frame):
     global TRACK_NOTIFICATION
     TRACK_NOTIFICATION = not TRACK_NOTIFICATION
-    sig_name = signal.Signals(sig).name
+    if isinstance(sig, int):
+        sig_name = signal.Signals(sig).name
+    else:
+        sig_name = sig
     print(f"* Signal {sig_name} received")
     print(f"* Email notifications: [tracked = {TRACK_NOTIFICATION}]")
-    print_cur_ts("Timestamp:\t\t\t")
+    if isinstance(sig, int):
+        print_cur_ts("Timestamp:\t\t\t")
 
 
 # Signal handler for SIGPIPE allowing to switch songs on loop email notifications
 def toggle_songs_on_loop_notifications_signal_handler(sig, frame):
     global SONG_ON_LOOP_NOTIFICATION
     SONG_ON_LOOP_NOTIFICATION = not SONG_ON_LOOP_NOTIFICATION
-    sig_name = signal.Signals(sig).name
+    if isinstance(sig, int):
+        sig_name = signal.Signals(sig).name
+    else:
+        sig_name = sig
     print(f"* Signal {sig_name} received")
     print(f"* Email notifications: [songs on loop = {SONG_ON_LOOP_NOTIFICATION}]")
-    print_cur_ts("Timestamp:\t\t\t")
+    if isinstance(sig, int):
+        print_cur_ts("Timestamp:\t\t\t")
 
 
 # Signal handler for SIGTRAP allowing to increase inactivity check timer by SPOTIFY_INACTIVITY_CHECK_SIGNAL_VALUE seconds
 def increase_inactivity_check_signal_handler(sig, frame):
     global SPOTIFY_INACTIVITY_CHECK
     SPOTIFY_INACTIVITY_CHECK = SPOTIFY_INACTIVITY_CHECK + SPOTIFY_INACTIVITY_CHECK_SIGNAL_VALUE
-    sig_name = signal.Signals(sig).name
+    if isinstance(sig, int):
+        sig_name = signal.Signals(sig).name
+    else:
+        sig_name = sig
     print(f"* Signal {sig_name} received")
     print(f"* Spotify timers: [inactivity: {display_time(SPOTIFY_INACTIVITY_CHECK)}]")
-    print_cur_ts("Timestamp:\t\t\t")
+    if isinstance(sig, int):
+        print_cur_ts("Timestamp:\t\t\t")
 
 
 # Signal handler for SIGABRT allowing to decrease inactivity check timer by SPOTIFY_INACTIVITY_CHECK_SIGNAL_VALUE seconds
@@ -1245,20 +1394,26 @@ def decrease_inactivity_check_signal_handler(sig, frame):
     global SPOTIFY_INACTIVITY_CHECK
     if SPOTIFY_INACTIVITY_CHECK - SPOTIFY_INACTIVITY_CHECK_SIGNAL_VALUE > 0:
         SPOTIFY_INACTIVITY_CHECK = SPOTIFY_INACTIVITY_CHECK - SPOTIFY_INACTIVITY_CHECK_SIGNAL_VALUE
-    sig_name = signal.Signals(sig).name
+    if isinstance(sig, int):
+        sig_name = signal.Signals(sig).name
+    else:
+        sig_name = sig
     print(f"* Signal {sig_name} received")
     print(f"* Spotify timers: [inactivity: {display_time(SPOTIFY_INACTIVITY_CHECK)}]")
-    print_cur_ts("Timestamp:\t\t\t")
+    if isinstance(sig, int):
+        print_cur_ts("Timestamp:\t\t\t")
 
 
 # Signal handler for SIGHUP allowing to reload secrets from dotenv files and token source credentials
 # from login & client token requests body files
 def reload_secrets_signal_handler(sig, frame):
     global DEVICE_ID, SYSTEM_ID, USER_URI_ID, REFRESH_TOKEN, LOGIN_URL, USER_AGENT, APP_VERSION, CPU_ARCH, OS_BUILD, PLATFORM, OS_MAJOR, OS_MINOR, CLIENT_MODEL
-
-    sig_name = signal.Signals(sig).name
-
-    print(f"* Signal {sig_name} received\n")
+    
+    if isinstance(sig, int):
+        sig_name = signal.Signals(sig).name
+    else:
+        sig_name = sig
+    print(f"* Signal {sig_name} received")
 
     suffix = "\n" if TOKEN_SOURCE == 'client' else ""
 
@@ -1326,7 +1481,8 @@ def reload_secrets_signal_handler(sig, frame):
             else:
                 print(f"* Error: Protobuf file ({CLIENTTOKEN_REQUEST_BODY_FILE}) does not exist")
 
-    print_cur_ts("Timestamp:\t\t\t")
+    if isinstance(sig, int):
+        print_cur_ts("Timestamp:\t\t\t")
 
 
 # Returns Apple & Genius search URLs for specified track
