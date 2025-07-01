@@ -521,6 +521,7 @@ FLAG_FILE = False
 FLAG_FILE_PATH = ""
 
 JMK_MODE = False
+ALT_COOKIE = False
 DISCOVERY_ZONE_FOUND_COUNT = 3
 DISCOVERY_ZONE_EXCEPTIONS_ALLOWED = 1
 TRUNCATE_CHARS = 0                      # of chars to truncate output to [0 means none]
@@ -539,6 +540,7 @@ SEND_TEXTS    = False
 DZ_ALERTS     = False
 ORIG_EMAILS   = False
 SHOW_CONFIGCAT_FLAGS = True
+SP_DC_COOKIE2 = ""
 
 from datetime import timezone
 from twilio.rest import Client
@@ -1449,6 +1451,9 @@ def reload_secrets_signal_handler(sig, frame):
         for secret in SECRET_KEYS:
             old_val = globals().get(secret)
             val = os.getenv(secret)
+            if secret == "SP_DC_COOKIE":
+                if ALT_COOKIE:
+                    val = os.getenv("SP_DC_COOKIE2")
             if val is not None and val != old_val:
                 globals()[secret] = val
                 print(f"* Reloaded {secret} from {env_path}{suffix}")
@@ -3752,7 +3757,7 @@ def main():
         type=str,
         help="Spotify sp_dc cookie"
     )
-    api_creds.add_argument(
+    cookie_auth.add_argument(
         "-f", "--alt-cookie",
         dest="alt_cookie",
         action="store_true",
@@ -4027,6 +4032,7 @@ def main():
         sys.exit(1)
 
     if args.alt_cookie:
+        ALT_COOKIE   = True
         SP_DC_COOKIE = SP_DC_COOKIE2
         GMAIL_TAG    = GMAIL_TAG2
         ERR_CODE     = ERR_CODE2
