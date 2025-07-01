@@ -517,6 +517,8 @@ CONFIGCAT_TIMER_DECREASE      = ""
 CONFIGCAT_TEXTS               = ""
 CONFIGCAT_DZ_ALERTS           = ""
 CONFIGCAT_ORIG_EMAILS         = ""
+FLAG_FILE = False
+FLAG_FILE_PATH = ""
 
 JMK_MODE = False
 DISCOVERY_ZONE_FOUND_COUNT = 3
@@ -734,7 +736,14 @@ def send_sms(smssubject):
     else:
         print(f"ERROR: SMS Attempts Reached Maximum")
 
-            
+def flag_file_create():
+    with open(FLAG_FILE_PATH, "w") as f:
+        f.write("This indicates active streaming by monitored user")
+
+def flag_file_delete():
+    if os.path.exists(FLAG_FILE_PATH):
+        os.remove(FLAG_FILE_PATH)
+
 def configcat_on_ready():
 #    print("✅ Client is ready.")
     pass
@@ -3060,6 +3069,8 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                     send_sms(f"START: {songstring()}")
                     if dz_message:
                         send_sms(dz_message)
+                if FLAG_FILE:
+                    flag_file_create()
                 
             # Primary loop
             while True:
@@ -3495,6 +3506,8 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                             print_jmk(f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}")
                             if SEND_TEXTS:
                                 send_sms(f"START: {songstring()}")                
+                            if FLAG_FILE:
+                                flag_file_create()
                              
                         m_body = f"Last played: {sp_artist} - {sp_track}\nDuration: {display_time(sp_track_duration)}{played_for_m_body}{playlist_m_body}\nAlbum: {sp_album}{context_m_body}\n\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}{friend_active_m_body}\n\nSongs Played: {song_count}\n{body_dz}Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
                         m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{sp_artist_url}\">{escape(sp_artist)}</a> - <a href=\"{sp_track_url}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{played_for_m_body_html}{playlist_m_body_html}<br>Album: <a href=\"{sp_album_url}\">{escape(sp_album)}</a>{context_m_body_html}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a>{friend_active_m_body_html}<br><br>Songs Played: {song_count}<br>{body_dz_html}Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
@@ -3578,6 +3591,8 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                             print_to_both(f"{timestring()}: {ERR_CODE}, *** End text sent. [{time_diff_str()}]: {songstring()}")
                             if SEND_TEXTS:
                                 send_sms(f"END: [{time_diff_str()}]: {songstring()}")
+                            if FLAG_FILE:
+                                flag_file_delete()
 
                         print(listened_songs_text)
 
@@ -3659,7 +3674,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
 
 def main():
     global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_CHECK_COUNTER, LOGIN_REQUEST_BODY_FILE, CLIENTTOKEN_REQUEST_BODY_FILE, REFRESH_TOKEN, LOGIN_URL, USER_AGENT, DEVICE_ID, SYSTEM_ID, USER_URI_ID, SP_DC_COOKIE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, SP_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, ERROR_NOTIFICATION, SPOTIFY_CHECK_INTERVAL, SPOTIFY_INACTIVITY_CHECK, SPOTIFY_ERROR_INTERVAL, SPOTIFY_DISAPPEARED_CHECK_INTERVAL, TRACK_SONGS, SMTP_PASSWORD, stdout_bck, APP_VERSION, CPU_ARCH, OS_BUILD, PLATFORM, OS_MAJOR, OS_MINOR, CLIENT_MODEL, TOKEN_SOURCE, ALARM_TIMEOUT, pyotp, USER_AGENT
-    global JMK_MODE, INITIAL_STARTUP, TRUNCATE_CHARS, GMAIL_TAG, ERR_CODE, SEND_TEXTS, DZ_ALERTS, ORIG_EMAILS, USER_ID
+    global JMK_MODE, INITIAL_STARTUP, TRUNCATE_CHARS, GMAIL_TAG, ERR_CODE, SEND_TEXTS, DZ_ALERTS, ORIG_EMAILS, USER_ID, ALT_COOKIE, SP_DC_COOKIE2, FLAG_FILE, FLAG_FILE_PATH
     global log_logger, screen_logger, both_logger, FINAL_LOG_PATH
 
     if "--generate-config" in sys.argv:
@@ -3922,6 +3937,13 @@ def main():
         default=None,
         help="Enable Jeoff's view and turn on texting"
     )
+    opts.add_argument(
+        "--ff", "--flag-file",
+        dest="flagfile",
+        action="store_true",
+        default=None,
+        help="Use flag file to indicate streaming state to other apps"
+    )
 
     args = parser.parse_args()
 
@@ -4016,8 +4038,9 @@ def main():
     if args.jmk:
         JMK_MODE = True
 
-    if args.truncate:
-        TRUNCATE_CHARS = args.truncate
+    if args.flagfile:
+        FLAG_FILE = True
+        flag_file_delete()
 
     if args.send_test_email:
         print("* Sending test email notification ...\n")
