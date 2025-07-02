@@ -904,16 +904,22 @@ def configcat_on_config_changed_new(config_data):
 def spotify_get_playlist_items(access_token, playlist_uri, fields, limit, offset):
     playlist_id = playlist_uri.split(':', 2)[2]
     url = f"https://api.spotify.com/v1/playlists/{playlist_id}/tracks?fields={fields}&limit={limit}&offset={offset}"
+
     headers = {
         "Authorization": f"Bearer {access_token}",
-        "Client-Id": SP_CACHED_CLIENT_ID,
-        "User-Agent": SP_CACHED_USER_AGENT,
+        "User-Agent": USER_AGENT
     }
+
+    if TOKEN_SOURCE == "cookie":
+        headers.update({
+            "Client-Id": SP_CACHED_CLIENT_ID
+        })
+
     # add si parameter so link opens in native Spotify app after clicking
     si = "?si=1"
 
     try:
-        response = req.get(url, headers=headers, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
+        response = SESSION.get(url, headers=headers, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
         response.raise_for_status()
         return response.json()
     except Exception:
