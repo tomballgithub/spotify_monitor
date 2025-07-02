@@ -19,8 +19,8 @@ VERSION = "2.2"
 
 # API 401 error means sp_dc cookie has expired. Lasts one year. 03/15/2025
 
-# spotify-friend-stalker: https://github.com/moritzlauper/spotify-friend-stalker
-# spotify-buddylist API:  https://github.com/valeriangalliat/spotify-buddylist
+# spotify-friend-stalker: https://github.com/moritzlauper/spotify-friend-stalker (node.js)
+# spotify-buddylist API:  https://github.com/valeriangalliat/spotify-buddylist (node.js)
 # spotify-api:            https://developer.spotify.com/documentation/web-api (official API)
 # spotify-monitor:        https://github.com/misiektoja/spotify_monitor/
 # spotify-api-python:     https://github.com/thlucas1/SpotifyWebApiPython (reference only)
@@ -62,8 +62,23 @@ VERSION = "2.2"
 # 2025/06/10: Migrated to latest code base
 # 2025/06/10: Modified look & feel of configuration flags logging at startup
 # 2025/06/10: Show stats on monitored playlists (discovery zone & liked songs) on screen during initial startup
+# 2025/06/21: Line truncation feature value of 999 now does autodetection of screen width
+# 2025/06/21: Don't show songs played on first boot when active
+# 2025/06/25: Removed redundant variables for tracks_upper (used) and sp_tracks (unused)
+# 2025/06/25: Removed song_count variable, since it's already there (listened_songs)
+# 2025/06/27: Configcat can be used to control runtime info instead of SIGUSR/etc that are Linux-only
+# 2025/06/28: Hide ConfigCat JSON fetch errors
+# 2025/06/28: Show elapsed-session-time after "Songs Played:" on each email update
+# 2025/06/28: Fixed truncation by treating tabs as spaces. Removed subtracting two from screen width during truncation auto-calculation
+# 2025/06/28: Added ConfigCat feature flag definitions for Jeoff's special items into the .CONF file
+# 2025/06/29: Optional flag file to indicate streaming state to other apps
+# 2025/06/29: Fix first email not going out for [00] song when user becomes active in JMK_MODE
 
 # bugs and to-dos:
+# *** flag file path configuration support via command line
+# *** PR: use configcat to refresh cookie (documentation, configuration, boottime data - refresh & emails, error level)
+# *** PR: Songs Played: 6 (each update) [time also?]
+# *** alternate notification method (pushover, gotify, ntfy.sh )
 # *** check for Twilio errors and report them (lost text example)
 # *** give discovery zone a +1 song grace after DZ identified [but how to message this, etc] -> started the work, see DZexceptions
 # ***      detect smart shuffle songs, for JMK at least??
