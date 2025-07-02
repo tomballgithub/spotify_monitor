@@ -2691,7 +2691,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
     DZcount = 0
     DZexceptions = 0
     DZplaylist = 0
-    song_count = 1
+#    song_count = 1
     body_dz = ""
     body_dz_html = ""
     dz_message = ""
@@ -2993,7 +2993,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
             else:
                 sp_active_ts_stop = sp_ts
                 print(f"\n*** Friend is OFFLINE for: {calculate_timespan(int(cur_ts), int(sp_ts))}")
-                song_count = 0
+#                song_count = 0
 
             if not JMK_MODE:
                 print(f"\nTracks/playlists/albums to monitor: {tracks}")
@@ -3005,12 +3005,15 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                 if tracks2:
                     print(f"Tracks/playlists/albums to monitor: Liked Songs ({len(tracks2)} songs)")
                           
-            if dz_message or song_count:
+
+#            if dz_message or song_count:
+            if dz_message or listened_songs:
                 print("")
             if dz_message:
                 print(dz_message)
-            if song_count:
-                print(f"Songs Played: {song_count}")
+# removed 6/21/2025, doesn't make sense if first booting up, as we don't know the song count
+#            if song_count:
+#                print(f"Songs Played: {song_count}")
             print_cur_ts("\nTimestamp:\t\t\t")
 
             sp_ts_old = sp_ts
@@ -3464,7 +3467,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                         sp_active_ts_stop = 0
 
                         if JMK_MODE:
-                            song_count = 1
+#                            song_count = 1
                             print_jmk(f" ")
                             print_jmk(f"----------------------")
                             print_to_both(f"{timestring()}: {ERR_CODE}, *** Start text sent. Track: {songstring()}")
@@ -3496,8 +3499,8 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                             if FLAG_FILE:
                                 flag_file_create()
                              
-                        m_body = f"Last played: {sp_artist} - {sp_track}\nDuration: {display_time(sp_track_duration)}{played_for_m_body}{playlist_m_body}\nAlbum: {sp_album}{context_m_body}\n\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}{friend_active_m_body}\n\nSongs Played: {song_count}\n{body_dz}Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-                        m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{sp_artist_url}\">{escape(sp_artist)}</a> - <a href=\"{sp_track_url}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{played_for_m_body_html}{playlist_m_body_html}<br>Album: <a href=\"{sp_album_url}\">{escape(sp_album)}</a>{context_m_body_html}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a>{friend_active_m_body_html}<br><br>Songs Played: {song_count}<br>{body_dz_html}Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
+                        m_body = f"Last played: {sp_artist} - {sp_track}\nDuration: {display_time(sp_track_duration)}{played_for_m_body}{playlist_m_body}\nAlbum: {sp_album}{context_m_body}\n\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}{friend_active_m_body}\n\nSongs Played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})\n{body_dz}Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
+                        m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{sp_artist_url}\">{escape(sp_artist)}</a> - <a href=\"{sp_track_url}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{played_for_m_body_html}{playlist_m_body_html}<br>Album: <a href=\"{sp_album_url}\">{escape(sp_album)}</a>{context_m_body_html}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a>{friend_active_m_body_html}<br><br>Songs Played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})<br>{body_dz_html}Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
 
                         if ACTIVE_NOTIFICATION:
                             print(f"Sending email notification to {RECEIVER_EMAIL}")
@@ -3516,8 +3519,8 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
 
                     if (TRACK_NOTIFICATION and on_the_list and not email_sent) or (SONG_NOTIFICATION and not email_sent):
                         m_subject = f"Spotify user {sp_username}: '{sp_artist} - {sp_track}'"
-                        m_body = f"Last played: {sp_artist} - {sp_track}\nDuration: {display_time(sp_track_duration)}{played_for_m_body}{playlist_m_body}\nAlbum: {sp_album}{context_m_body}\n\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}\n\nSongs Played: {song_count}\n{body_dz}Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-                        m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{sp_artist_url}\">{escape(sp_artist)}</a> - <a href=\"{sp_track_url}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{played_for_m_body_html}{playlist_m_body_html}<br>Album: <a href=\"{sp_album_url}\">{escape(sp_album)}</a>{context_m_body_html}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br><br>Songs Played: {song_count}<br>{body_dz_html}Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
+                        m_body = f"Last played: {sp_artist} - {sp_track}\nDuration: {display_time(sp_track_duration)}{played_for_m_body}{playlist_m_body}\nAlbum: {sp_album}{context_m_body}\n\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}\n\nSongs Played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})\n{body_dz}Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
+                        m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{sp_artist_url}\">{escape(sp_artist)}</a> - <a href=\"{sp_track_url}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{played_for_m_body_html}{playlist_m_body_html}<br>Album: <a href=\"{sp_album_url}\">{escape(sp_album)}</a>{context_m_body_html}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br><br>Songs Played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})<br>{body_dz_html}Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
                         print(f"Sending email notification to {RECEIVER_EMAIL}")
                         email_sent = True
                         if JMK_MODE:
@@ -3527,8 +3530,8 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
 
                     if song_on_loop == SONG_ON_LOOP_VALUE and SONG_ON_LOOP_NOTIFICATION:
                         m_subject = f"Spotify user {sp_username} plays song on loop: '{sp_artist} - {sp_track}'"
-                        m_body = f"Last played: {sp_artist} - {sp_track}\nDuration: {display_time(sp_track_duration)}{played_for_m_body}{playlist_m_body}\nAlbum: {sp_album}{context_m_body}\n\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}\n\nUser plays song on LOOP ({song_on_loop} times)\n\nSongs Played: {song_count}\n{body_dz}Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-                        m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{sp_artist_url}\">{escape(sp_artist)}</a> - <a href=\"{sp_track_url}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{played_for_m_body_html}{playlist_m_body_html}<br>Album: <a href=\"{sp_album_url}\">{escape(sp_album)}</a>{context_m_body_html}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br><br>User plays song on LOOP (<b>{song_on_loop}</b> times)<br><br>Songs Played: {song_count}<br>{body_dz_html}Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
+                        m_body = f"Last played: {sp_artist} - {sp_track}\nDuration: {display_time(sp_track_duration)}{played_for_m_body}{playlist_m_body}\nAlbum: {sp_album}{context_m_body}\n\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}\n\nUser plays song on LOOP ({song_on_loop} times)\n\nSongs Played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})\n{body_dz}Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
+                        m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{sp_artist_url}\">{escape(sp_artist)}</a> - <a href=\"{sp_track_url}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{played_for_m_body_html}{playlist_m_body_html}<br>Album: <a href=\"{sp_album_url}\">{escape(sp_album)}</a>{context_m_body_html}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br><br>User plays song on LOOP (<b>{song_on_loop}</b> times)<br><br>Songs Played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})<br>{body_dz_html}Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
                         if not email_sent:
                             print(f"Sending email notification to {RECEIVER_EMAIL}")
                         send_email(m_subject, m_body, m_body_html, SMTP_SSL)
@@ -3539,12 +3542,12 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                     except Exception as e:
                         print(f"* Error: {e}")
 
-                    if dz_message or song_count:
+                    if dz_message or listened_songs:
                         print("")
                     if dz_message:
                         print(dz_message)
-                    if song_count:
-                        print(f"Songs Played: {song_count}")
+                    if listened_songs:
+                        print(f"Songs Played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})")
                     print_cur_ts("\nTimestamp:\t\t\t")
                     sp_ts_old = sp_ts
                 # Track has not changed
@@ -3608,8 +3611,8 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                                     spotify_linux_play_pause("pause")
                         if INACTIVE_NOTIFICATION:
                             m_subject = f"Spotify user {sp_username} is inactive: '{sp_artist} - {sp_track}' (after {calculate_timespan(int(sp_active_ts_stop), int(sp_active_ts_start), show_seconds=False)}: {get_range_of_dates_from_tss(sp_active_ts_start, sp_active_ts_stop, short=True)})"
-                            m_body = f"Last played: {sp_artist} - {sp_track}\nDuration: {display_time(sp_track_duration)}{played_for_m_body}{playlist_m_body}\nAlbum: {sp_album}{context_m_body}\n\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}\n\nFriend got inactive after listening to music for {calculate_timespan(int(sp_active_ts_stop), int(sp_active_ts_start))}\nFriend played music from {get_range_of_dates_from_tss(sp_active_ts_start, sp_active_ts_stop, short=True, between_sep=' to ')}{listened_songs_mbody}\n\nSongs Played: {song_count}\n{body_dz}Last activity: {get_date_from_ts(sp_active_ts_stop)}\nInactivity timer: {display_time(SPOTIFY_INACTIVITY_CHECK)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-                            m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{sp_artist_url}\">{escape(sp_artist)}</a> - <a href=\"{sp_track_url}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{played_for_m_body_html}{playlist_m_body_html}<br>Album: <a href=\"{sp_album_url}\">{escape(sp_album)}</a>{context_m_body_html}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br><br>Friend got inactive after listening to music for <b>{calculate_timespan(int(sp_active_ts_stop), int(sp_active_ts_start))}</b><br>Friend played music from <b>{get_range_of_dates_from_tss(sp_active_ts_start, sp_active_ts_stop, short=True, between_sep='</b> to <b>')}</b>{listened_songs_mbody_html}<br><br>Songs Played: {song_count}<br>{body_dz_html}Last activity: <b>{get_date_from_ts(sp_active_ts_stop)}</b><br>Inactivity timer: {display_time(SPOTIFY_INACTIVITY_CHECK)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
+                            m_body = f"Last played: {sp_artist} - {sp_track}\nDuration: {display_time(sp_track_duration)}{played_for_m_body}{playlist_m_body}\nAlbum: {sp_album}{context_m_body}\n\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}\n\nFriend got inactive after listening to music for {calculate_timespan(int(sp_active_ts_stop), int(sp_active_ts_start))}\nFriend played music from {get_range_of_dates_from_tss(sp_active_ts_start, sp_active_ts_stop, short=True, between_sep=' to ')}{listened_songs_mbody}\n\nSongs Played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})\n{body_dz}Last activity: {get_date_from_ts(sp_active_ts_stop)}\nInactivity timer: {display_time(SPOTIFY_INACTIVITY_CHECK)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
+                            m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{sp_artist_url}\">{escape(sp_artist)}</a> - <a href=\"{sp_track_url}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{played_for_m_body_html}{playlist_m_body_html}<br>Album: <a href=\"{sp_album_url}\">{escape(sp_album)}</a>{context_m_body_html}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br><br>Friend got inactive after listening to music for <b>{calculate_timespan(int(sp_active_ts_stop), int(sp_active_ts_start))}</b><br>Friend played music from <b>{get_range_of_dates_from_tss(sp_active_ts_start, sp_active_ts_stop, short=True, between_sep='</b> to <b>')}</b>{listened_songs_mbody_html}<br><br>Songs Played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})<br>{body_dz_html}Last activity: <b>{get_date_from_ts(sp_active_ts_stop)}</b><br>Inactivity timer: {display_time(SPOTIFY_INACTIVITY_CHECK)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
                             print(f"Sending email notification to {RECEIVER_EMAIL}")
                             send_email(m_subject, m_body, m_body_html, SMTP_SSL)
                             email_sent = True
