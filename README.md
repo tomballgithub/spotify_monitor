@@ -1,6 +1,6 @@
 # spotify_monitor
 
-spotify_monitor is a tool for real-time monitoring of Spotify friends' music activity.
+Tool for real-time monitoring of Spotify friends' music activity feed.
 
 NOTE: If you're interested in tracking changes to Spotify users' profiles including their playlists, take a look at another tool I've developed: [spotify_profile_monitor](https://github.com/misiektoja/spotify_profile_monitor).
 
@@ -175,12 +175,23 @@ If you store the `SP_DC_COOKIE` in a dotenv file you can update its value and se
 
 This is the alternative method used to obtain a Spotify access token which simulates a login from the real Spotify desktop app using credentials intercepted from a real session.
 
-- Run an intercepting proxy of your choice (like [Proxyman](https://proxyman.com)).
+- Run an intercepting proxy of your choice (like [Proxyman](https://proxyman.com) - the trial version is sufficient)
 
-- Launch the Spotify desktop client and look for POST requests to `https://login{n}.spotify.com/v3/login`
-   - Note: The `login` part is suffixed with one or more digits (e.g. `login5`).
+- Enable SSL traffic decryption for `spotify.com` domain
+   - in Proxyman: click **Tools → SSL Proxying List → + button → Add Domain → paste `*.spotify.com` → Add**
 
-- If you don't see this request, log out from the Spotify desktop client and log back in.
+- Launch the Spotify desktop client, then switch to your intercepting proxy (like Proxyman) and look for POST requests to `https://login5.spotify.com/v3/login`
+
+- If you don't see this request, try following steps (stop once it works):
+   - restart the Spotify desktop client
+   - log out from the Spotify desktop client and log back in
+   - point Spotify at the intercepting proxy directly in its settings, i.e. in **Spotify → Settings → Proxy Settings**, set:
+      - **proxy type**: `HTTP`
+      - **host**: `127.0.0.1` (IP/FQDN of your proxy, for Proxyman use the IP you see at the top bar)
+      - **port**: `9090` (port of your proxy, for Proxyman use the port you see at the top bar)
+      - restart the app; since QUIC (HTTP/3) requires raw UDP and can't tunnel over HTTP CONNECT, Spotify will downgrade to TCP-only HTTP/2 or 1.1, which intercepting proxy can decrypt
+   -  block Spotify's UDP port 443 at the OS level with a firewall of your choice - this prevents QUIC (HTTP/3), forcing TLS over TCP and letting intercepting proxy perform MITM
+   - try an older version of the Spotify desktop client
 
 - Export the login request body (a binary Protobuf payload) to a file (e.g. ***login-request-body-file***)
    - In Proxyman: **right click the request → Export → Request Body → Save File**.

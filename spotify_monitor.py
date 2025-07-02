@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v2.2
+v2.2.1
 
 Tool implementing real-time tracking of Spotify friends music activity:
 https://github.com/misiektoja/spotify_monitor/
@@ -15,7 +15,7 @@ pyotp (optional, needed when the token source is set to cookie)
 python-dotenv (optional)
 """
 
-VERSION = "2.2"
+VERSION = "2.2.1"
 
 # API 401 error means sp_dc cookie has expired. Lasts one year. 03/15/2025
 
@@ -218,6 +218,10 @@ SP_USER_GOT_OFFLINE_TRACK_ID = ""
 # Delay before pausing the above track after the user goes offline; in seconds
 # Set to 0 to keep playing indefinitely until manually paused
 SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE = 5  # 5 seconds
+
+# Occasionally, the Spotify API glitches and reports that the user has disappeared from the list of friends
+# To avoid false alarms, we delay alerts until this happens REMOVED_DISAPPEARED_COUNTER times in a row
+REMOVED_DISAPPEARED_COUNTER = 4
 
 # Optional: specify user agent manually
 #
@@ -499,6 +503,7 @@ SONG_ON_LOOP_VALUE = 0
 SKIPPED_SONG_THRESHOLD = 0
 SP_USER_GOT_OFFLINE_TRACK_ID = ""
 SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE = 0
+REMOVED_DISAPPEARED_COUNTER = 0
 USER_AGENT = ""
 LIVENESS_CHECK_INTERVAL = 0
 CHECK_INTERNET_URL = ""
@@ -1675,10 +1680,13 @@ def fetch_server_time(session: req.Session, ua: str) -> int:
 def generate_totp():
     import pyotp
 
-    secret_cipher_bytes = [
-        12, 56, 76, 33, 88, 44, 88, 33,
-        78, 78, 11, 66, 22, 22, 55, 69, 54,
-    ]
+    secret_cipher_dict = {
+        "8": [37, 84, 32, 76, 87, 90, 87, 47, 13, 75, 48, 54, 44, 28, 19, 21, 22],
+        "7": [59, 91, 66, 74, 30, 66, 74, 38, 46, 50, 72, 61, 44, 71, 86, 39, 89],
+        "6": [21, 24, 85, 46, 48, 35, 33, 8, 11, 63, 76, 12, 55, 77, 14, 7, 54],
+        "5": [12, 56, 76, 33, 88, 44, 88, 33, 78, 78, 11, 66, 22, 22, 55, 69, 54]
+    }
+    secret_cipher_bytes = secret_cipher_dict["8"]
 
     transformed = [e ^ ((t % 33) + 9) for t, e in enumerate(secret_cipher_bytes)]
     joined = "".join(str(num) for num in transformed)
@@ -1707,7 +1715,7 @@ def refresh_access_token_from_sp_dc(sp_dc: str) -> dict:
         "productType": "web-player",
         "totp": otp_value,
         "totpServer": otp_value,
-        "totpVer": 5,
+        "totpVer": 8,
         "sTime": server_time,
         "cTime": client_time,
         "buildDate": time.strftime("%Y-%m-%d", time.gmtime(server_time)),
@@ -2777,7 +2785,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                 SP_CACHED_ACCESS_TOKEN = None
 
             client_errs = ['access token', 'invalid client token', 'expired client token', 'refresh token has been revoked', 'refresh token has expired', 'refresh token is invalid', 'invalid grant during refresh']
-            cookie_errs = ['access token', 'unauthorized']
+            cookie_errs = ['access token', 'unauthorized', 'unsuccessful token request']
 
             if TOKEN_SOURCE == 'client' and any(k in err for k in client_errs):
                 print(f"* Error: client or refresh token may be invalid or expired!")
@@ -2790,11 +2798,11 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                     email_sent = True
 
             elif TOKEN_SOURCE == 'cookie' and any(k in err for k in cookie_errs):
-                print(f"* Error: sp_dc may be invalid or expired!")
+                print(f"* Error: sp_dc may be invalid/expired or Spotify has broken sth again!")
                 if ERROR_NOTIFICATION and not email_sent:
-                    m_subject = f"spotify_monitor: sp_dc may be invalid or expired! (uri: {user_uri_id})"
-                    m_body = f"sp_dc may be invalid or expired!\n{e}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                    m_body_html = f"<html><head></head><body>sp_dc may be invalid or expired!<br>{escape(str(e))}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
+                    m_subject = f"spotify_monitor: sp_dc may be invalid/expired or Spotify has broken sth again! (uri: {user_uri_id})"
+                    m_body = f"sp_dc may be invalid/expired or Spotify has broken sth again!\n{e}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                    m_body_html = f"<html><head></head><body>sp_dc may be invalid/expired or Spotify has broken sth again!<br>{escape(str(e))}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
                     print(f"Sending email notification to {RECEIVER_EMAIL}")
                     send_email(m_subject, m_body, m_body_html, SMTP_SSL)
                     email_sent = True
@@ -3066,6 +3074,8 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                 if FLAG_FILE:
                     flag_file_create()
                 
+            disappeared_counter = 0
+
             # Primary loop
             while True:
 
@@ -3133,7 +3143,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                             print(f"* Error, retrying in {display_time(SPOTIFY_ERROR_INTERVAL)}: '{e}'")
 
                             client_errs = ['access token', 'invalid client token', 'expired client token', 'refresh token has been revoked', 'refresh token has expired', 'refresh token is invalid', 'invalid grant during refresh']
-                            cookie_errs = ['access token', 'unauthorized']
+                            cookie_errs = ['access token', 'unauthorized', 'unsuccessful token request']
 
                             if TOKEN_SOURCE == 'client' and any(k in err for k in client_errs):
                                 print(f"* Error: client or refresh token may be invalid or expired!")
@@ -3146,11 +3156,11 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                                     email_sent = True
 
                             elif TOKEN_SOURCE == 'cookie' and any(k in err for k in cookie_errs):
-                                print(f"* Error: sp_dc may be invalid or expired!")
+                                print(f"* Error: sp_dc may be invalid/expired or Spotify has broken sth again!")
                                 if ERROR_NOTIFICATION and not email_sent:
-                                    m_subject = f"spotify_monitor: sp_dc may be invalid or expired! (uri: {user_uri_id})"
-                                    m_body = f"sp_dc may be invalid or expired!\n{e}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                                    m_body_html = f"<html><head></head><body>sp_dc may be invalid or expired!<br>{escape(str(e))}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
+                                    m_subject = f"spotify_monitor: sp_dc may be invalid/expired or Spotify has broken sth again! (uri: {user_uri_id})"
+                                    m_body = f"sp_dc may be invalid/expired or Spotify has broken sth again!\n{e}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                                    m_body_html = f"<html><head></head><body>sp_dc may be invalid/expired or Spotify has broken sth again!<br>{escape(str(e))}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
                                     print(f"Sending email notification to {RECEIVER_EMAIL}")
                                     send_email(m_subject, m_body, m_body_html, SMTP_SSL)
                                     email_sent = True
@@ -3160,6 +3170,10 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
 
                 if sp_found is False:
                     # User has disappeared from the Spotify's friend list or account has been removed
+                    disappeared_counter += 1
+                    if disappeared_counter < REMOVED_DISAPPEARED_COUNTER:
+                        time.sleep(SPOTIFY_CHECK_INTERVAL)
+                        continue
                     if user_not_found is False:
                         if is_user_removed(sp_accessToken, user_uri_id):
                             print(f"Spotify user '{user_uri_id}' ({sp_username}) was probably removed! Retrying in {display_time(SPOTIFY_DISAPPEARED_CHECK_INTERVAL)} intervals")
@@ -3183,6 +3197,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                     continue
                 else:
                     # User reappeared in the Spotify's friend list
+                    disappeared_counter = 0
                     if user_not_found is True:
                         print(f"Spotify user {user_uri_id} ({sp_username}) has reappeared!")
                         if ERROR_NOTIFICATION:
