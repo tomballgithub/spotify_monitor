@@ -666,14 +666,14 @@ class Logger(object):
 
     def write(self, message):
         """Write message based on the selected mode."""
-        if (TRUNCATE_CHARS):
-            message = message [:TRUNCATE_CHARS]
-        if self.mode in ["both", "screen"]:
-            self.terminal.write(message)
-            self.terminal.flush()
         if self.mode in ["both", "log"]:
             self.logfile.write(message)
             self.logfile.flush()
+        if self.mode in ["both", "screen"]:
+            if (TRUNCATE_CHARS):
+                message = message.expandtabs(tabsize=8)[:TRUNCATE_CHARS]
+            self.terminal.write(message)
+            self.terminal.flush()
 
     def flush(self):
         pass  # Needed for compatibility with sys.stdout
@@ -681,29 +681,27 @@ class Logger(object):
 # Helper functions using persistent loggers
 def print_to_log(message):
     """Prints only to the log file."""
-    if (TRUNCATE_CHARS):
-        message = message [:TRUNCATE_CHARS]
     log_logger.write(str(message) + "\n")
 
 def print_to_both(message):
     """Prints to both the log file and screen, bypassing sys.stdout redirection."""
-    if (TRUNCATE_CHARS):
-        message = message [:TRUNCATE_CHARS]
     log_logger.write(str(message) + "\n")
+    if (TRUNCATE_CHARS):
+        message = message[:TRUNCATE_CHARS]
     sys.__stdout__.write(str(message) + "\n")  # Force writing to actual console
     sys.__stdout__.flush()
 
 def print_to_screen(message):
     """Prints only to the screen, bypassing sys.stdout redirection."""
     if (TRUNCATE_CHARS):
-        message = message [:TRUNCATE_CHARS]
+        message = message[:TRUNCATE_CHARS]
     sys.__stdout__.write(str(message) + "\n")  # Force writing to actual console
     sys.__stdout__.flush()
 
 def print_jmk(message):
     """Prints only to the screen, bypassing sys.stdout redirection."""
     if (TRUNCATE_CHARS):
-        message = message [:TRUNCATE_CHARS]
+        message = message[:TRUNCATE_CHARS]
     sys.__stdout__.write(str(message) + "\n")
     sys.__stdout__.flush()
     
@@ -3658,7 +3656,8 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
 def main():
     global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_CHECK_COUNTER, LOGIN_REQUEST_BODY_FILE, CLIENTTOKEN_REQUEST_BODY_FILE, REFRESH_TOKEN, LOGIN_URL, USER_AGENT, DEVICE_ID, SYSTEM_ID, USER_URI_ID, SP_DC_COOKIE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, SP_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, ERROR_NOTIFICATION, SPOTIFY_CHECK_INTERVAL, SPOTIFY_INACTIVITY_CHECK, SPOTIFY_ERROR_INTERVAL, SPOTIFY_DISAPPEARED_CHECK_INTERVAL, TRACK_SONGS, SMTP_PASSWORD, stdout_bck, APP_VERSION, CPU_ARCH, OS_BUILD, PLATFORM, OS_MAJOR, OS_MINOR, CLIENT_MODEL, TOKEN_SOURCE, ALARM_TIMEOUT, pyotp, USER_AGENT
     global JMK_MODE, INITIAL_STARTUP, TRUNCATE_CHARS, GMAIL_TAG, ERR_CODE, SEND_TEXTS, DZ_ALERTS, ORIG_EMAILS, USER_ID, ALT_COOKIE, SP_DC_COOKIE2, FLAG_FILE, FLAG_FILE_PATH
-    global log_logger, screen_logger, both_logger, FINAL_LOG_PATH
+    global FINAL_LOG_PATH, log_logger
+#    global log_logger, screen_logger, both_logger, FINAL_LOG_PATH
 
     if "--generate-config" in sys.argv:
         print(CONFIG_BLOCK.strip("\n"))
@@ -4259,9 +4258,22 @@ def main():
 
     # Create persistent Logger instances
     log_logger = Logger(FINAL_LOG_PATH, mode="log")
-    screen_logger = Logger(FINAL_LOG_PATH, mode="screen")
-    both_logger = Logger(FINAL_LOG_PATH, mode="both")
+#    screen_logger = Logger(FINAL_LOG_PATH, mode="screen")
+#    both_logger = Logger(FINAL_LOG_PATH, mode="both")
 
+    if args.truncate:
+        if args.truncate != 999:
+            TRUNCATE_CHARS = args.truncate
+        else:
+            try:
+                terminal_size = os.get_terminal_size()
+                print_to_log(f"The terminal screen width is: {terminal_size.columns} characters")
+                print_to_log(f"")
+                TRUNCATE_CHARS = terminal_size.columns
+                
+            except OSError:
+                print("Cannot determine terminal size. Running in a non-terminal environment or output redirected.")
+    
     ## BEGIN SETUP CONFIGCAT - must be after custom log is set up because the error logging routine uses print_to_log
     if JMK_MODE:
         hooks = Hooks()
