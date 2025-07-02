@@ -3033,7 +3033,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                 print_jmk(f"----------------------")               
                 print_to_both(f"{timestring()}: {ERR_CODE}, *** Start text sent. Track: {songstring()}")
                 #---
-                if sp_playlist.upper() == DZ_PLAYLIST_NAME.upper() or dz_str.upper() in tracks_upper:
+                if sp_playlist.upper() == DZ_PLAYLIST_NAME.upper() or dz_str.upper() in tracks:
 # this is executed during first boot up only
 # this is caught above
 #                    sp_track = sp_track + " \u2665"
