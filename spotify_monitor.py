@@ -3028,7 +3028,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
 
             # Print after timestamp
             if JMK_MODE and jmk_send:
-                song_count = 1
+#                song_count = 1
                 print_jmk(f" ")
                 print_jmk(f"----------------------")               
                 print_to_both(f"{timestring()}: {ERR_CODE}, *** Start text sent. Track: {songstring()}")
