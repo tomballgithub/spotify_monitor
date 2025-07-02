@@ -3508,6 +3508,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                             email_sent = True
                             if JMK_MODE:
                                 send_email(f"{GMAIL_TAG}---------------------------------", "  ", "  ", SMTP_SSL)
+                                send_email(f"{GMAIL_TAG}[{time_diff_str()}] {timestring()} {songstring()}", m_body, m_body_html, SMTP_SSL)
 
                     on_the_list = False
                     if sp_track.upper() in tracks or sp_playlist.upper() in tracks or sp_album.upper() in tracks:
