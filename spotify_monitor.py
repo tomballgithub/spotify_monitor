@@ -3035,47 +3035,13 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                 #---
                 if sp_playlist.upper() == DZ_PLAYLIST_NAME.upper() or dz_str.upper() in tracks:
 # this is executed during first boot up only
-# this is caught above
-#                    sp_track = sp_track + " \u2665"
-#                    DZcount += 1
-#                    DZexceptions = 0
-#                    if (DZcount >= DISCOVERY_ZONE_FOUND_COUNT or DZplaylist > 0):
-#                        sp_playlist = DZ_PLAYLIST_NAME
-#                        is_playlist = True
-#                    if sp_playlist.upper() == DZ_PLAYLIST_NAME.upper():
-#                        DZplaylist += 1
-#                    else:
-#                        DZplaylist = 0
-                    # after a restart, always flag DZ
-                    # if (DZcount == DISCOVERY_ZONE_FOUND_COUNT and DZplaylist == 0) or (DZplaylist == 1):
                     if (DZcount >= DISCOVERY_ZONE_FOUND_COUNT) or DZplaylist:
-#                        print_to_log(f"*** Discovery Zone Detected: {songstring()}, DZ Count: {DZcount}, DZ Playlist: {DZplaylist}")
                         dz_message = f"*** Discovery Zone Detected: {songstring()}\nDZ Count: {DZcount}, DZ Playlist: {DZplaylist}"
                         print_jmk(f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] *** Discovery Zone Detected")
                         if DZ_ALERTS:
                             send_email(f"{GMAIL_TAG}----------------- Discovery Zone Detected -----", "  ", "  ", SMTP_SSL)
-                            # if SEND_TEXTS:
-                                # send_sms(dz_message)
                     else:
-#                        print_to_log(f"*** Discovery Zone: DZ Count: {DZcount}, DZ Playlist: {DZplaylist}")
                         dz_message = f"Discovery Zone Count: {DZcount}, DZ Playlist: {DZplaylist}"
-# this is caught above
-#                    body_dz = f"Discovery Zone Count: {DZcount}\n"
-#                    body_dz_html = f"Discovery Zone Count: {DZcount}<br>"
-# cannot possibly happen at first boot up
-                # else:
-                    # if (DZcount >= DISCOVERY_ZONE_FOUND_COUNT):
-                        # print_to_log(f"*** Discovery Zone Cleared: {songstring()}, DZ Count: {DZcount}, DZ Playlist: {DZplaylist}")
-                        # print_jmk(f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] *** Discovery Zone Cleared, DZ Count: {DZcount}")
-                        # send_email(f"{GMAIL_TAG}----------------- Discovery Zone Cleared: {DZcount}, DZ Playlist: {DZplaylist}", "  ", "  ", SMTP_SSL)
-                        # if SEND_TEXTS:
-                            # send_sms(f"Discovery Zone Cleared: {songstring()}, DZ Count: {DZcount}, DZ Playlist: {DZplaylist}")
-# this is caught above
-#                    DZcount = 0
-#                    DZexceptions = 0
-#                    DZplaylist = 0
-#                    body_dz = ""
-#                    body_dz_html = ""
                 #---
                 print_jmk(f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}")
                 if SEND_TEXTS:
@@ -3220,7 +3186,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                     sp_artist_old = sp_artist
                     sp_track_old = sp_track
                     alive_counter = 0
-                    song_count += 1
+#                    song_count += 1
                     sp_playlist = sp_data["sp_playlist"]
                     sp_track_uri = sp_data["sp_track_uri"]
                     sp_track_uri_id = sp_data["sp_track_uri_id"]
@@ -3278,9 +3244,6 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
 
                         hasTrack = search_playlist(sp_accessToken, sp_playlist, sp_playlist_uri, sp_track_uri_id, sp_track, sp_artist, False)
 
-                        # if hasTrack:
-                            # print_to_log(f"track: {sp_track}, was found in playlist: {sp_playlist} ({sp_track})")
-                        # else:
                         if not hasTrack:
                             if (sp_playlist_owner == "Spotify"):
                                 sp_playlist = sp_playlist + "(unique)"
@@ -3327,16 +3290,13 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
 # this check handles if NOT just becoming active
                             if not ((cur_ts - sp_ts_old) > SPOTIFY_INACTIVITY_CHECK and sp_active_ts_stop > 0):
                                 if (DZcount == DISCOVERY_ZONE_FOUND_COUNT and DZplaylist == 0) or (DZplaylist == 1):
-#                                    print_to_log(f"*** Discovery Zone Detected: {songstring()}, DZ Count: {DZcount}, DZ Playlist: {DZplaylist}")
                                     dz_message = f"*** Discovery Zone Detected: {songstring()}\nDZ Count: {DZcount}, DZ Playlist: {DZplaylist}"
                                     dz_msg_screen = f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] *** Discovery Zone Detected"
-#                                    print_jmk(f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] *** Discovery Zone Detected")
                                     if DZ_ALERTS:
                                         send_email(f"{GMAIL_TAG}----------------- Discovery Zone Detected -----", "  ", "  ", SMTP_SSL)
                                         if SEND_TEXTS:
                                             send_sms(dz_message)
                                 else:
-#                                    print_to_log(f"*** Discovery Zone: DZ Count: {DZcount}, DZ Playlist: {DZplaylist}")
                                     dz_message = f"Discovery Zone Count: {DZcount}, DZ Playlist: {DZplaylist}"
                             body_dz = f"Discovery Zone Count: {DZcount}, DZ Playlist: {DZplaylist}\n"
                             body_dz_html = f"Discovery Zone Count: {DZcount}, DZ Playlist: {DZplaylist}<br>"
@@ -3346,10 +3306,8 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                             dz_message = ""
                             if not ((cur_ts - sp_ts_old) > SPOTIFY_INACTIVITY_CHECK and sp_active_ts_stop > 0):
                                 if (DZcount >= DISCOVERY_ZONE_FOUND_COUNT):
-#                                    print_to_log(f"*** Discovery Zone Cleared: {songstring()}, DZ Count: {DZcount}, DZ Playlist: {DZplaylist}")
                                     dz_message = f"*** Discovery Zone Cleared: {songstring()}, DZ Count: {DZcount}, DZ Playlist: {DZplaylist}"
                                     dz_msg_screen = f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] *** Discovery Zone Cleared, DZ Count: {DZcount}"
-#                                    print_jmk(f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] *** Discovery Zone Cleared, DZ Count: {DZcount}")
                                     send_email(f"{GMAIL_TAG}----------------- Discovery Zone Cleared: {DZcount}, DZ Playlist: {DZplaylist}", "  ", "  ", SMTP_SSL)
                                     if SEND_TEXTS:
                                         send_sms(dz_message)
