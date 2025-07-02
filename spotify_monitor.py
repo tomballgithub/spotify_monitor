@@ -529,10 +529,10 @@ DZ_PLAYLIST_NAME = "Discovery Zone"
 LIKED_PLAYLIST_NAME = "Liked Songs"
 LOAD_TRACKS_FREQUENCY = 60*60*1         # every 1 hours reload discover zone and liked songs lists
 INITIAL_STARTUP = True
-sp_tracks  = []
-sp_tracks2 = []
-tracks_upper  = [] # Discovery Zone
-tracks2_upper = [] # Liked Songs
+#sp_tracks  = []
+#sp_tracks2 = []
+sp_tracks_upper  = [] # Discovery Zone
+sp_tracks2_upper = [] # Liked Songs
 USER_ID       = ""
 GMAIL_TAG     = ""
 ERR_CODE      = ""
@@ -957,19 +957,20 @@ def search_playlist(access_token, search_playlist_name, search_playlist_uri, sea
     return found_track
 
     
-def periodic_load_tracks(spotify_tracks, sp_tracks_var, tracks_upper_var):
+def periodic_load_tracks(spotify_tracks, tracks_upper_var):
     def task():
+        sp_tracks = []
         global_vars = globals()
         old_len = len(global_vars[tracks_upper_var])
-        global_vars[sp_tracks_var] = load_spotify_tracks_from_file(spotify_tracks)
-        global_vars[tracks_upper_var] = {t.upper() for t in global_vars[sp_tracks_var]}
+        sp_tracks = load_spotify_tracks_from_file(spotify_tracks)
+        global_vars[tracks_upper_var] = {t.upper() for t in sp_tracks}
         
         if len(global_vars[tracks_upper_var]) != old_len:
             len_str = f" [was: {old_len}] " if old_len else " "
             if INITIAL_STARTUP:
-                print_to_both(f"*** Load Monitoring Tracks: {time.ctime()}, {len(global_vars[tracks_upper_var])} songs{len_str}in {spotify_tracks} [{len(global_vars[sp_tracks_var]) - len(global_vars[tracks_upper_var])} duplicates removed]")
+                print_to_both(f"*** Load Monitoring Tracks: {time.ctime()}, {len(global_vars[tracks_upper_var])} songs{len_str}in {spotify_tracks} [{len(sp_tracks) - len(global_vars[tracks_upper_var])} duplicates removed]")
             else:
-                print_to_log(f"*** Load Monitoring Tracks: {time.ctime()}, {len(global_vars[tracks_upper_var])} songs{len_str}in {spotify_tracks} [{len(global_vars[sp_tracks_var]) - len(global_vars[tracks_upper_var])} duplicates removed]")
+                print_to_log(f"*** Load Monitoring Tracks: {time.ctime()}, {len(global_vars[tracks_upper_var])} songs{len_str}in {spotify_tracks} [{len(sp_tracks) - len(global_vars[tracks_upper_var])} duplicates removed]")
         timer = threading.Timer(LOAD_TRACKS_FREQUENCY, task)
         timer.daemon = True
         timer.start()
@@ -2659,10 +2660,10 @@ def resolve_executable(path):
 # Monitors music activity of the specified Spotify friend's user URI ID
 def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
     global SP_CACHED_ACCESS_TOKEN
-    global sp_tracks
-    global sp_tracks2
-    global tracks_upper
-    global tracks2_upper
+#    global sp_tracks
+#    global sp_tracks2
+#    global tracks_upper
+#    global tracks2_upper
     sp_active_ts_start = 0
     sp_active_ts_stop = 0
     sp_active_ts_start_old = 0
@@ -2869,7 +2870,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
 # this is executed during first boot up only
             if JMK_MODE:
                 dz_str = f"{sp_artist} - {sp_track}"
-                if sp_playlist.upper() == DZ_PLAYLIST_NAME.upper() or dz_str.upper() in tracks_upper:
+                if sp_playlist.upper() == DZ_PLAYLIST_NAME.upper() or dz_str.upper() in tracks:
                     sp_track = sp_track + " \u2665"
                     DZcount += 1
                     DZexceptions = 0
@@ -2890,7 +2891,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                     body_dz = ""
                     body_dz_html = ""
                     dz_message = ""
-                    if not is_playlist and (dz_str.upper() in tracks2_upper):
+                    if not is_playlist and (dz_str.upper() in tracks2):
                         is_playlist = True
                         sp_playlist = LIKED_PLAYLIST_NAME
 
@@ -2953,9 +2954,9 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                 song_on_loop = 1
                 print("\n*** Friend is currently ACTIVE !")
 
-                if sp_track.upper() in tracks_upper or sp_playlist.upper() in tracks_upper or sp_album.upper() in tracks_upper:
+                if sp_track.upper() in tracks or sp_playlist.upper() in tracks or sp_album.upper() in tracks:
                     print("*** Track/playlist/album matched with the list!")
-                if sp_track.upper() in tracks2_upper or sp_playlist.upper() in tracks2_upper or sp_album.upper() in tracks2_upper:
+                if sp_track.upper() in tracks2 or sp_playlist.upper() in tracks2 or sp_album.upper() in tracks2:
                     print("*** Track/playlist/album matched with the list!")
                  
                 try:
@@ -2996,9 +2997,9 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
             if JMK_MODE:
                 print(f"")
                 if tracks:
-                    print(f"Tracks/playlists/albums to monitor: Discovery Zone ({len(tracks_upper)} songs)")
+                    print(f"Tracks/playlists/albums to monitor: Discovery Zone ({len(tracks)} songs)")
                 if tracks2:
-                    print(f"Tracks/playlists/albums to monitor: Liked Songs ({len(tracks2_upper)} songs)")
+                    print(f"Tracks/playlists/albums to monitor: Liked Songs ({len(tracks2)} songs)")
                           
             if dz_message or song_count:
                 print("")
@@ -3304,7 +3305,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                         dz_str = f"{sp_artist} - {sp_track}"
 # this is executed for every song change
                         #---
-                        if sp_playlist.upper() == DZ_PLAYLIST_NAME.upper() or dz_str.upper() in tracks_upper:
+                        if sp_playlist.upper() == DZ_PLAYLIST_NAME.upper() or dz_str.upper() in tracks:
                             sp_track = sp_track + " \u2665"
                             DZcount += 1
                             DZexceptions = 0
@@ -3350,7 +3351,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                             DZplaylist = 0
                             body_dz = ""
                             body_dz_html = ""
-                            if not is_playlist and (dz_str.upper() in tracks2_upper):
+                            if not is_playlist and (dz_str.upper() in tracks2):
                                 is_playlist = True
                                 sp_playlist = LIKED_PLAYLIST_NAME
                         #---
@@ -3466,22 +3467,9 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
 # this is executed when friend becomes active
 # already handled above for every song
                             #---
-                            if sp_playlist.upper() == DZ_PLAYLIST_NAME.upper() or dz_str.upper() in tracks_upper:
-                                # sp_track = sp_track + " \u2665"
-                                # DZcount += 1
-                                # DZexceptions = 0
-                                # if (DZcount >= DISCOVERY_ZONE_FOUND_COUNT or DZplaylist > 0):
-                                    # sp_playlist = DZ_PLAYLIST_NAME
-                                    # is_playlist = True
-                                # if sp_playlist.upper() == DZ_PLAYLIST_NAME.upper():
-                                    # DZplaylist += 1
-                                # else:
-                                    # DZplaylist = 0
-
+                            if sp_playlist.upper() == DZ_PLAYLIST_NAME.upper() or dz_str.upper() in tracks:
                                 # after a restart, always flag DZ
-                                # if (DZcount == DISCOVERY_ZONE_FOUND_COUNT and DZplaylist == 0) or (DZplaylist == 1):
                                 if (DZcount >= DISCOVERY_ZONE_FOUND_COUNT) or DZplaylist:
-                                    #print_to_log(f"*** Discovery Zone Detected: {songstring()}, DZ Count: {DZcount}, DZ Playlist: {DZplaylist}")
                                     dz_message = f"*** Discovery Zone Detected: {songstring()}\nDZ Count: {DZcount}, DZ Playlist: {DZplaylist}"
                                     print_jmk(f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] *** Discovery Zone Detected")
                                     if DZ_ALERTS:
@@ -3489,24 +3477,14 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                                         if SEND_TEXTS:
                                             send_sms(dz_message)
                                 else:
-#                                    print_to_log(f"*** Discovery Zone: DZ Count: {DZcount}, DZ Playlist: {DZplaylist}")
                                     dz_message = f"Discovery Zone Count: {DZcount}, DZ Playlist: {DZplaylist}"
-                                # body_dz = f"Discovery Zone Count: {DZcount}, DZ Playlist: {DZplaylist}\n"
-                                # body_dz_html = f"Discovery Zone Count: {DZcount}, DZ Playlist: {DZplaylist}<br>"
                             else:
-#                                dz_message = ""
                                 if (DZcount >= DISCOVERY_ZONE_FOUND_COUNT):
-#                                    print_to_log(f"*** Discovery Zone Cleared: {songstring()}, DZ Count: {DZcount}, DZ Playlist: {DZplaylist}")
                                     dz_message = f"*** Discovery Zone Cleared: {songstring()}, DZ Count: {DZcount}, DZ Playlist: {DZplaylist}"
                                     print_jmk(f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] *** Discovery Zone Cleared, DZ Count: {DZcount}")
                                     send_email(f"{GMAIL_TAG}----------------- Discovery Zone Cleared: {DZcount}, DZ Playlist: {DZplaylist}", "  ", "  ", SMTP_SSL)
                                     if SEND_TEXTS:
                                         send_sms(dz_message)
-                                # DZcount = 0
-                                # DZexceptions = 0
-                                # DZplaylist = 0
-                                # body_dz = ""
-                                # body_dz_html = ""
                             #---
                             print_jmk(f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}")
                             if SEND_TEXTS:
@@ -3525,10 +3503,10 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                                 send_email(f"{GMAIL_TAG}---------------------------------", "  ", "  ", SMTP_SSL)
 
                     on_the_list = False
-                    if sp_track.upper() in tracks_upper or sp_playlist.upper() in tracks_upper or sp_album.upper() in tracks_upper:
+                    if sp_track.upper() in tracks or sp_playlist.upper() in tracks or sp_album.upper() in tracks:
                         print("\n*** Track/playlist/album matched with the list!")
                         on_the_list = True
-                    if sp_track.upper() in tracks2_upper or sp_playlist.upper() in tracks2_upper or sp_album.upper() in tracks2_upper:
+                    if sp_track.upper() in tracks2 or sp_playlist.upper() in tracks2 or sp_album.upper() in tracks2:
                         print("\n*** Track/playlist/album matched with the list!")
                         on_the_list = True
 
@@ -4300,10 +4278,10 @@ def main():
     ## END SETUP CONFIGCAT
 
     if args.monitor_dz:
-        periodic_load_tracks(args.monitor_dz, "sp_tracks", "tracks_upper")
+        periodic_load_tracks(args.monitor_dz, "sp_tracks_upper")
 
     if args.monitor_liked:
-        periodic_load_tracks(args.monitor_liked, "sp_tracks2", "tracks2_upper")
+        periodic_load_tracks(args.monitor_liked, "sp_tracks2_upper")
 
     if INITIAL_STARTUP:
         INITIAL_STARTUP = False
@@ -4360,7 +4338,7 @@ def main():
         signal.signal(signal.SIGABRT, decrease_inactivity_check_signal_handler)
         signal.signal(signal.SIGHUP, reload_secrets_signal_handler)
 
-    spotify_monitor_friend_uri(args.user_id, sp_tracks, sp_tracks2, CSV_FILE)
+    spotify_monitor_friend_uri(args.user_id, sp_tracks_upper, sp_tracks2_upper, CSV_FILE)
 
     sys.stdout = stdout_bck
     sys.exit(0)
