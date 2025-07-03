@@ -73,6 +73,7 @@ VERSION = "2.2.1"
 # 2025/06/28: Added ConfigCat feature flag definitions for Jeoff's special items into the .CONF file
 # 2025/06/29: Optional flag file to indicate streaming state to other apps
 # 2025/06/29: Fix first email not going out for [00] song when user becomes active in JMK_MODE
+# 2025/07/02: Pull in latest source changes
 # 2025/07/02: Fix message truncation if message is multiple lines via \n
 # 2025/07/02: Fix DZ Cleared message when going from DZ Playlist to not DZ Playlist
 
