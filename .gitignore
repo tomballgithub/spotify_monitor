@@ -4,6 +4,7 @@
 *.log
 *.txt
 *.json
+*.env
 archive/
 
 # Byte-compiled / optimized / DLL files
