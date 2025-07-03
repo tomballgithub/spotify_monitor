@@ -73,6 +73,7 @@ VERSION = "2.2.1"
 # 2025/06/28: Added ConfigCat feature flag definitions for Jeoff's special items into the .CONF file
 # 2025/06/29: Optional flag file to indicate streaming state to other apps
 # 2025/06/29: Fix first email not going out for [00] song when user becomes active in JMK_MODE
+# 2025/07/02: Fix message truncation if message is multiple lines via \n
 
 # bugs and to-dos:
 # *** flag file path configuration support via command line
@@ -677,6 +678,30 @@ adapter = HTTPAdapter(max_retries=retry, pool_connections=100, pool_maxsize=100)
 SESSION.mount("https://", adapter)
 SESSION.mount("http://", adapter)
 
+# Truncates each line of a string to a specified number of characters,
+def truncate_string_per_line(message, truncate_chars, tabsize=8):
+    """
+    Truncates each line of a string to a specified number of characters,
+    treating tabs as spaces before truncation.
+
+    Args:
+        message (str): The input string, potentially containing newlines.
+        truncate_chars (int): The maximum number of characters per line.
+        tabsize (int): The number of spaces a tab character represents.
+
+    Returns:
+        str: The truncated string with each line respecting the character limit.
+    """
+    lines = message.split('\n')  # Split the message into individual lines
+    truncated_lines = []
+
+    for line in lines:
+        expanded_line = line.expandtabs(tabsize=tabsize)  # Expand tabs for the current line
+        truncated_line = expanded_line[:truncate_chars]   # Truncate the expanded line
+        truncated_lines.append(truncated_line)
+
+    return '\n'.join(truncated_lines)  # Join the processed lines back with newlines
+
 # Logger class to output messages to stdout and log file
 class Logger(object):
     def __init__(self, filename, mode="both"):
@@ -691,7 +716,7 @@ class Logger(object):
             self.logfile.flush()
         if self.mode in ["both", "screen"]:
             if (TRUNCATE_CHARS):
-                message = message.expandtabs(tabsize=8)[:TRUNCATE_CHARS]
+                message = truncate_string_per_line(message, TRUNCATE_CHARS)
             self.terminal.write(message)
             self.terminal.flush()
 
@@ -707,21 +732,21 @@ def print_to_both(message):
     """Prints to both the log file and screen, bypassing sys.stdout redirection."""
     log_logger.write(str(message) + "\n")
     if (TRUNCATE_CHARS):
-        message = message[:TRUNCATE_CHARS]
+        message = truncate_string_per_line(message, TRUNCATE_CHARS)
     sys.__stdout__.write(str(message) + "\n")  # Force writing to actual console
     sys.__stdout__.flush()
 
 def print_to_screen(message):
     """Prints only to the screen, bypassing sys.stdout redirection."""
     if (TRUNCATE_CHARS):
-        message = message[:TRUNCATE_CHARS]
+        message = truncate_string_per_line(message, TRUNCATE_CHARS)
     sys.__stdout__.write(str(message) + "\n")  # Force writing to actual console
     sys.__stdout__.flush()
 
 def print_jmk(message):
     """Prints only to the screen, bypassing sys.stdout redirection."""
     if (TRUNCATE_CHARS):
-        message = message[:TRUNCATE_CHARS]
+        message = truncate_string_per_line(message, TRUNCATE_CHARS)
     sys.__stdout__.write(str(message) + "\n")
     sys.__stdout__.flush()
     
