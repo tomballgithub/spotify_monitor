@@ -74,6 +74,7 @@ VERSION = "2.2.1"
 # 2025/06/29: Optional flag file to indicate streaming state to other apps
 # 2025/06/29: Fix first email not going out for [00] song when user becomes active in JMK_MODE
 # 2025/07/02: Fix message truncation if message is multiple lines via \n
+# 2025/07/02: Fix DZ Cleared message when going from DZ Playlist to not DZ Playlist
 
 # bugs and to-dos:
 # *** flag file path configuration support via command line
@@ -3360,7 +3361,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
 # this check handles if NOT just becoming active
                             dz_message = ""
                             if not ((cur_ts - sp_ts_old) > SPOTIFY_INACTIVITY_CHECK and sp_active_ts_stop > 0):
-                                if (DZcount >= DISCOVERY_ZONE_FOUND_COUNT):
+                                if (DZcount >= DISCOVERY_ZONE_FOUND_COUNT) or (DZplaylist):
                                     dz_message = f"*** Discovery Zone Cleared: {songstring()}, DZ Count: {DZcount}, DZ Playlist: {DZplaylist}"
                                     dz_msg_screen = f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] *** Discovery Zone Cleared, DZ Count: {DZcount}"
                                     send_email(f"{GMAIL_TAG}----------------- Discovery Zone Cleared: {DZcount}, DZ Playlist: {DZplaylist}", "  ", "  ", SMTP_SSL)
@@ -3499,7 +3500,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                                 else:
                                     dz_message = f"Discovery Zone Count: {DZcount}, DZ Playlist: {DZplaylist}"
                             else:
-                                if (DZcount >= DISCOVERY_ZONE_FOUND_COUNT):
+                                if (DZcount >= DISCOVERY_ZONE_FOUND_COUNT) or (DZplaylist):
                                     dz_message = f"*** Discovery Zone Cleared: {songstring()}, DZ Count: {DZcount}, DZ Playlist: {DZplaylist}"
                                     print_jmk(f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] *** Discovery Zone Cleared, DZ Count: {DZcount}")
                                     send_email(f"{GMAIL_TAG}----------------- Discovery Zone Cleared: {DZcount}, DZ Playlist: {DZplaylist}", "  ", "  ", SMTP_SSL)
