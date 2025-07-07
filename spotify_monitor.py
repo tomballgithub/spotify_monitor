@@ -4011,7 +4011,7 @@ def main():
         "-n", "--truncate",
         dest="truncate",
         type=int,
-        help="Truncate output to this # of characters"
+        help="Truncate output to this # of characters. '999' will autodetect and use the screen width"
     )
     opts.add_argument(
         "-k", "--jmk",
@@ -4343,10 +4343,12 @@ def main():
         else:
             try:
                 terminal_size = shutil.get_terminal_size()
-                print(f"The detected terminal screen width is: {terminal_size.columns} characters\n")
+                print_jmk(f"The detected terminal screen width is: {terminal_size.columns} characters\n")
+                print_jmk(f"")
                 TRUNCATE_CHARS = terminal_size.columns
             except Exception as e:
-                print(f"Error: Cannot determine terminal screen width: {e}")
+                print_jmk(f"Error: Cannot determine terminal screen width: {e}")
+                print_jmk(f"")
                 sys.exit(1)
 
     if args.disable_logging is True:
@@ -4372,18 +4374,6 @@ def main():
         #screen_logger = Logger(FINAL_LOG_PATH, mode="screen")
         #both_logger = Logger(FINAL_LOG_PATH, mode="both")
 
-    if args.truncate:
-        if args.truncate != 999:
-            TRUNCATE_CHARS = args.truncate
-        else:
-            try:
-                terminal_size = os.get_terminal_size()
-                print_to_log(f"The terminal screen width is: {terminal_size.columns} characters")
-                print_to_log(f"")
-                TRUNCATE_CHARS = terminal_size.columns
-                
-            except OSError:
-                print("Cannot determine terminal size. Running in a non-terminal environment or output redirected.")
     
     ## BEGIN SETUP CONFIGCAT - must be after custom log is set up because the error logging routine uses print_to_log
     if JMK_MODE:
