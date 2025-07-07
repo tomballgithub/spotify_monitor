@@ -745,14 +745,16 @@ def truncate_string_per_line(message, truncate_chars, tabsize=8):
 class Logger(object):
     def __init__(self, filename, mode="both"):
         self.terminal = sys.stdout
-        self.logfile = open(filename, "a", buffering=1, encoding="utf-8")
+        if not DISABLE_LOGGING:
+            self.logfile = open(filename, "a", buffering=1, encoding="utf-8")
         self.mode = mode  # Controls where to print
 
     def write(self, message):
         """Write message based on the selected mode."""
-        if self.mode in ["both", "log"]:
-            self.logfile.write(message)
-            self.logfile.flush()
+        if not DISABLE_LOGGING:
+            if self.mode in ["both", "log"]:
+                self.logfile.write(message)
+                self.logfile.flush()
         if self.mode in ["both", "screen"]:
             if (TRUNCATE_CHARS):
                 message = truncate_string_per_line(message, TRUNCATE_CHARS)
@@ -765,11 +767,13 @@ class Logger(object):
 # Helper functions using persistent loggers
 def print_to_log(message):
     """Prints only to the log file."""
-    log_logger.write(str(message) + "\n")
+    if not DISABLE_LOGGING:
+        log_logger.write(str(message) + "\n")
 
 def print_to_both(message):
     """Prints to both the log file and screen, bypassing sys.stdout redirection."""
-    log_logger.write(str(message) + "\n")
+    if not DISABLE_LOGGING:
+        log_logger.write(str(message) + "\n")
     if (TRUNCATE_CHARS):
         message = truncate_string_per_line(message, TRUNCATE_CHARS)
     sys.__stdout__.write(str(message) + "\n")  # Force writing to actual console
@@ -4374,9 +4378,10 @@ def main():
         FINAL_LOG_PATH = None
 
     # Create persistent Logger instances
-    log_logger = Logger(FINAL_LOG_PATH, mode="log")
-#    screen_logger = Logger(FINAL_LOG_PATH, mode="screen")
-#    both_logger = Logger(FINAL_LOG_PATH, mode="both")
+    if not DISABLE_LOGGING:
+        log_logger = Logger(FINAL_LOG_PATH, mode="log")
+        #screen_logger = Logger(FINAL_LOG_PATH, mode="screen")
+        #both_logger = Logger(FINAL_LOG_PATH, mode="both")
 
     if args.truncate:
         if args.truncate != 999:
