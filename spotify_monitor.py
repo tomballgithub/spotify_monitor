@@ -76,11 +76,18 @@ VERSION = "2.3"
 # 2025/07/02: Pull in latest source changes
 # 2025/07/02: Fix message truncation if message is multiple lines via \n
 # 2025/07/02: Fix DZ Cleared message when going from DZ Playlist to not DZ Playlist
+# 2025/07/03: Added support for setting the FLAG_FILE_PATH
+# 2025/07/03: Fixed crashing when logging was disabled
+# 2025/07/03: Submitted PR: Missing *
+# 2025/07/03: Submitted PR: Song Counts & Time Elapsed
+# 2025/07/03: Submitted PR: Line truncation
+# 2025/07/03: Submitted PR: Flag file
 
 # bugs and to-dos:
-# *** flag file path configuration support via command line
-# *** PR: use configcat to refresh cookie (documentation, configuration, boottime data - refresh & emails, error level)
-# *** PR: Songs Played: 6 (each update) [time also?]
+# *** PR: use configcat to refresh cookie & directly update values (documentation, configuration, boottime data - refresh & emails, error level)
+# *** PR: identify playlists via song lists and auto-refresh
+# *** PR: Twilio (a free notification service would be better)
+# profile monitor: * Error, retrying in 5 minutes: fetch_server_time() head network request error: HTTPSConnectionPool(host='open.spotify.com', port=443): Read timed out. (read timeout=15)
 # *** alternate notification method (pushover, gotify, ntfy.sh )
 # *** check for Twilio errors and report them (lost text example)
 # *** give discovery zone a +1 song grace after DZ identified [but how to message this, etc] -> started the work, see DZexceptions
