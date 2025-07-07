@@ -824,14 +824,6 @@ def send_sms(smssubject):
     else:
         print(f"ERROR: SMS Attempts Reached Maximum")
 
-def flag_file_create():
-    with open(FLAG_FILE_PATH, "w") as f:
-        f.write("This indicates active streaming by monitored user")
-
-def flag_file_delete():
-    if os.path.exists(FLAG_FILE_PATH):
-        os.remove(FLAG_FILE_PATH)
-
 def configcat_on_ready():
 #    print("✅ Client is ready.")
     pass
@@ -3588,8 +3580,6 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                             print_jmk(f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}")
                             if SEND_TEXTS:
                                 send_sms(f"START: {songstring()}")                
-                            if FLAG_FILE:
-                                flag_file_create()
                              
                         m_body = f"Last played: {sp_artist} - {sp_track}\nDuration: {display_time(sp_track_duration)}{played_for_m_body}{playlist_m_body}\nAlbum: {sp_album}{context_m_body}\n\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}{friend_active_m_body}\n\nSongs Played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})\n{body_dz}Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
                         m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{sp_artist_url}\">{escape(sp_artist)}</a> - <a href=\"{sp_track_url}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{played_for_m_body_html}{playlist_m_body_html}<br>Album: <a href=\"{sp_album_url}\">{escape(sp_album)}</a>{context_m_body_html}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a>{friend_active_m_body_html}<br><br>Songs Played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})<br>{body_dz_html}Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
@@ -3679,8 +3669,6 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                             print_to_both(f"{timestring()}: {ERR_CODE}, *** End text sent. [{time_diff_str()}]: {songstring()}")
                             if SEND_TEXTS:
                                 send_sms(f"END: [{time_diff_str()}]: {songstring()}")
-                            if FLAG_FILE:
-                                flag_file_delete()
 
                         print(listened_songs_text)
 
@@ -4133,6 +4121,7 @@ def main():
     else:
         if FLAG_FILE:
             FLAG_FILE = os.path.expanduser(FLAG_FILE)
+            flag_file_delete() # PR change to add?
 
     if args.send_test_email:
         print("* Sending test email notification ...\n")
