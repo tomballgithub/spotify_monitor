@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v2.2.1
+v2.3
 
 Tool implementing real-time tracking of Spotify friends music activity:
 https://github.com/misiektoja/spotify_monitor/
@@ -15,7 +15,7 @@ pyotp (optional, needed when the token source is set to cookie)
 python-dotenv (optional)
 """
 
-VERSION = "2.2.1"
+VERSION = "2.3"
 
 # API 401 error means sp_dc cookie has expired. Lasts one year. 03/15/2025
 
@@ -296,6 +296,18 @@ HORIZONTAL_LINE = 113
 # Whether to clear the terminal screen after starting the tool
 CLEAR_SCREEN = True
 
+# Path to a file that is created when the user is active and deleted when inactive
+# Useful for external tools to detect streaming status
+# Can also be set via the --flag-file flag
+FLAG_FILE = ""
+
+# Max characters per line when printing to screen to avoid line wrapping
+# Does not affect log file output
+# Set to 999 to auto-detect terminal width
+# Applies only when DISABLE_LOGGING is False
+# Can also be set via the --truncate flag
+TRUNCATE_CHARS = 0
+
 # Value added/subtracted via signal handlers to adjust inactivity timeout (SPOTIFY_INACTIVITY_CHECK); in seconds
 SPOTIFY_INACTIVITY_CHECK_SIGNAL_VALUE = 30  # 30 seconds
 
@@ -540,14 +552,13 @@ CONFIGCAT_TIMER_DECREASE      = ""
 CONFIGCAT_TEXTS               = ""
 CONFIGCAT_DZ_ALERTS           = ""
 CONFIGCAT_ORIG_EMAILS         = ""
-FLAG_FILE = False
-FLAG_FILE_PATH = ""
+FLAG_FILE = ""
+TRUNCATE_CHARS = 0
 
 JMK_MODE = False
 ALT_COOKIE = False
 DISCOVERY_ZONE_FOUND_COUNT = 3
 DISCOVERY_ZONE_EXCEPTIONS_ALLOWED = 1
-TRUNCATE_CHARS = 0                      # of chars to truncate output to [0 means none]
 DZ_PLAYLIST_NAME = "Discovery Zone"
 LIKED_PLAYLIST_NAME = "Liked Songs"
 LOAD_TRACKS_FREQUENCY = 60*60*1         # every 1 hours reload discover zone and liked songs lists
@@ -603,6 +614,12 @@ SP_CACHED_CLIENT_ID = ""
 
 # URL of the Spotify Web Player endpoint to get access token
 TOKEN_URL = "https://open.spotify.com/api/token"
+
+# URL of the endpoint to get server time needed to create TOTP object
+SERVER_TIME_URL = "https://open.spotify.com/"
+
+# Identifier used to select the appropriate encrypted secret from secret_cipher_dict when generating a TOTP token
+TOTP_VER = 10
 
 # Variables for caching functionality of the Spotify client token to avoid unnecessary refreshing
 SP_CACHED_CLIENT_TOKEN = None
@@ -703,6 +720,19 @@ def truncate_string_per_line(message, truncate_chars, tabsize=8):
         truncated_lines.append(truncated_line)
 
     return '\n'.join(truncated_lines)  # Join the processed lines back with newlines
+
+# Truncates each line of a string to a specified number of characters including tab expansion and multi-line support
+def truncate_string_per_line(message, truncate_chars, tabsize=8):
+    lines = message.split('\n')
+    truncated_lines = []
+
+    for line in lines:
+        expanded_line = line.expandtabs(tabsize=tabsize)
+        truncated_line = expanded_line[:truncate_chars]
+        truncated_lines.append(truncated_line)
+
+    return '\n'.join(truncated_lines)
+
 
 # Logger class to output messages to stdout and log file
 class Logger(object):
@@ -1049,6 +1079,22 @@ def load_spotify_tracks_from_file(spotify_tracksF):
     return(sp_tracksF)
 
 
+def flag_file_create():
+    try:
+        with open(FLAG_FILE, "w") as f:
+            f.write("This indicates active streaming by monitored user")
+    except Exception:
+        pass
+
+
+def flag_file_delete():
+    try:
+        if os.path.exists(FLAG_FILE):
+            os.remove(FLAG_FILE)
+    except Exception:
+        pass
+
+
 # Class used to generate timeout exceptions
 class TimeoutException(Exception):
     pass
@@ -1063,6 +1109,8 @@ def timeout_handler(sig, frame):
 def signal_handler(sig, frame):
     sys.stdout = stdout_bck
     print('\n* You pressed Ctrl+C, tool is terminated.')
+    if FLAG_FILE:
+        flag_file_delete()
     sys.exit(0)
 
 
@@ -1690,7 +1738,7 @@ def fetch_server_time(session: req.Session, ua: str) -> int:
         if platform.system() != 'Windows':
             signal.signal(signal.SIGALRM, timeout_handler)
             signal.alarm(FUNCTION_TIMEOUT + 2)
-        response = session.head("https://open.spotify.com/", headers=headers, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
+        response = session.head(SERVER_TIME_URL, headers=headers, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
         response.raise_for_status()
     except TimeoutException as e:
         raise Exception(f"fetch_server_time() head network request timeout after {display_time(FUNCTION_TIMEOUT + 2)}: {e}")
@@ -1700,7 +1748,11 @@ def fetch_server_time(session: req.Session, ua: str) -> int:
         if platform.system() != 'Windows':
             signal.alarm(0)
 
-    return int(parsedate_to_datetime(response.headers["Date"]).timestamp())
+    date_hdr = response.headers.get("Date")
+    if not date_hdr:
+        raise Exception("fetch_server_time() missing 'Date' header")
+
+    return int(parsedate_to_datetime(date_hdr).timestamp())
 
 
 # Creates a TOTP object using a secret derived from transformed cipher bytes
@@ -1708,12 +1760,14 @@ def generate_totp():
     import pyotp
 
     secret_cipher_dict = {
+        "10": [61, 110, 58, 98, 35, 79, 117, 69, 102, 72, 92, 102, 69, 93, 41, 101, 42, 75],
+        "9": [109, 101, 90, 99, 66, 92, 116, 108, 85, 70, 86, 49, 68, 54, 87, 50, 72, 121, 52, 64, 57, 43, 36, 81, 97, 72, 53, 41, 78, 56],
         "8": [37, 84, 32, 76, 87, 90, 87, 47, 13, 75, 48, 54, 44, 28, 19, 21, 22],
         "7": [59, 91, 66, 74, 30, 66, 74, 38, 46, 50, 72, 61, 44, 71, 86, 39, 89],
         "6": [21, 24, 85, 46, 48, 35, 33, 8, 11, 63, 76, 12, 55, 77, 14, 7, 54],
-        "5": [12, 56, 76, 33, 88, 44, 88, 33, 78, 78, 11, 66, 22, 22, 55, 69, 54]
+        "5": [12, 56, 76, 33, 88, 44, 88, 33, 78, 78, 11, 66, 22, 22, 55, 69, 54],
     }
-    secret_cipher_bytes = secret_cipher_dict["8"]
+    secret_cipher_bytes = secret_cipher_dict[str(TOTP_VER)]
 
     transformed = [e ^ ((t % 33) + 9) for t, e in enumerate(secret_cipher_bytes)]
     joined = "".join(str(num) for num in transformed)
@@ -1728,7 +1782,6 @@ def refresh_access_token_from_sp_dc(sp_dc: str) -> dict:
     transport = True
     init = True
     session = req.Session()
-    session.cookies.set("sp_dc", sp_dc)
     data: dict = {}
     token = ""
 
@@ -1742,12 +1795,16 @@ def refresh_access_token_from_sp_dc(sp_dc: str) -> dict:
         "productType": "web-player",
         "totp": otp_value,
         "totpServer": otp_value,
-        "totpVer": 8,
-        "sTime": server_time,
-        "cTime": client_time,
-        "buildDate": time.strftime("%Y-%m-%d", time.gmtime(server_time)),
-        "buildVer": f"web-player_{time.strftime('%Y-%m-%d', time.gmtime(server_time))}_{server_time * 1000}_{secrets.token_hex(4)}",
+        "totpVer": TOTP_VER,
     }
+
+    if TOTP_VER < 10:
+        params.update({
+            "sTime": server_time,
+            "cTime": client_time,
+            "buildDate": time.strftime("%Y-%m-%d", time.gmtime(server_time)),
+            "buildVer": f"web-player_{time.strftime('%Y-%m-%d', time.gmtime(server_time))}_{server_time * 1000}_{secrets.token_hex(4)}",
+        })
 
     headers = {
         "User-Agent": USER_AGENT,
@@ -3008,6 +3065,9 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                 song_on_loop = 1
                 print("\n*** Friend is currently ACTIVE !")
 
+                if FLAG_FILE:
+                    flag_file_create()
+
                 if sp_track.upper() in tracks or sp_playlist.upper() in tracks or sp_album.upper() in tracks:
                     print("*** Track/playlist/album matched with the list!")
                 if sp_track.upper() in tracks2 or sp_playlist.upper() in tracks2 or sp_album.upper() in tracks2:
@@ -3022,8 +3082,8 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
 
                 if ACTIVE_NOTIFICATION:
                     m_subject = f"Spotify user {sp_username} is active: '{sp_artist} - {sp_track}'"
-                    m_body = f"Last played: {sp_artist} - {sp_track}\nDuration: {display_time(sp_track_duration)}{playlist_m_body}\nAlbum: {sp_album}{context_m_body}\n\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}\n\nLast activity: {get_date_from_ts(sp_ts)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-                    m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{sp_artist_url}\">{escape(sp_artist)}</a> - <a href=\"{sp_track_url}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{playlist_m_body_html}<br>Album: <a href=\"{sp_album_url}\">{escape(sp_album)}</a>{context_m_body_html}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br><br>Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
+                    m_body = f"Last played: {sp_artist} - {sp_track}\nDuration: {display_time(sp_track_duration)}{playlist_m_body}\nAlbum: {sp_album}{context_m_body}\n\nApple Music URL: {apple_search_url}\nYouTube Music URL:{youtube_music_search_url}\nGenius lyrics URL: {genius_search_url}\n\nSongs played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})\n\nLast activity: {get_date_from_ts(sp_ts)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
+                    m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{sp_artist_url}\">{escape(sp_artist)}</a> - <a href=\"{sp_track_url}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{playlist_m_body_html}<br>Album: <a href=\"{sp_album_url}\">{escape(sp_album)}</a>{context_m_body_html}<br><br>Apple Music URL: <a href=\"{apple_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br>YouTube Music URL: <a href=\"{youtube_music_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br>Genius lyrics URL: <a href=\"{genius_search_url}\">{escape(sp_artist)} - {escape(sp_track)}</a><br><br>Songs played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})<br><br>Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
                     print(f"Sending email notification to {RECEIVER_EMAIL}")
                     if JMK_MODE:
                         send_email(f"{GMAIL_TAG}---------------------------------", "  ", "  ", SMTP_SSL)
@@ -3043,18 +3103,22 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
             else:
                 sp_active_ts_stop = sp_ts
                 print(f"\n*** Friend is OFFLINE for: {calculate_timespan(int(cur_ts), int(sp_ts))}")
-#                song_count = 0
+
+# removed 6/21/2025, doesn't make sense if first booting up, as we don't know the song count
+# jmk - should delete this (PR) - I think Michal added it back
+#            if listened_songs:
+#                print(f"\nSongs played:\t\t\t{listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})")
 
             if not JMK_MODE:
-                print(f"\nTracks/playlists/albums to monitor: {tracks}")
-                print(f"\nTracks/playlists/albums to monitor: {tracks2}")
+                print(f"")
+                print(f"Tracks/playlists/albums to monitor: {tracks}")
+                print(f"Tracks/playlists/albums to monitor: {tracks2}")
             if JMK_MODE:
                 print(f"")
                 if tracks:
                     print(f"Tracks/playlists/albums to monitor: Discovery Zone ({len(tracks)} songs)")
                 if tracks2:
                     print(f"Tracks/playlists/albums to monitor: Liked Songs ({len(tracks2)} songs)")
-                          
 
 #            if dz_message or song_count:
             if dz_message or listened_songs:
@@ -3064,6 +3128,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
 # removed 6/21/2025, doesn't make sense if first booting up, as we don't know the song count
 #            if song_count:
 #                print(f"Songs Played: {song_count}")
+
             print_cur_ts("\nTimestamp:\t\t\t")
 
             sp_ts_old = sp_ts
@@ -3098,8 +3163,6 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                     send_sms(f"START: {songstring()}")
                     if dz_message:
                         send_sms(dz_message)
-                if FLAG_FILE:
-                    flag_file_create()
                 
             disappeared_counter = 0
 
@@ -3466,6 +3529,9 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                         looped_songs = 0
                         song_on_loop = 1
 
+                        if FLAG_FILE:
+                            flag_file_create()
+
                         print(f"\n*** Friend got ACTIVE after being offline for {calculate_timespan(int(sp_active_ts_start), int(sp_active_ts_stop))} ({get_date_from_ts(sp_active_ts_stop)})")
                         m_subject = f"Spotify user {sp_username} is active: '{sp_artist} - {sp_track}' (after {calculate_timespan(int(sp_active_ts_start), int(sp_active_ts_stop), show_seconds=False)} - {get_short_date_from_ts(sp_active_ts_stop)})"
                         friend_active_m_body = f"\n\nFriend got active after being offline for {calculate_timespan(int(sp_active_ts_start), int(sp_active_ts_stop))}\nLast activity (before getting offline): {get_date_from_ts(sp_active_ts_stop)}"
@@ -3564,6 +3630,8 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                         print(dz_message)
                     if listened_songs:
                         print(f"Songs Played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})")
+#                        print(f"\nSongs played:\t\t\t{listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})")
+
                     print_cur_ts("\nTimestamp:\t\t\t")
                     sp_ts_old = sp_ts
                 # Track has not changed
@@ -3574,6 +3642,9 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                         sp_active_ts_stop = sp_ts
                         print(f"*** Friend got INACTIVE after listening to music for {calculate_timespan(int(sp_active_ts_stop), int(sp_active_ts_start))}")
                         print(f"*** Friend played music from {get_range_of_dates_from_tss(sp_active_ts_start, sp_active_ts_stop, short=True, between_sep=' to ')}")
+
+                        if FLAG_FILE:
+                            flag_file_delete()
 
                         listened_songs_text = f"*** User played {listened_songs} songs"
                         listened_songs_mbody = f"\n\nUser played {listened_songs} songs"
@@ -3679,8 +3750,8 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
 
 
 def main():
-    global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_CHECK_COUNTER, LOGIN_REQUEST_BODY_FILE, CLIENTTOKEN_REQUEST_BODY_FILE, REFRESH_TOKEN, LOGIN_URL, USER_AGENT, DEVICE_ID, SYSTEM_ID, USER_URI_ID, SP_DC_COOKIE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, SP_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, ERROR_NOTIFICATION, SPOTIFY_CHECK_INTERVAL, SPOTIFY_INACTIVITY_CHECK, SPOTIFY_ERROR_INTERVAL, SPOTIFY_DISAPPEARED_CHECK_INTERVAL, TRACK_SONGS, SMTP_PASSWORD, stdout_bck, APP_VERSION, CPU_ARCH, OS_BUILD, PLATFORM, OS_MAJOR, OS_MINOR, CLIENT_MODEL, TOKEN_SOURCE, ALARM_TIMEOUT, pyotp, USER_AGENT
-    global JMK_MODE, INITIAL_STARTUP, TRUNCATE_CHARS, GMAIL_TAG, ERR_CODE, SEND_TEXTS, DZ_ALERTS, ORIG_EMAILS, USER_ID, ALT_COOKIE, SP_DC_COOKIE2, FLAG_FILE, FLAG_FILE_PATH
+    global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_CHECK_COUNTER, LOGIN_REQUEST_BODY_FILE, CLIENTTOKEN_REQUEST_BODY_FILE, REFRESH_TOKEN, LOGIN_URL, USER_AGENT, DEVICE_ID, SYSTEM_ID, USER_URI_ID, SP_DC_COOKIE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, SP_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, ERROR_NOTIFICATION, SPOTIFY_CHECK_INTERVAL, SPOTIFY_INACTIVITY_CHECK, SPOTIFY_ERROR_INTERVAL, SPOTIFY_DISAPPEARED_CHECK_INTERVAL, TRACK_SONGS, SMTP_PASSWORD, stdout_bck, APP_VERSION, CPU_ARCH, OS_BUILD, PLATFORM, OS_MAJOR, OS_MINOR, CLIENT_MODEL, TOKEN_SOURCE, ALARM_TIMEOUT, pyotp, USER_AGENT, FLAG_FILE, TRUNCATE_CHARS
+    global JMK_MODE, INITIAL_STARTUP, GMAIL_TAG, ERR_CODE, SEND_TEXTS, DZ_ALERTS, ORIG_EMAILS, USER_ID, ALT_COOKIE, SP_DC_COOKIE2
     global FINAL_LOG_PATH, log_logger
 #    global log_logger, screen_logger, both_logger, FINAL_LOG_PATH
 
@@ -3897,6 +3968,12 @@ def main():
         help="Filename with Spotify tracks/playlists/albums to alert on"
     )
     opts.add_argument(
+        "--flag-file",
+        dest="flag_file",
+        metavar="PATH",
+        help="Path to flag file that is created when the user is active and deleted when inactive",
+    )
+    opts.add_argument(
         "--user-agent",
         dest="user_agent",
         metavar="USER_AGENT",
@@ -3943,13 +4020,6 @@ def main():
         action="store_true",
         default=None,
         help="Enable Jeoff's view and turn on texting"
-    )
-    opts.add_argument(
-        "--ff", "--flag-file",
-        dest="flagfile",
-        action="store_true",
-        default=None,
-        help="Use flag file to indicate streaming state to other apps"
     )
 
     args = parser.parse_args()
@@ -4046,9 +4116,12 @@ def main():
     if args.jmk:
         JMK_MODE = True
 
-    if args.flagfile:
-        FLAG_FILE = True
+    if args.flag_file:
+        FLAG_FILE = os.path.expanduser(args.flag_file)
         flag_file_delete()
+    else:
+        if FLAG_FILE:
+            FLAG_FILE = os.path.expanduser(FLAG_FILE)
 
     if args.send_test_email:
         print("* Sending test email notification ...\n")
@@ -4264,6 +4337,18 @@ def main():
         if not FILE_SUFFIX:
             FILE_SUFFIX = str(args.user_id)
 
+    if args.truncate:
+        if args.truncate != 999:
+            TRUNCATE_CHARS = args.truncate
+        else:
+            try:
+                terminal_size = shutil.get_terminal_size()
+                print(f"The detected terminal screen width is: {terminal_size.columns} characters\n")
+                TRUNCATE_CHARS = terminal_size.columns
+            except Exception as e:
+                print(f"Error: Cannot determine terminal screen width: {e}")
+                sys.exit(1)
+
     if args.disable_logging is True:
         DISABLE_LOGGING = True
 
@@ -4362,6 +4447,10 @@ def main():
     print(f"* CSV logging enabled:\t\t{bool(CSV_FILE)}" + (f" ({CSV_FILE})" if CSV_FILE else ""))
     print(f"* Alert on monitored tracks:\t{bool(MONITOR_LIST_FILE)}" + (f" ({MONITOR_LIST_FILE})" if MONITOR_LIST_FILE else ""))
     print(f"* Output logging enabled:\t{not DISABLE_LOGGING}" + (f" ({FINAL_LOG_PATH})" if not DISABLE_LOGGING else ""))
+    if not DISABLE_LOGGING and TRUNCATE_CHARS > 0:
+        print(f"* Truncate terminal lines:\t{TRUNCATE_CHARS} chars")
+    if FLAG_FILE:
+        print(f"* Flag file:\t\t\t{FLAG_FILE}")
     print(f"* Configuration file:\t\t{cfg_path}")
     print(f"* Dotenv file:\t\t\t{env_path or 'None'}\n")
 
