@@ -83,6 +83,7 @@ VERSION = "2.3.1"
 # 2025/07/03: Submitted PR: Song Counts & Time Elapsed
 # 2025/07/03: Submitted PR: Line truncation
 # 2025/07/03: Submitted PR: Flag file
+# 2025/07/07: Fixed truncation to support multi-character-width emojis
 
 # bugs and to-dos:
 # *** PR: use configcat to refresh cookie & directly update values (documentation, configuration, boottime data - refresh & emails, error level)
@@ -723,29 +724,6 @@ adapter = HTTPAdapter(max_retries=retry, pool_connections=100, pool_maxsize=100)
 SESSION.mount("https://", adapter)
 SESSION.mount("http://", adapter)
 
-# Truncates each line of a string to a specified number of characters,
-def truncate_string_per_line(message, truncate_chars, tabsize=8):
-    """
-    Truncates each line of a string to a specified number of characters,
-    treating tabs as spaces before truncation.
-
-    Args:
-        message (str): The input string, potentially containing newlines.
-        truncate_chars (int): The maximum number of characters per line.
-        tabsize (int): The number of spaces a tab character represents.
-
-    Returns:
-        str: The truncated string with each line respecting the character limit.
-    """
-    lines = message.split('\n')  # Split the message into individual lines
-    truncated_lines = []
-
-    for line in lines:
-        expanded_line = line.expandtabs(tabsize=tabsize)  # Expand tabs for the current line
-        truncated_line = expanded_line[:truncate_chars]   # Truncate the expanded line
-        truncated_lines.append(truncated_line)
-
-    return '\n'.join(truncated_lines)  # Join the processed lines back with newlines
 
 # Truncates each line of a string to a specified number of characters including tab expansion and multi-line support
 def truncate_string_per_line(message, truncate_width, tabsize=8):
