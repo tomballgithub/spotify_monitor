@@ -2991,7 +2991,9 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                 dz_str = f"{sp_artist} - {sp_track}"
                 if sp_playlist.upper() == DZ_PLAYLIST_NAME.upper() or dz_str.upper() in tracks:
                     sp_track = sp_track + " \u2665"
-                    DZcount += 1
+#                    DZcount += 1DISCOVERY_ZONE_FOUND_COUNT
+# at bootup, if last song was a DZ song, assume still doing DZ
+                    DZcount = DISCOVERY_ZONE_FOUND_COUNT
                     DZexceptions = 0
                     if sp_playlist.upper() == DZ_PLAYLIST_NAME.upper():
                         DZplaylist += 1
