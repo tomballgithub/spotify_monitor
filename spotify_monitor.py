@@ -3114,10 +3114,8 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                 sp_active_ts_stop = sp_ts
                 print(f"\n*** Friend is OFFLINE for: {calculate_timespan(int(cur_ts), int(sp_ts))}")
 
-# removed 6/21/2025, doesn't make sense if first booting up, as we don't know the song count
-# jmk - should delete this (PR) - I think Michal added it back
-#            if listened_songs:
-#                print(f"\nSongs played:\t\t\t{listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})")
+            if listened_songs:
+                print(f"\nSongs played:\t\t\t{listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})")
 
             if not JMK_MODE:
                 print(f"")
@@ -3135,9 +3133,6 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, tracks2, csv_file_name):
                 print("")
             if dz_message:
                 print(dz_message)
-# removed 6/21/2025, doesn't make sense if first booting up, as we don't know the song count
-#            if song_count:
-#                print(f"Songs Played: {song_count}")
 
             print_cur_ts("\nTimestamp:\t\t\t")
 
