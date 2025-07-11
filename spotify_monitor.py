@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v2.3
+v2.3.1
 
 Tool implementing real-time tracking of Spotify friends music activity:
 https://github.com/misiektoja/spotify_monitor/
@@ -13,9 +13,10 @@ python-dateutil
 urllib3
 pyotp (optional, needed when the token source is set to cookie)
 python-dotenv (optional)
+wcwidth (optional, needed by TRUNCATE_CHARS feature)
 """
 
-VERSION = "2.3"
+VERSION = "2.3.1"
 
 # API 401 error means sp_dc cookie has expired. Lasts one year. 03/15/2025
 
@@ -318,13 +319,32 @@ TRUNCATE_CHARS = 0
 # Value added/subtracted via signal handlers to adjust inactivity timeout (SPOTIFY_INACTIVITY_CHECK); in seconds
 SPOTIFY_INACTIVITY_CHECK_SIGNAL_VALUE = 30  # 30 seconds
 
+# ---------------------------------------------------------------------
+
+# The section below is used when the token source is set to 'cookie'
+
 # Maximum number of attempts to get a valid access token in a single run of the spotify_get_access_token_from_sp_dc() function
-# Used only when the token source is set to 'cookie'
 TOKEN_MAX_RETRIES = 10
 
 # Interval between access token retry attempts; in seconds
-# Used only when the token source is set to 'cookie'
 TOKEN_RETRY_TIMEOUT = 0.5  # 0.5 second
+
+# Mapping of TOTP version identifiers to the encrypted byte sequence for TOTP secret generation
+# Newest TOTP secrets can be fetched via spotify_monitor_secret_grabber.py (see debug dir)
+SECRET_CIPHER_DICT = {
+    "12": [107, 81, 49, 57, 67, 93, 87, 81, 69, 67, 40, 93, 48, 50, 46, 91, 94, 113, 41, 108, 77, 107, 34],
+    "11": [111, 45, 40, 73, 95, 74, 35, 85, 105, 107, 60, 110, 55, 72, 69, 70, 114, 83, 63, 88, 91],
+    "10": [61, 110, 58, 98, 35, 79, 117, 69, 102, 72, 92, 102, 69, 93, 41, 101, 42, 75],
+    "9": [109, 101, 90, 99, 66, 92, 116, 108, 85, 70, 86, 49, 68, 54, 87, 50, 72, 121, 52, 64, 57, 43, 36, 81, 97, 72, 53, 41, 78, 56],
+    "8": [37, 84, 32, 76, 87, 90, 87, 47, 13, 75, 48, 54, 44, 28, 19, 21, 22],
+    "7": [59, 91, 66, 74, 30, 66, 74, 38, 46, 50, 72, 61, 44, 71, 86, 39, 89],
+    "6": [21, 24, 85, 46, 48, 35, 33, 8, 11, 63, 76, 12, 55, 77, 14, 7, 54],
+    "5": [12, 56, 76, 33, 88, 44, 88, 33, 78, 78, 11, 66, 22, 22, 55, 69, 54],
+}
+
+# Identifier used to select the appropriate encrypted secret from SECRET_CIPHER_DICT when generating a TOTP token
+# Set to 0 to auto-select the highest available version
+TOTP_VER = 0
 
 # ---------------------------------------------------------------------
 
@@ -546,6 +566,10 @@ CLEAR_SCREEN = False
 SPOTIFY_INACTIVITY_CHECK_SIGNAL_VALUE = 0
 TOKEN_MAX_RETRIES = 0
 TOKEN_RETRY_TIMEOUT = 0.0
+SECRET_CIPHER_DICT = {}
+TOTP_VER = 0
+FLAG_FILE = ""
+TRUNCATE_CHARS = 0
 CONFIGCAT_USERNAME = ""
 CONFIGCAT_PASSWORD = ""
 CONFIGCAT_SDK_KEY  = ""
@@ -559,8 +583,6 @@ CONFIGCAT_TIMER_DECREASE      = ""
 CONFIGCAT_TEXTS               = ""
 CONFIGCAT_DZ_ALERTS           = ""
 CONFIGCAT_ORIG_EMAILS         = ""
-FLAG_FILE = ""
-TRUNCATE_CHARS = 0
 
 JMK_MODE = False
 ALT_COOKIE = False
@@ -624,9 +646,6 @@ TOKEN_URL = "https://open.spotify.com/api/token"
 
 # URL of the endpoint to get server time needed to create TOTP object
 SERVER_TIME_URL = "https://open.spotify.com/"
-
-# Identifier used to select the appropriate encrypted secret from secret_cipher_dict when generating a TOTP token
-TOTP_VER = 10
 
 # Variables for caching functionality of the Spotify client token to avoid unnecessary refreshing
 SP_CACHED_CLIENT_TOKEN = None
@@ -729,14 +748,30 @@ def truncate_string_per_line(message, truncate_chars, tabsize=8):
     return '\n'.join(truncated_lines)  # Join the processed lines back with newlines
 
 # Truncates each line of a string to a specified number of characters including tab expansion and multi-line support
-def truncate_string_per_line(message, truncate_chars, tabsize=8):
+def truncate_string_per_line(message, truncate_width, tabsize=8):
+    try:
+        from wcwidth import wcwidth
+    except ImportError:
+        return message
+
     lines = message.split('\n')
     truncated_lines = []
 
     for line in lines:
-        expanded_line = line.expandtabs(tabsize=tabsize)
-        truncated_line = expanded_line[:truncate_chars]
-        truncated_lines.append(truncated_line)
+        expanded_line = line.expandtabs(tabsize)
+        current_width = 0
+        truncated = ''
+
+        for char in expanded_line:
+            char_width = wcwidth(char)
+            if char_width < 0:
+                char_width = 0  # Non-printable or unknown width
+            if current_width + char_width > truncate_width:
+                break
+            truncated += char
+            current_width += char_width
+
+        truncated_lines.append(truncated)
 
     return '\n'.join(truncated_lines)
 
@@ -1762,15 +1797,7 @@ def fetch_server_time(session: req.Session, ua: str) -> int:
 def generate_totp():
     import pyotp
 
-    secret_cipher_dict = {
-        "10": [61, 110, 58, 98, 35, 79, 117, 69, 102, 72, 92, 102, 69, 93, 41, 101, 42, 75],
-        "9": [109, 101, 90, 99, 66, 92, 116, 108, 85, 70, 86, 49, 68, 54, 87, 50, 72, 121, 52, 64, 57, 43, 36, 81, 97, 72, 53, 41, 78, 56],
-        "8": [37, 84, 32, 76, 87, 90, 87, 47, 13, 75, 48, 54, 44, 28, 19, 21, 22],
-        "7": [59, 91, 66, 74, 30, 66, 74, 38, 46, 50, 72, 61, 44, 71, 86, 39, 89],
-        "6": [21, 24, 85, 46, 48, 35, 33, 8, 11, 63, 76, 12, 55, 77, 14, 7, 54],
-        "5": [12, 56, 76, 33, 88, 44, 88, 33, 78, 78, 11, 66, 22, 22, 55, 69, 54],
-    }
-    secret_cipher_bytes = secret_cipher_dict[str(TOTP_VER)]
+    secret_cipher_bytes = SECRET_CIPHER_DICT[str((ver := TOTP_VER or max(map(int, SECRET_CIPHER_DICT))))]
 
     transformed = [e ^ ((t % 33) + 9) for t, e in enumerate(secret_cipher_bytes)]
     joined = "".join(str(num) for num in transformed)
