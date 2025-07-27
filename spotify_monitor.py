@@ -818,7 +818,7 @@ def truncate_string_per_line(message, truncate_width, tabsize=8):
     except ImportError:
         return message
 
-    lines = message.split('\n')
+    lines = f"{message}".split('\n') # force conversion to string
     truncated_lines = []
 
     for line in lines:
