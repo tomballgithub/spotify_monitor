@@ -3442,7 +3442,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                     if JMK_MODE:
                         send_email(f"{GMAIL_TAG}---------------------------------", "  ", "  ", SMTP_SSL)
                         send_email(f"{GMAIL_TAG}[{time_diff_str()}] {timestring()} {songstring()}", m_body, m_body_html, SMTP_SSL)
-                    else:
+                    if not JMK_MODE or ORIG_EMAILS:
                         send_email(m_subject, m_body, m_body_html, SMTP_SSL)
 
                 if TRACK_SONGS and sp_track_uri_id:
@@ -4035,8 +4035,9 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
                         if ACTIVE_NOTIFICATION:
                             print(f"Sending email notification to {RECEIVER_EMAIL}")
-                            send_email(m_subject, m_body, m_body_html, SMTP_SSL)
                             email_sent = True
+                            if not JMK_MODE or ORIG_EMAILS:
+                                send_email(m_subject, m_body, m_body_html, SMTP_SSL)
                             if JMK_MODE:
                                 send_email(f"{GMAIL_TAG}---------------------------------", "  ", "  ", SMTP_SSL)
                                 send_email(f"{GMAIL_TAG}[{time_diff_str()}] {timestring()} {songstring()}", m_body, m_body_html, SMTP_SSL)
