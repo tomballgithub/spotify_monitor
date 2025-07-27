@@ -1,3 +1,50 @@
+#issues
+
+# PR - flag file delete at start
+# PR - wrong comment (-l) reference
+#
+# new notification type instead of Twilio
+# design & try test cases - test transitioning from one playlist to another (given I zero everything out)
+# - compare old to new, screen view, emails, etc
+# remove DEBUG_JMK statements
+# remove ERR_CODE (JMK/KEL) from final ALT_VIEW
+#
+#?? use generic routine of send_notification instead of send_sms
+#?? matching playlist means instant detection (and optional notify) rather than counting
+#?? don't show 'icon' if in the exception process
+#?? error checking for keys 'icon', 'url', 'refresh', 'notify', and 'override'
+#?? playlist exception should only apply if actually in a playlist versus building up the count
+#?? ACTION: SONG CHANGE -> print song because it's hard to keep track in log
+#?? printing weird -> ICON_SONG_MISSING_FROM_PLAYLIST character spacing weird
+#?? if song in two playlists, attribute it the active one first
+#?? playlist url sometimes blank
+#?? fix case of double-counting song
+#?? emails/texts missing -> f"*** {notify_playlist['name']} Detected: {songstr}, Song Count: {notify_playlist['count_start']}" [notify was off for Liked Songs]
+#?? fixed COUNT START: 0 next song after an exception granted
+#?? Added playlist name to ACTION: debug statements around finding playlist or not hitting exception limit
+#?? Add ACTION: COUNT_END debug info when playlist not found
+#?? When handling exceptions to monitored playlists, need to reset it all back as if it was OK (ex: is_playlist = True)
+#?? When restarting on detected playlist, missing playlist assignment, context: album, and icon appending
+#?? No *** detected on screen sometimes
+#?? errant 'override' always at user becoming active later (not at restart)
+#?? remove spaces before/after playlist and song names
+#?? what -> Prints the list of Spotify friends with the last listened track (-l flag)
+#?? JMK showing up at end of URLs?
+#?? periodic tracks stop if frequency is 0
+#?? playlist compare periodically checks entire playlist set and not just length (# of songs)
+#?? when printing "monitoring tracks" should I should subdetail (alert? icons?)
+#?? wrong playlist (white noise) in email and log
+#?? playlist URL blank - add a key?
+#?? configurable icon if song not found in playlist
+#?? added alert key for each monitored playlist (PLAYLIST_NOTIFICATION equivalent)
+#?? initial active jmk email and original emails missing count and playlist (it's hit or miss) - See 2:30pm 7/21
+#?? JMK_MODE only to override start count if playlist already in action
+#?? playlist detected notes not being shown on screen
+#++ does count ever go above 3?
+#++ initial active original email missing
+#++ initial active getting 3rd text with count info
+#++ restored original MONITOR_LIST_FILE functionality
+
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
@@ -84,8 +131,12 @@ VERSION = "2.4"
 # 2025/07/03: Submitted PR: Line truncation
 # 2025/07/03: Submitted PR: Flag file
 # 2025/07/07: Fixed truncation to support multi-character-width emojis
+# 2025/07/13: Simplified start-text-sent and end-text-sent on-screen messaging
+# 2025/07/18: When song not found in playlist, leave the playlist name but indicate with a 'warning' emoji
+# 2025/07/20: Completely redid code for DZ and Liked Songs to make it generic for a PR, and more flexible, and to support hysteresis for smart shuffle
 
 # bugs and to-dos:
+# start/end texts include DZ count if > 0?
 # *** PR: use configcat to refresh cookie & directly update values (documentation, configuration, boottime data - refresh & emails, error level)
 # *** PR: identify playlists via song lists and auto-refresh
 # *** PR: Twilio (a free notification service would be better)
