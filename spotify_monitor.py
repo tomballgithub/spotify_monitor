@@ -667,6 +667,7 @@ CONFIGCAT_DZ_ALERTS           = ""
 CONFIGCAT_ORIG_EMAILS         = ""
 
 JMK_MODE = False
+ALT_VIEW = False
 ALT_COOKIE = False
 DISCOVERY_ZONE_FOUND_COUNT = 3
 DISCOVERY_ZONE_EXCEPTIONS_ALLOWED = 1
@@ -687,6 +688,7 @@ SHOW_CONFIGCAT_FLAGS = True
 SP_DC_COOKIE2 = ""
 LOAD_TRACKS_FREQUENCY = 3600 # 1 hour
 monitored_playlists_data = {}
+DEBUG_JMK = False
 DZ_MSG_TEMPLATE = "{name} Count: {count_start}"
 ICON_ADD = False
 
@@ -864,8 +866,13 @@ class Logger(object):
 # Helper functions using persistent loggers
 def print_to_log(message):
     """Prints only to the log file."""
-    if not DISABLE_LOGGING:
-        log_logger.write(str(message) + "\n")
+##jmkfix
+    if not ALT_VIEW:
+        sys.__stdout__.write(str(message) + "\n")  # Force writing to actual console
+        sys.__stdout__.flush()
+    else:
+        if not DISABLE_LOGGING:
+            log_logger.write(str(message) + "\n")
 
 def print_to_both(message):
     """Prints to both the log file and screen, bypassing sys.stdout redirection."""
@@ -883,13 +890,6 @@ def print_to_screen(message):
     sys.__stdout__.write(str(message) + "\n")  # Force writing to actual console
     sys.__stdout__.flush()
 
-def print_jmk(message):
-    """Prints only to the screen, bypassing sys.stdout redirection."""
-    if (TRUNCATE_CHARS):
-        message = truncate_string_per_line(message, TRUNCATE_CHARS)
-    sys.__stdout__.write(str(message) + "\n")
-    sys.__stdout__.flush()
-    
 def timestring():
     now = datetime.now()
     return now.strftime("%m/%d, %H:%M:%S")
@@ -3484,8 +3484,8 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
             email_sent = False
 
             # Change print's beyond this point to only go to log
-            # Then, print_jmk will only go to screen (both a possibility for debugging)
-            if JMK_MODE:
+            # Then, print_to_screen will only go to screen (both a possibility for debugging)
+            if ALT_VIEW:
                 sys.stdout = Logger(FINAL_LOG_PATH, mode="log")
 
             # Print after timestamp
@@ -4198,7 +4198,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
 def main():
     global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_CHECK_COUNTER, LOGIN_REQUEST_BODY_FILE, CLIENTTOKEN_REQUEST_BODY_FILE, REFRESH_TOKEN, LOGIN_URL, USER_AGENT, DEVICE_ID, SYSTEM_ID, USER_URI_ID, SP_DC_COOKIE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, SP_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, ERROR_NOTIFICATION, SPOTIFY_CHECK_INTERVAL, SPOTIFY_INACTIVITY_CHECK, SPOTIFY_ERROR_INTERVAL, SPOTIFY_DISAPPEARED_CHECK_INTERVAL, TRACK_SONGS, SMTP_PASSWORD, stdout_bck, APP_VERSION, CPU_ARCH, OS_BUILD, PLATFORM, OS_MAJOR, OS_MINOR, CLIENT_MODEL, TOKEN_SOURCE, ALARM_TIMEOUT, pyotp, USER_AGENT, FLAG_FILE, TRUNCATE_CHARS
-    global JMK_MODE, INITIAL_STARTUP, GMAIL_TAG, ERR_CODE, SEND_TEXTS, DZ_ALERTS, ORIG_EMAILS, USER_ID, ALT_COOKIE, SP_DC_COOKIE2
+    global ALT_VIEW, JMK_MODE, INITIAL_STARTUP, GMAIL_TAG, ERR_CODE, SEND_TEXTS, DZ_ALERTS, ORIG_EMAILS, USER_ID, ALT_COOKIE, ADD_PLAYLISTS_TO_MONITOR, DEBUG_JMK
     global FINAL_LOG_PATH, log_logger
 #    global log_logger, screen_logger, both_logger, FINAL_LOG_PATH
 
@@ -4550,6 +4550,7 @@ def main():
 
     if args.jmk:
         JMK_MODE = True
+        ALT_VIEW = True
 
     if args.flag_file:
         FLAG_FILE = os.path.expanduser(args.flag_file)
@@ -4779,12 +4780,18 @@ def main():
         else:
             try:
                 terminal_size = shutil.get_terminal_size()
-                print_jmk(f"The detected terminal screen width is: {terminal_size.columns} characters\n")
-                print_jmk(f"")
+                if ALT_VIEW:
+                    print_to_screen(f"The detected terminal screen width is: {terminal_size.columns} characters\n")
+                    print_to_screen(f"")
+                else:
+                    print(f"The detected terminal screen width is: {terminal_size.columns} characters\n")
                 TRUNCATE_CHARS = terminal_size.columns
             except Exception as e:
-                print_jmk(f"Error: Cannot determine terminal screen width: {e}")
-                print_jmk(f"")
+                if ALT_VIEW:
+                    print_to_screen(f"Error: Cannot determine terminal screen width: {e}")
+                    print_to_screen(f"")
+                else:
+                    print(f"Error: Cannot determine terminal screen width: {e}")
                 sys.exit(1)
 
     if args.disable_logging is True:
