@@ -894,7 +894,7 @@ def timestring():
     now = datetime.now()
     return now.strftime("%m/%d, %H:%M:%S")
 
-def send_sms(smssubject):
+def send_sms(smssubject, sendto=SMS_FROM, sendfrom=SMS_TO):
     """Sends an SMS using the Twilio API."""
 
     smssubject = smssubject.replace("\n", "")
@@ -906,21 +906,24 @@ def send_sms(smssubject):
 
             message = client.messages.create(
                 body=f'{ERR_CODE}, {timestring()}: {smssubject}',
-                from_=SMS_FROM,
-                to=SMS_TO
+                from_=sendfrom,
+                to=sendto
             )
             end_time = int(time.time() * 1000)  # Get time in milliseconds
-            print(f'*** SUCCESS: SMS Time-to-Send [{end_time - begin_time}ms], "{smssubject}"')
+            print(f'*** SUCCESS: SMS Time-to-Send [{end_time - begin_time}ms], (sendto), "{smssubject}"')
             break
         except Exception as err:
             end_time = int(time.time() * 1000)  # Get time in milliseconds
-            print(f'*** ERROR: SMS Time-to-Send [{end_time - begin_time}ms], "{smssubject}"')
+            print(f'*** ERROR: SMS Time-to-Send [{end_time - begin_time}ms], (sendto), "{smssubject}"')
             print(f"{err}")
             time.sleep(SMS_TIMEOUT * (2 ** retry))
             continue
     else:
         print(f"ERROR: SMS Attempts Reached Maximum")
 
+def send_notification(message, sendto="", sendfrom="")
+    send_sms(smssubject, sendto, sendfrom)
+    
 def configcat_on_ready():
 #    print("✅ Client is ready.")
     pass
@@ -3492,7 +3495,8 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 #                song_count = 1
                 print_to_screen(f" ")
                 print_to_screen(f"----------------------")               
-                print_to_both(f"{timestring()}: {ERR_CODE}, *** Start text sent. Track: {songstring()}")
+#                print_to_both(f"{timestring()}: {ERR_CODE}, *** Start text sent. Track: {songstring()}")
+                print_to_both(f"{timestring()}: {ERR_CODE}, *** Start notification sent")
                 #---
 #                dz_str = f"{sp_artist} - {sp_track}"
                 found_playlist = find_song_in_playlists(dz_str, found_playlist)
@@ -4109,9 +4113,10 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                             listened_songs_mbody_html += looped_songs_mbody_html
 
                         if JMK_MODE:
-                            print_to_both(f"{timestring()}: {ERR_CODE}, *** End text sent. [{time_diff_str()}]: {songstring()}")
+#                            print_to_both(f"{timestring()}: {ERR_CODE}, *** End text sent. [{time_diff_str()}]: {songstring()}")
+                            print_to_both(f"{timestring()}: {ERR_CODE}, *** End notification sent")
                             if SEND_TEXTS:
-                                send_sms(f"END: [{time_diff_str()}]: {songstring()}")
+                                send_notification(f"END: [{time_diff_str()}]: {songstring()}")
 
                         print(listened_songs_text)
 
