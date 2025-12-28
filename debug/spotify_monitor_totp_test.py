@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v1.8
+v2.1
 
 Debug code to test the fetching of a Spotify access token using a Web Player sp_dc cookie and TOTP parameters
 https://github.com/misiektoja/spotify_monitor#debugging-tools
@@ -21,12 +21,23 @@ options:
   -h, --help           show this help message and exit
   --sp-dc SP_DC        Value of sp_dc cookie
   --totp-ver TOTP_VER  Identifier of the secret key when generating a TOTP token (TOTP_VER)
+  --token-validity-url TOKEN_VALIDITY_URL  URL used for token validity check
   --fetch-secrets      Additionally fetch and update secret keys used for TOTP generation (extraction via headless web browser, requires playwright)
-  --download-secrets   Additionally download and update secret keys used for TOTP generation (from remote URL)
+  --download-secrets   Additionally download and update secret keys used for TOTP generation (from remote or local URL)
 
 ---------------
 
 Change log:
+
+v2.1 (27 Dec 25):
+- Added TOKEN_VALIDITY_URL global variable and --token-validity-url CLI parameter to allow customization of the URL used for token validity checks
+
+v2.0 (26 Dec 25):
+- Updated URL in check_token_validity() due to new Spotify restrictions introduced on 22 Dec 2025
+
+v1.9 (12 Oct 25):
+- Added support for loading secrets from local files via file:// URLs (with support for expansion of ~ and environment variables in file paths)
+- Updated remote URL in SECRET_CIPHER_DICT_URL
 
 v1.8 (14 Jul 25):
 - added automatic download of Spotify Web Player TOTP secrets from remote URL (when --download-secrets is used)
@@ -82,6 +93,7 @@ SP_DC_COOKIE = ""
 
 TOKEN_URL = "https://open.spotify.com/api/token"
 SERVER_TIME_URL = "https://open.spotify.com/"
+TOKEN_VALIDITY_URL = "https://guc-spclient.spotify.com/presence-view/v1/buddylist"
 
 # Set to 0 to auto-select the highest available version
 TOTP_VER = 0
@@ -89,17 +101,15 @@ TOTP_VER = 0
 SECRET_CIPHER_DICT = {
     "14": [62, 54, 109, 83, 107, 77, 41, 103, 45, 93, 114, 38, 41, 97, 64, 51, 95, 94, 95, 94],
     "13": [59, 92, 64, 70, 99, 78, 117, 75, 99, 103, 116, 67, 103, 51, 87, 63, 93, 59, 70, 45, 32],
-    "12": [107, 81, 49, 57, 67, 93, 87, 81, 69, 67, 40, 93, 48, 50, 46, 91, 94, 113, 41, 108, 77, 107, 34],
-    "11": [111, 45, 40, 73, 95, 74, 35, 85, 105, 107, 60, 110, 55, 72, 69, 70, 114, 83, 63, 88, 91],
-    "10": [61, 110, 58, 98, 35, 79, 117, 69, 102, 72, 92, 102, 69, 93, 41, 101, 42, 75],
-    "9": [109, 101, 90, 99, 66, 92, 116, 108, 85, 70, 86, 49, 68, 54, 87, 50, 72, 121, 52, 64, 57, 43, 36, 81, 97, 72, 53, 41, 78, 56],
-    "8": [37, 84, 32, 76, 87, 90, 87, 47, 13, 75, 48, 54, 44, 28, 19, 21, 22],
-    "7": [59, 91, 66, 74, 30, 66, 74, 38, 46, 50, 72, 61, 44, 71, 86, 39, 89],
-    "6": [21, 24, 85, 46, 48, 35, 33, 8, 11, 63, 76, 12, 55, 77, 14, 7, 54],
-    "5": [12, 56, 76, 33, 88, 44, 88, 33, 78, 78, 11, 66, 22, 22, 55, 69, 54],
 }
 
-SECRET_CIPHER_DICT_URL = "https://github.com/Thereallo1026/spotify-secrets/blob/main/secrets/secretDict.json?raw=true"
+# Remote or local URL used to fetch updated secrets needed for TOTP generation
+# If you used "spotify_monitor_secret_grabber.py --secretdict > secretDict.json" specify the file location below
+# SECRET_CIPHER_DICT_URL = "https://github.com/Thereallo1026/spotify-secrets/blob/main/secrets/secretDict.json?raw=true"
+SECRET_CIPHER_DICT_URL = "https://github.com/xyloflake/spot-secrets-go/blob/main/secrets/secretDict.json?raw=true"
+# SECRET_CIPHER_DICT_URL = file:///C:/your_path/secretDict.json
+# SECRET_CIPHER_DICT_URL = "file:///your_path/secretDict.json"
+# SECRET_CIPHER_DICT_URL = "file://~/secretDict.json"
 
 # leave empty to auto generate randomly
 USER_AGENT = ""
@@ -213,12 +223,39 @@ def fetch_and_update_secrets():
         return False
 
     try:
-        response = requests.get(SECRET_CIPHER_DICT_URL, timeout=10)
-        response.raise_for_status()
-        secrets = response.json()
+        if SECRET_CIPHER_DICT_URL.startswith("file:"):
+            import os
+            from urllib.parse import urlparse, unquote
+
+            parsed = urlparse(SECRET_CIPHER_DICT_URL)
+
+            if parsed.netloc:
+                raw_path = f"/{parsed.netloc}{parsed.path or ''}"
+            else:
+                if SECRET_CIPHER_DICT_URL.startswith("file://"):
+                    raw_path = parsed.path or SECRET_CIPHER_DICT_URL[len("file://"):]
+                else:
+                    raw_path = parsed.path or SECRET_CIPHER_DICT_URL[len("file:"):]
+
+            raw_path = unquote(raw_path)
+
+            if raw_path.startswith("/~"):
+                raw_path = raw_path[1:]
+
+            if not raw_path.startswith("/") and not raw_path.startswith("~"):
+                raw_path = "/" + raw_path
+
+            path = os.path.expanduser(os.path.expandvars(raw_path))
+
+            with open(path, "r", encoding="utf-8") as f:
+                secrets = json.load(f)
+        else:
+            response = requests.get(SECRET_CIPHER_DICT_URL, timeout=10)
+            response.raise_for_status()
+            secrets = response.json()
 
         if not isinstance(secrets, dict) or not secrets:
-            raise ValueError("Fetched payload not a non‑empty dict")
+            raise ValueError("Fetched payload not a non-empty dict")
 
         for key, value in secrets.items():
             if not isinstance(key, str) or not key.isdigit():
@@ -459,8 +496,6 @@ def refresh_access_token_from_sp_dc(sp_dc: str) -> dict:
 
 
 def check_token_validity(access_token: str, client_id: str = "", user_agent: str = "") -> bool:
-    url = "https://api.spotify.com/v1/me"
-
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Client-Id": client_id,
@@ -472,7 +507,7 @@ def check_token_validity(access_token: str, client_id: str = "", user_agent: str
         })
 
     try:
-        response = requests.get(url, headers=headers, timeout=5)
+        response = requests.get(TOKEN_VALIDITY_URL, headers=headers, timeout=5)
         valid = response.status_code == 200
     except Exception:
         valid = False
@@ -483,13 +518,14 @@ def check_token_validity(access_token: str, client_id: str = "", user_agent: str
 
 
 def main():
-    global USER_AGENT, TOTP_VER
+    global USER_AGENT, TOTP_VER, TOKEN_VALIDITY_URL
 
     parser = argparse.ArgumentParser(description="Fetch Spotify access token using a Web Player sp_dc cookie and TOTP parameters")
     parser.add_argument("--sp-dc", help="Value of sp_dc cookie", default=None)
     parser.add_argument("--totp-ver", help="Identifier of the secret key when generating a TOTP token (TOTP_VER)", default=None)
+    parser.add_argument("--token-validity-url", help="URL used for token validity check", default=None)
     parser.add_argument("--fetch-secrets", action="store_true", help="Additionally fetch and update secret keys used for TOTP generation (extraction via headless web browser, requires playwright)")
-    parser.add_argument("--download-secrets", action="store_true", help="Additionally download and update secret keys used for TOTP generation (from remote URL)")
+    parser.add_argument("--download-secrets", action="store_true", help="Additionally download and update secret keys used for TOTP generation (from remote or local URL)")
     args = parser.parse_args()
 
     if args.fetch_secrets:
@@ -509,7 +545,7 @@ def main():
 
     if args.download_secrets:
         _LOGGER.debug("Downloading secret keys used for TOTP generation ...")
-        _LOGGER.debug("Remote URL: %s", SECRET_CIPHER_DICT_URL)
+        _LOGGER.debug("URL: %s", SECRET_CIPHER_DICT_URL)
         if not fetch_and_update_secrets():
             _LOGGER.error("Failed to download secrets")
 
@@ -520,6 +556,10 @@ def main():
         except Exception as e:
             _LOGGER.error("Failed to set TOTP_VER from parameter: %s", e)
             _LOGGER.debug("Reverting to existing TOTP_VER")
+
+    if args.token_validity_url:
+        _LOGGER.debug(f"Setting TOKEN_VALIDITY_URL to {args.token_validity_url}")
+        TOKEN_VALIDITY_URL = args.token_validity_url
 
     sp_dc = args.sp_dc or SP_DC_COOKIE
     if not sp_dc:

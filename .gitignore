@@ -53,6 +53,8 @@ htmlcov/
 .coverage
 .coverage.*
 .cache
+.cache/
+.mcache/
 nosetests.xml
 coverage.xml
 *.cover
@@ -118,6 +120,8 @@ ipython_config.py
 #   in version control.
 #   https://pdm.fming.dev/#use-with-ide
 .pdm.toml
+.pdm-python
+.pdm-build/
 
 # PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
 __pypackages__/
@@ -138,6 +142,8 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+venv*/
+env*/
 
 # Spyder project settings
 .spyderproject
@@ -172,3 +178,43 @@ cython_debug/
 
 # Config files
 *.conf
+
+# Local development and temporary files
+local/
+tmp/
+
+# Ruff stuff:
+.ruff_cache/
+
+# PyPI configuration file
+.pypirc
+
+# IDE & editor metadata
+.cursor/
+.cursorignore
+.cursorindexingignore
+*.sublime-project
+*.sublime-workspace
+.vscode/
+.idea/
+.abstra/
+*.swp
+*.swo
+
+# Credentials, certs, pkeys and config snapshots
+*.pem
+*.key
+*.crt
+*.p12
+*.jks
+*.der
+*.token
+*.secret
+*.auth
+*.bak
+*.old
+*.orig
+
+# macOS metadata
+.DS_Store
+*.DS_Store
