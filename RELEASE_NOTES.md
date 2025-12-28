@@ -2,6 +2,42 @@
 
 This is a high-level summary of the most important changes. 
 
+# Changes in 2.4 (14 Jul 2025)
+
+**Features and Improvements**:
+
+- **IMPROVE:** Added automatic fetching of secrets used by web-player access token endpoint (`cookie` mode) while generating TOTP; it avoids manual updates since Spotify started rotating them every two days
+
+**Bug fixes**:
+
+- **BUGFIX:** Fixed bugs in retry logic and error handling in spotify_get_access_token_from_sp_dc()
+
+# Changes in 2.3.1 (10 Jul 2025)
+
+**Features and Improvements**:
+
+- **IMPROVE:** Updated secret cipher bytes used by web-player access token endpoint (`cookie` mode) to v11 & v12
+- **IMPROVE:** Moved secret cipher bytes for web-player endpoint to configuration section
+- **IMPROVE:** Implemented auto-selection of highest cipher version when `TOTP_VER` is set to 0
+- **NEW:** Added tool to extract secret keys used for TOTP generation in Spotify Web Player JavaScript bundles (see [Debugging Tools](https://github.com/misiektoja/spotify_monitor#debugging-tools) for more info)
+
+**Bug fixes**:
+
+- **BUGFIX:** Fixed truncation code to handle emojis with an actual width greater than one character (thanks [@tomballgithub](https://github.com/tomballgithub))
+
+# Changes in 2.3 (07 Jul 2025)
+
+**Features and Improvements**:
+
+- **NEW:** Added new config option (`FLAG_FILE`) and flag (`--flag-file`) to create a file when the user is active and delete it when inactive; useful for external tools to detect streaming status (thanks [@tomballgithub](https://github.com/tomballgithub))
+- **NEW:** Added new config option (`TRUNCATE_CHARS`) and flag (`--truncate`) to limit screen line length; set to 999 to auto-detect terminal width (thanks [@tomballgithub](https://github.com/tomballgithub))
+- **IMPROVE:** Updated secret cipher bytes used by web-player access token endpoint (`cookie` mode) to v9 & v10 (thanks [@Thereallo1026](https://github.com/Thereallo1026) for reverse engineering the current secrets)
+- **IMPROVE:** Added number of songs played and elapsed time to session events (thanks [@tomballgithub](https://github.com/tomballgithub))
+
+**Bug fixes**:
+
+- **BUGFIX:** Fixed missing asterisk on startup screen (thanks [@tomballgithub](https://github.com/tomballgithub))
+
 # Changes in 2.2.1 (02 Jul 2025)
 
 **Bug fixes**:
