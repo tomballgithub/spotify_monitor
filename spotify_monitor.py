@@ -37,7 +37,7 @@ JMK_DEBUG = False
 # last_found_playlist = False
 # active_ever = False
 # icon_add = False
-# playlist_append_str = ""
+# playlist_suffix_string = ""
 # hasTrack = False
 # sp_playlist_owner = ""
 # sp_playlist_image_url = ""        
@@ -161,7 +161,7 @@ JMK_DEBUG = False
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v2.7
+v2.9
 
 Tool implementing real-time tracking of Spotify friends music activity:
 https://github.com/misiektoja/spotify_monitor/
@@ -177,7 +177,7 @@ wcwidth (optional, needed by TRUNCATE_CHARS feature)
 spotipy (required since v2.7 due to new Spotify restrictions introduced on 22 Dec 2025)
 """
 
-VERSION = "2.7"
+VERSION = "2.9"
 
 # API 401 error means sp_dc cookie has expired. Lasts one year. 03/15/2025
 
@@ -259,15 +259,21 @@ VERSION = "2.7"
 # 2025/12/27: New spotify API scheme required
 # 2025/12/27: New playlist image method required due to spotify API change for spotify-owned editorial playlists
 # 2025/12/28: Updated to latest code base
+# 2025/01/18: Added missing (custom) to END notifications of playlists
+# 2025/01/18: Removed Twilio and send_sms support. Current mechanism is NTFY
+# 2025/01/18: Fixed JMK_MODE emails not being sent for stream except START/initial song. Broke after updating code base on 12/25/25
+# 2025/02/19: Fixed duplicate emails introduced with catching up to latest code base
+# 2025/02/19: Fixed duplicate listened_songs += 1 introduced with catching up to latest code base
+# 2025/02/22: Fixed exception crash if error (but not 404) occurs during fetching playlist image URL
+# 2025/02/27: Fixed exception crash if error (but not 404) occurs during spotify_get_playlist_owner
 
 # bugs and to-dos:
 # start/end texts include DZ count if > 0?
-# *** PR: use configcat to refresh cookie & directly update values (documentation, configuration, boottime data - refresh & emails, error level)
 # *** PR: identify playlists via song lists and auto-refresh
+# *** PR: use configcat to refresh cookie & directly update values (documentation, configuration, boottime data - refresh & emails, error level)
 # *** PR: NTFY (a free notification service would be better)
 # profile monitor: * Error, retrying in 5 minutes: fetch_server_time() head network request error: HTTPSConnectionPool(host='open.spotify.com', port=443): Read timed out. (read timeout=15)
 # *** alternate notification method (pushover, gotify, ntfy.sh )
-# *** check for Twilio errors and report them (lost text example)
 # *** give discovery zone a +1 song grace after DZ identified [but how to message this, etc] -> started the work, see DZexceptions
 # ***      detect smart shuffle songs, for JMK at least??
 # *** why not write straight to the gdrive spreadsheet instead of indirectly via email?
@@ -520,6 +526,10 @@ SP_LOGFILE = "spotify_monitor"
 # Can also be disabled via the -d flag
 DISABLE_LOGGING = False
 
+# Enable debug mode for technical logging (can also be enabled via --debug flag)
+# Shows request flow, selected params and internal state changes (with sensitive values redacted)
+DEBUG_MODE = False
+
 # Width of horizontal line
 HORIZONTAL_LINE = 113
 
@@ -573,6 +583,17 @@ ENABLE_MUSIXMATCH_URL = False
 # Whether to show Lyrics.com lyrics URL in console and emails
 ENABLE_LYRICS_COM_URL = False
 
+# String to add after playlist name to indicate it's a Spotify public curated and customized playlist
+# The distinction may be important because the songs will vary by account due to listening habits.
+# This will be used for messages on console and emails
+# The string should include all desired characters, including a preceding space and parenthesis, if desired
+#
+# Example:
+#   For: 90s Pop (by Spotify), SPOTIFY_SUFFIX = " (by Spotify)"
+#
+# Leave empty to disable
+SPOTIFY_SUFFIX = ""
+
 # The Spotify API sometimes doesn't provide specific public shared playlists for a user.
 # This allows you to add one or more playlists to be monitored
 #
@@ -586,16 +607,9 @@ ENABLE_LYRICS_COM_URL = False
 # example: [ {'uri': 'spotify:playlist:6pYPhRkJMSg1d7j8RHgJK1', 'owner_name': 'teocida', 'owner_uri': 'spotify:user:teocida'} ]
 # example: [ {'uri': 'spotify:playlist:0AyBQ5uEhJgdh2NFcMe6wb', 'owner_name': 'uwacwfv5hr23atg1v3dez1sxs', 'owner_uri': 'spotify:user:uwacwfv5hr23atg1v3dez1sxs'} ]
 #
-DZ_PLAYLIST_NAME = "Discovery Zone"
-LIKED_PLAYLIST_NAME = "Liked Songs"
-FILENAME_DZ    = "dz_songs.txt"
-FILENAME_LIKED = "liked_songs_jmk.txt"
 
 LOAD_TRACKS_FREQUENCY = 3600 # 1 hour
-ADD_PLAYLISTS_TO_MONITOR2 = [
-  {'name': DZ_PLAYLIST_NAME,    'filename': FILENAME_DZ,    'qty_start': 3, 'qty_end': 2, 'refresh': 3600, 'icon': ' \u2665', 'override': True, 'notify': True, 'url': 'Discovery Zone (no URL)'},
-  {'name': LIKED_PLAYLIST_NAME, 'filename': FILENAME_LIKED, 'qty_start': 3, 'qty_end': 2, 'refresh': 3600, 'icon': ' \u2665', 'override': True, 'notify': True, 'url': 'Liked Songs (no URL)'}
-]
+ADD_PLAYLISTS_TO_MONITOR = []
 
 # ---------------------------------------------------------------------
 
@@ -617,7 +631,6 @@ SECRET_CIPHER_DICT = {
 # Remote or local URL used to fetch updated secrets needed for TOTP generation
 # Set to empty string to disable
 # If you used "spotify_monitor_secret_grabber.py --secretdict > secretDict.json" specify the file location below
-# SECRET_CIPHER_DICT_URL = "https://github.com/Thereallo1026/spotify-secrets/blob/main/secrets/secretDict.json?raw=true"
 SECRET_CIPHER_DICT_URL = "https://github.com/xyloflake/spot-secrets-go/blob/main/secrets/secretDict.json?raw=true"
 # SECRET_CIPHER_DICT_URL = file:///C:/your_path/secretDict.json
 # SECRET_CIPHER_DICT_URL = "file:///your_path/secretDict.json"
@@ -767,13 +780,13 @@ CONFIGCAT_PASSWORD = ""
 CONFIGCAT_SDK_KEY  = ""
 
 # Name of each flag assigned in ConfigCat (it's OK to remove ones you will not use)
-CONFIGCAT_RELOAD_SECRETS      = "reloadSecretsTokens"
-CONFIGCAT_EMAIL_USERS         = "emailUserUpdates"
-CONFIGCAT_EMAIL_SONGS_ALL     = "emailSongsAll"
-CONFIGCAT_EMAIL_SONGS_TRACKED = "emailSongsTracked"
-CONFIGCAT_EMAIL_SONGS_LOOPED  = "emailSongsLooped"
-CONFIGCAT_TIMER_INCREASE      = "increaseInactivityTimer"
-CONFIGCAT_TIMER_DECREASE      = "decreaseInactivityTimer"
+CONFIGCAT_RELOAD_SECRETS      = ""
+CONFIGCAT_EMAIL_USERS         = ""
+CONFIGCAT_EMAIL_SONGS_ALL     = ""
+CONFIGCAT_EMAIL_SONGS_TRACKED = ""
+CONFIGCAT_EMAIL_SONGS_LOOPED  = ""
+CONFIGCAT_TIMER_INCREASE      = ""
+CONFIGCAT_TIMER_DECREASE      = ""
 
 """
 
@@ -849,6 +862,7 @@ DOTENV_FILE = ""
 FILE_SUFFIX = ""
 SP_LOGFILE = ""
 DISABLE_LOGGING = False
+DEBUG_MODE = False
 HORIZONTAL_LINE = 0
 CLEAR_SCREEN = False
 SPOTIFY_INACTIVITY_CHECK_SIGNAL_VALUE = 0
@@ -869,6 +883,8 @@ SECRET_CIPHER_DICT_URL = ""
 TOTP_VER = 0
 FLAG_FILE = ""
 TRUNCATE_CHARS = 0
+SPOTIFY_SUFFIX = ""
+
 CONFIGCAT_USERNAME = ""
 CONFIGCAT_PASSWORD = ""
 CONFIGCAT_SDK_KEY  = ""
@@ -885,7 +901,6 @@ CONFIGCAT_ORIG_EMAILS         = ""
 CONFIGCAT_USERNAME_LEGACY = ""
 CONFIGCAT_PASSWORD_LEGACY = ""
 CONFIGCAT_SDK_KEY_LEGACY  = ""
-NTFY_TOKEN = ""
 
 JMK_MODE = False
 ALT_VIEW = False
@@ -919,7 +934,6 @@ NTFY_TOPIC_KEL = "jeoff_spotify_stream"
 NTFY_TOPIC_JMK = "jeoff_spotify_stream_jmk"
 
 from datetime import timezone
-from twilio.rest import Client
 import threading
 
 from configcatclient.configcatclient import ConfigCatClient
@@ -936,7 +950,7 @@ DEFAULT_CONFIG_FILENAME = "spotify_monitor.conf"
 
 # List of secret keys to load from env/config
 SECRET_KEYS = ("REFRESH_TOKEN", "SP_DC_COOKIE", "SMTP_PASSWORD", "SP_APP_CLIENT_ID", "SP_APP_CLIENT_SECRET")
-SECRET_KEYS+= ("SP_DC_COOKIE2", "CONFIGCAT_USERNAME", "CONFIGCAT_PASSWORD", "CONFIGCAT_SDK_KEY", "ACCOUNT_SID", "AUTH_TOKEN", "CONFIGCAT_USERNAME_LEGACY", "CONFIGCAT_PASSWORD_LEGACY", "CONFIGCAT_SDK_KEY_LEGACY", "NTFY_TOKEN")
+SECRET_KEYS+= ("SP_DC_COOKIE2", "CONFIGCAT_USERNAME", "CONFIGCAT_PASSWORD", "CONFIGCAT_SDK_KEY", "CONFIGCAT_USERNAME_LEGACY", "CONFIGCAT_PASSWORD_LEGACY", "CONFIGCAT_SDK_KEY_LEGACY")
 
 # Strings removed from track names for generating proper Genius search URLs
 re_search_str = r'remaster|extended|original mix|remix|original soundtrack|radio( |-)edit|\(feat\.|( \(.*version\))|( - .*version)'
@@ -1015,8 +1029,8 @@ from pathlib import Path
 import secrets
 from typing import Optional
 from email.utils import parsedate_to_datetime
-import uuid
-import ntfy
+import uuid #jmk ntfy album/song images
+import ntfy #jmk ntfy
 
 import urllib3
 if not VERIFY_SSL:
@@ -1026,9 +1040,21 @@ SESSION = req.Session()
 
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup #jmk playlist images
 
-retry = Retry(
+# Cap server-provided Retry-After to avoid long blocking sleeps on 429 responses
+MAX_RETRY_AFTER_SECONDS = 60
+
+
+class CappedRetry(Retry):
+    def get_retry_after(self, response):
+        retry_after = super().get_retry_after(response)
+        if retry_after is None:
+            return None
+        return min(retry_after, MAX_RETRY_AFTER_SECONDS)
+
+
+retry = CappedRetry(
     total=5,
     connect=3,
     read=3,
@@ -1103,12 +1129,12 @@ class Logger(object):
         """Write message based on the selected mode."""
         if not DISABLE_LOGGING:
             if self.mode in ["both", "log"]:
-                self.logfile.write(message)
+                self.logfile.write(message.expandtabs(8))
                 self.logfile.flush()
         if self.mode in ["both", "screen"]:
             if (TRUNCATE_CHARS):
                 message = truncate_string_per_line(message, TRUNCATE_CHARS)
-            self.terminal.write(message)
+            self.terminal.write(message.expandtabs(8))
             self.terminal.flush()
 
     def flush(self):
@@ -1119,18 +1145,18 @@ def print_to_log(message):
     """Prints only to the log file."""
 ##jmkfix
     if not ALT_VIEW:
-        sys.__stdout__.write(str(message) + "\n")  # Force writing to actual console
+        sys.__stdout__.write(str(message).expandtabs(8) + "\n")  # Force writing to actual console
         sys.__stdout__.flush()
     else:
         if not DISABLE_LOGGING:
-            log_logger.write(str(message) + "\n")
+            log_logger.write(str(message).expandtabs(8) + "\n")
 
 def print_to_both(message):
     """Prints to both the log file and screen, bypassing sys.stdout redirection."""
     if not DISABLE_LOGGING:
-        log_logger.write(str(message) + "\n")
+        log_logger.write(str(message).expandtabs(8) + "\n")
     if (TRUNCATE_CHARS):
-        message = truncate_string_per_line(message, TRUNCATE_CHARS)
+        message = truncate_string_per_line(message.expandtabs(8), TRUNCATE_CHARS)
     sys.__stdout__.write(str(message) + "\n")  # Force writing to actual console
     sys.__stdout__.flush()
 
@@ -1138,9 +1164,9 @@ def print_to_screen(message):
     """Prints only to the screen, bypassing sys.stdout redirection, unless debugging."""
     if DEBUG_JMK in (1, 2):
         if log_logger:
-            log_logger.write(str(message) + "\n")
+            log_logger.write(str(message).expandtabs(8) + "\n")
     if (TRUNCATE_CHARS):
-        message = truncate_string_per_line(message, TRUNCATE_CHARS)
+        message = truncate_string_per_line(message.expandtabs(8), TRUNCATE_CHARS)
     sys.__stdout__.write(str(message) + "\n")  # Force writing to actual console
     sys.__stdout__.flush()
 
@@ -1149,46 +1175,16 @@ def print_debug(message):
     message = "DEBUG: " + message
     if not DISABLE_LOGGING:
         if DEBUG_JMK in (1, 2):
-            log_logger.write(str(message) + "\n")
+            log_logger.write(str(message).expandtabs(8) + "\n")
     if DEBUG_JMK in (2, 3):
         if (TRUNCATE_CHARS):
-            message = truncate_string_per_line(message, TRUNCATE_CHARS)
+            message = truncate_string_per_line(message.expandtabs(8), TRUNCATE_CHARS)
         sys.__stdout__.write(str(message) + "\n")  # Force writing to actual console
         sys.__stdout__.flush()
 
 def timestring():
     now = datetime.now()
     return now.strftime("%m/%d, %H:%M:%S")
-
-def send_sms(smssubject, sendto="", sendfrom=""):
-    """Sends an SMS using the Twilio API."""
-    if sendto == "":
-        sendto = SMS_TO
-    if sendfrom == "":
-        sendfrom = SMS_FROM
-    smssubject = smssubject.replace("\n", "")
-    for retry in range(SMS_RETRIES):
-        try:
-            begin_time = int(time.time() * 1000)  # Get time in milliseconds
-
-            client = Client(ACCOUNT_SID, AUTH_TOKEN)
-
-            message = client.messages.create(
-                body=f'{ERR_CODE}, {timestring()}: {smssubject}',
-                from_=sendfrom,
-                to=sendto
-            )
-            end_time = int(time.time() * 1000)  # Get time in milliseconds
-            print(f'*** SUCCESS: SMS Time-to-Send [{end_time - begin_time}ms], {sendto}, "{smssubject}"')
-            break
-        except Exception as err:
-            end_time = int(time.time() * 1000)  # Get time in milliseconds
-            print(f'*** ERROR: SMS Time-to-Send [{end_time - begin_time}ms], {sendto}, "{smssubject}"')
-            print(f"{err}")
-            time.sleep(SMS_TIMEOUT * (2 ** retry))
-            continue
-    else:
-        print(f"ERROR: SMS Attempts Reached Maximum")
 
 def send_ntfy(message, image_url, track, artist, album, playlist, timediffstr, count):
 # KEL, 08/11, 20:25:28: START: September - Earth, Wind & Fire (The Best Of Earth, Wind & Fire Vol. 1) [YACHT ROCK | TOP 100 SONGS]
@@ -1372,7 +1368,6 @@ def send_ntfy(message, image_url, track, artist, album, playlist, timediffstr, c
     
 
 def send_notification(message, image_url="", track="", artist="", album="", playlist="", timediffstr="", count=0):
-    # send_sms(message)
     send_ntfy(message, image_url, track.strip(), artist.strip(), album.strip(), playlist.strip(), timediffstr.strip(), count)
     
 def configcat_on_ready():
@@ -1494,9 +1489,9 @@ def configcat_on_config_changed_new(config_data):
             print(f"      Email user active/inactive: {raw_users}")
             print(f"      Email on songs, all:        {raw_songs_all}")
             print(f"      Email on songs, tracked:    {raw_songs_tracked}")
-            print(f"      Email on songs, tracked:    {raw_songs_looped}")
+            print(f"      Email on songs, looped:     {raw_songs_looped}")
             print(f"      Increase inactivity timer:  {raw_timer_increase}")
-            print(f"      Increase inactivity timer:  {raw_timer_decrease}")
+            print(f"      Decrease inactivity timer:  {raw_timer_decrease}")
         if not JMK_MODE:
             print("")
 
@@ -1766,6 +1761,10 @@ def load_spotify_tracks_from_file(filename):
     return tracks
 
 
+    def flush(self):
+        pass
+
+
 def flag_file_create():
     try:
         with open(FLAG_FILE, "w") as f:
@@ -1787,6 +1786,11 @@ class TimeoutException(Exception):
     pass
 
 
+# Class used when TOTP secrets are unavailable or unusable for token generation
+class SecretsUnavailableError(Exception):
+    pass
+
+
 # Signal handler for SIGALRM when the operation times out
 def timeout_handler(sig, frame):
     raise TimeoutException
@@ -1804,9 +1808,12 @@ def signal_handler(sig, frame):
 # Checks internet connectivity
 def check_internet(url=CHECK_INTERNET_URL, timeout=CHECK_INTERNET_TIMEOUT, verify=VERIFY_SSL):
     try:
+        debug_print(f"HTTP GET {url} [connectivity check], timeout={timeout}, verify_ssl={verify}")
         _ = req.get(url, headers={'User-Agent': USER_AGENT}, timeout=timeout, verify=verify)
+        debug_print(f"HTTP GET {url} -> OK")
         return True
     except req.RequestException as e:
+        debug_print(f"HTTP GET {url} -> failed: {e}")
         print(f"* No connectivity, please check your network:\n\n{e}")
         return False
 
@@ -1822,6 +1829,50 @@ def clear_screen(enabled=True):
             os.system('clear')
     except Exception:
         print("* Cannot clear the screen contents")
+
+
+# Debug print helper - only prints when DEBUG_MODE is enabled
+def debug_print(message):
+    if DEBUG_MODE:
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        print(f"[DEBUG {timestamp}] {message}")
+
+
+def mask_secret(value, prefix=4, suffix=2):
+    if value is None:
+        return None
+    s = str(value)
+    if not s:
+        return ""
+    if len(s) <= (prefix + suffix):
+        return "*" * len(s)
+    return f"{s[:prefix]}...{s[-suffix:]}"
+
+
+def sanitize_debug_params(params):
+    if not isinstance(params, dict):
+        return params
+    redacted_keys = {"totp", "totpServer", "refresh_token", "access_token"}
+    out = {}
+    for k, v in params.items():
+        if k in redacted_keys:
+            out[k] = mask_secret(v)
+        else:
+            out[k] = v
+    return out
+
+
+def sanitize_debug_headers(headers):
+    if not isinstance(headers, dict):
+        return headers
+    sensitive = {"authorization", "cookie", "client-token"}
+    out = {}
+    for k, v in headers.items():
+        if str(k).lower() in sensitive:
+            out[k] = mask_secret(v)
+        else:
+            out[k] = v
+    return out
 
 
 # Converts absolute value of seconds to human readable format
@@ -2414,9 +2465,11 @@ def format_music_urls_email_html(apple_music_url, youtube_music_url, amazon_musi
 # Sends a lightweight request to check Spotify token validity
 def check_token_validity(access_token: str, client_id: Optional[str] = None, user_agent: Optional[str] = None, oauth_app: Optional[bool] = False) -> bool:
     url1 = "https://guc-spclient.spotify.com/presence-view/v1/buddylist"
-    url2 = "https://api.spotify.com/v1/browse/categories?limit=1&fields=categories.items(id)"
+    # Use a known stable track for validation (Bohemian Rhapsody - Queen)
+    url2 = "https://api.spotify.com/v1/tracks/7tFiyTwD0nx5a1eklYtX2J"
 
     url = url2 if oauth_app else url1
+    check_mode = "oauth_app" if oauth_app else f"{TOKEN_SOURCE}_token"
 
     headers = {"Authorization": f"Bearer {access_token}"}
 
@@ -2434,10 +2487,17 @@ def check_token_validity(access_token: str, client_id: Optional[str] = None, use
         signal.signal(signal.SIGALRM, timeout_handler)
         signal.alarm(FUNCTION_TIMEOUT + 2)
     try:
+        debug_print(
+            f"Token validity check mode={check_mode}, url={url}, "
+            f"client_id_header={'yes' if 'Client-Id' in headers else 'no'}"
+        )
+        debug_print(f"HTTP GET {url} [token validity] headers={sanitize_debug_headers(headers)}")
         response = req.get(url, headers=headers, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
         valid = response.status_code == 200
+        debug_print(f"HTTP GET {url} -> {response.status_code} [token validity mode={check_mode}] (valid={valid})")
     except Exception:
         valid = False
+        debug_print(f"HTTP GET {url} -> failed during token validity check [mode={check_mode}]")
     finally:
         if platform.system() != 'Windows':
             signal.alarm(0)
@@ -2541,8 +2601,10 @@ def fetch_server_time(session: req.Session, ua: str) -> int:
         if platform.system() != 'Windows':
             signal.signal(signal.SIGALRM, timeout_handler)
             signal.alarm(FUNCTION_TIMEOUT + 2)
+        debug_print(f"HTTP HEAD {SERVER_TIME_URL} [server time] timeout={FUNCTION_TIMEOUT}")
         response = session.head(SERVER_TIME_URL, headers=headers, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
         response.raise_for_status()
+        debug_print(f"HTTP HEAD {SERVER_TIME_URL} -> {response.status_code}")
     except TimeoutException as e:
         raise Exception(f"fetch_server_time() head network request timeout after {display_time(FUNCTION_TIMEOUT + 2)}: {e}")
     except Exception as e:
@@ -2562,9 +2624,12 @@ def fetch_server_time(session: req.Session, ua: str) -> int:
 def generate_totp():
     import pyotp
 
+    if not SECRET_CIPHER_DICT:
+        raise SecretsUnavailableError("generate_totp(): SECRET_CIPHER_DICT is empty")
+
     ver = TOTP_VER or max(map(int, SECRET_CIPHER_DICT))
     if str(ver) not in SECRET_CIPHER_DICT:
-        raise Exception(f"generate_totp(): Defined TOTP_VER ({ver}) is missing in SECRET_CIPHER_DICT")
+        raise SecretsUnavailableError(f"generate_totp(): Defined TOTP_VER ({ver}) is missing in SECRET_CIPHER_DICT")
 
     secret_cipher_bytes = SECRET_CIPHER_DICT[str(ver)]
 
@@ -2608,28 +2673,37 @@ def fetch_and_update_secrets():
             path = os.path.expanduser(os.path.expandvars(raw_path))
 
             print(f"Loading Spotify web-player TOTP secrets from file: {path}")
+            if os.path.getsize(path) == 0:
+                raise ValueError(f"Secret file is empty: {path}")
             with open(path, "r", encoding="utf-8") as f:
                 secrets = json.load(f)
             print("─" * HORIZONTAL_LINE)
         else:
             print(f"Fetching Spotify web-player TOTP secrets from URL: {SECRET_CIPHER_DICT_URL}")
+            debug_print(f"HTTP GET {SECRET_CIPHER_DICT_URL} [secrets update]")
             response = req.get(SECRET_CIPHER_DICT_URL, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
             response.raise_for_status()
+            debug_print(f"HTTP GET {SECRET_CIPHER_DICT_URL} -> {response.status_code}")
+            if not response.text.strip():
+                raise ValueError("Fetched payload is empty")
             secrets = response.json()
             print("─" * HORIZONTAL_LINE)
 
         if not isinstance(secrets, dict) or not secrets:
-            raise ValueError("fetch_and_update_secrets(): Fetched payload not a non-empty dict")
+            raise ValueError("Fetched payload not a non-empty dict")
 
         for key, value in secrets.items():
             if not isinstance(key, str) or not key.isdigit():
-                raise ValueError(f"fetch_and_update_secrets(): Invalid key format: {key}")
+                raise ValueError(f"Invalid key format: {key}")
             if not isinstance(value, list) or not all(isinstance(x, int) for x in value):
-                raise ValueError(f"fetch_and_update_secrets(): Invalid value format for key {key}")
+                raise ValueError(f"Invalid value format for key {key}")
 
         SECRET_CIPHER_DICT = secrets
         return True
 
+    except json.JSONDecodeError as e:
+        print(f"fetch_and_update_secrets(): Failed to parse secrets (invalid JSON format): {e}")
+        return False
     except Exception as e:
         print(f"fetch_and_update_secrets(): Failed to get new secrets: {e}")
         return False
@@ -2681,15 +2755,17 @@ def refresh_access_token_from_sp_dc(sp_dc: str) -> dict:
             signal.signal(signal.SIGALRM, timeout_handler)
             signal.alarm(FUNCTION_TIMEOUT + 2)
 
+        debug_print(f"HTTP GET {TOKEN_URL} [sp_dc transport] params={sanitize_debug_params(params)} headers={sanitize_debug_headers(headers)}")
         response = session.get(TOKEN_URL, params=params, headers=headers, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
         response.raise_for_status()
         data = response.json()
         token = data.get("accessToken", "")
+        debug_print(f"HTTP GET {TOKEN_URL} [sp_dc transport] -> {response.status_code}, token_len={len(token)}")
 
     except (req.RequestException, TimeoutException, req.HTTPError, ValueError) as e:
         transport = False
         last_err = str(e)
-        print(f"***** {last_err}")
+        debug_print(f"HTTP GET {TOKEN_URL} [sp_dc transport] failed: {e}")
     finally:
         if platform.system() != "Windows":
             signal.alarm(0)
@@ -2702,15 +2778,17 @@ def refresh_access_token_from_sp_dc(sp_dc: str) -> dict:
                 signal.signal(signal.SIGALRM, timeout_handler)
                 signal.alarm(FUNCTION_TIMEOUT + 2)
 
+            debug_print(f"HTTP GET {TOKEN_URL} [sp_dc init] params={sanitize_debug_params(params)} headers={sanitize_debug_headers(headers)}")
             response = session.get(TOKEN_URL, params=params, headers=headers, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
             response.raise_for_status()
             data = response.json()
             token = data.get("accessToken", "")
+            debug_print(f"HTTP GET {TOKEN_URL} [sp_dc init] -> {response.status_code}, token_len={len(token)}")
 
         except (req.RequestException, TimeoutException, req.HTTPError, ValueError) as e:
             init = False
             last_err = str(e)
-            print(f"****** {last_err}")
+            debug_print(f"HTTP GET {TOKEN_URL} [sp_dc init] failed: {e}")
         finally:
             if platform.system() != "Windows":
                 signal.alarm(0)
@@ -2733,7 +2811,13 @@ def spotify_get_access_token_from_sp_dc(sp_dc: str):
     now = time.time()
 
     if SP_CACHED_ACCESS_TOKEN and now < SP_ACCESS_TOKEN_EXPIRES_AT and check_token_validity(SP_CACHED_ACCESS_TOKEN, SP_CACHED_CLIENT_ID, USER_AGENT):
+        debug_print("Using cached Spotify access token (sp_dc source)")
         return SP_CACHED_ACCESS_TOKEN
+
+    if not SECRET_CIPHER_DICT:
+        debug_print("SECRET_CIPHER_DICT is empty, fetching secrets before token refresh")
+        if not fetch_and_update_secrets():
+            raise RuntimeError("Failed to obtain TOTP secrets: SECRET_CIPHER_DICT is empty and secrets update failed")
 
     max_retries = TOKEN_MAX_RETRIES
     retry = 0
@@ -2742,7 +2826,7 @@ def spotify_get_access_token_from_sp_dc(sp_dc: str):
 
     while retry < max_retries:
         try:
-            # print(f"attempt: {retry}")
+            debug_print(f"Refreshing Spotify access token via sp_dc (attempt {retry + 1}/{max_retries})")
             token_data = refresh_access_token_from_sp_dc(sp_dc)
             token = token_data["access_token"]
             client_id = token_data.get("client_id", "")
@@ -2753,12 +2837,22 @@ def spotify_get_access_token_from_sp_dc(sp_dc: str):
             SP_CACHED_CLIENT_ID = client_id
 
             if SP_CACHED_ACCESS_TOKEN is None or not check_token_validity(SP_CACHED_ACCESS_TOKEN, SP_CACHED_CLIENT_ID, USER_AGENT):
+                debug_print("Received token is invalid, retrying")
                 retry += 1
                 time.sleep(TOKEN_RETRY_TIMEOUT)
             else:
+                debug_print(f"Spotify access token obtained successfully, length={length}")
                 break
+        except SecretsUnavailableError as e:
+            last_error = str(e)
+            debug_print(f"TOTP secrets unavailable: {e}")
+            if fetch_and_update_secrets():
+                debug_print("TOTP secrets updated, retrying token refresh immediately")
+                continue
+            raise RuntimeError(f"Failed to obtain TOTP secrets for token refresh: {e}")
         except Exception as e:
             last_error = str(e)
+            debug_print(f"Token refresh attempt failed: {e}")
             retry += 1
             if retry < max_retries:
                 time.sleep(TOKEN_RETRY_TIMEOUT)
@@ -2767,6 +2861,7 @@ def spotify_get_access_token_from_sp_dc(sp_dc: str):
 
         if fetch_and_update_secrets():
             try:
+                debug_print("Retrying token refresh after secrets update")
                 token_data = refresh_access_token_from_sp_dc(sp_dc)
                 token = token_data["access_token"]
                 client_id = token_data.get("client_id", "")
@@ -2777,10 +2872,11 @@ def spotify_get_access_token_from_sp_dc(sp_dc: str):
                 SP_CACHED_CLIENT_ID = client_id
 
                 if SP_CACHED_ACCESS_TOKEN and check_token_validity(SP_CACHED_ACCESS_TOKEN, SP_CACHED_CLIENT_ID, USER_AGENT):
+                    debug_print("Spotify access token obtained successfully after secrets update")
                     return SP_CACHED_ACCESS_TOKEN
             except Exception as e:
                 last_error = str(e)
-                print(f"**** {last_error}")
+                debug_print(f"Token refresh after secrets update failed: {e}")
 
         error_msg = f"Failed to obtain a valid Spotify access token after {max_retries} attempts"
         if last_error:
@@ -3118,12 +3214,14 @@ def spotify_get_access_token_from_client(device_id, system_id, user_uri_id, refr
     global SP_CACHED_ACCESS_TOKEN, SP_CACHED_REFRESH_TOKEN, SP_ACCESS_TOKEN_EXPIRES_AT
 
     if SP_CACHED_ACCESS_TOKEN and time.time() < SP_ACCESS_TOKEN_EXPIRES_AT and check_token_validity(SP_CACHED_ACCESS_TOKEN, user_agent=USER_AGENT):
+        debug_print("Using cached Spotify access token (client source)")
         return SP_CACHED_ACCESS_TOKEN
 
     if not client_token:
         raise Exception("Client token is missing")
 
     if SP_CACHED_REFRESH_TOKEN:
+        debug_print("Using cached refresh token for client auth flow")
         refresh_token = SP_CACHED_REFRESH_TOKEN
 
     protobuf_body = build_spotify_auth_protobuf(device_id, system_id, user_uri_id, refresh_token)
@@ -3151,10 +3249,14 @@ def spotify_get_access_token_from_client(device_id, system_id, user_uri_id, refr
         if platform.system() != 'Windows':
             signal.signal(signal.SIGALRM, timeout_handler)
             signal.alarm(FUNCTION_TIMEOUT + 2)
+        debug_print(f"HTTP POST {LOGIN_URL} [client auth] headers={sanitize_debug_headers(headers)} payload_len={len(protobuf_body)}")
         response = req.post(LOGIN_URL, headers=headers, data=protobuf_body, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
+        debug_print(f"HTTP POST {LOGIN_URL} [client auth] -> {response.status_code}")
     except TimeoutException as e:
+        debug_print(f"HTTP POST {LOGIN_URL} [client auth] timeout: {e}")
         raise Exception(f"spotify_get_access_token_from_client() network request timeout after {display_time(FUNCTION_TIMEOUT + 2)}: {e}")
     except Exception as e:
+        debug_print(f"HTTP POST {LOGIN_URL} [client auth] failed: {e}")
         raise Exception(f"spotify_get_access_token_from_client() network request error: {e}")
     finally:
         if platform.system() != 'Windows':
@@ -3217,6 +3319,7 @@ def spotify_get_client_token(app_version, device_id, system_id, **device_overrid
     global SP_CACHED_CLIENT_TOKEN, SP_CLIENT_TOKEN_EXPIRES_AT
 
     if SP_CACHED_CLIENT_TOKEN and time.time() < SP_CLIENT_TOKEN_EXPIRES_AT:
+        debug_print("Using cached client token")
         return SP_CACHED_CLIENT_TOKEN
 
     body = build_clienttoken_request_protobuf(app_version, device_id, system_id, **device_overrides)
@@ -3241,10 +3344,14 @@ def spotify_get_client_token(app_version, device_id, system_id, **device_overrid
         if platform.system() != 'Windows':
             signal.signal(signal.SIGALRM, timeout_handler)
             signal.alarm(FUNCTION_TIMEOUT + 2)
+        debug_print(f"HTTP POST {CLIENTTOKEN_URL} [client token] app_version={app_version}, device_overrides={device_overrides}, payload_len={len(body)}")
         response = req.post(CLIENTTOKEN_URL, headers=headers, data=body, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
+        debug_print(f"HTTP POST {CLIENTTOKEN_URL} [client token] -> {response.status_code}")
     except TimeoutException as e:
+        debug_print(f"HTTP POST {CLIENTTOKEN_URL} [client token] timeout: {e}")
         raise Exception(f"spotify_get_client_token() network request timeout after {display_time(FUNCTION_TIMEOUT + 2)}: {e}")
     except Exception as e:
+        debug_print(f"HTTP POST {CLIENTTOKEN_URL} [client token] failed: {e}")
         raise Exception(f"spotify_get_client_token() network request error: {e}")
     finally:
         if platform.system() != 'Windows':
@@ -3263,6 +3370,7 @@ def spotify_get_client_token(app_version, device_id, system_id, **device_overrid
 
     SP_CACHED_CLIENT_TOKEN = client_token
     SP_CLIENT_TOKEN_EXPIRES_AT = time.time() + ttl
+    debug_print(f"Client token refreshed successfully, ttl={ttl}s")
 
     return client_token
 
@@ -3281,12 +3389,14 @@ def spotify_get_access_token_from_client_auto(device_id, system_id, user_uri_id,
         OS_MINOR is not None and OS_MINOR > 0,
         CLIENT_MODEL is not None and CLIENT_MODEL > 0
     ]):
+        debug_print("Attempting to refresh/get client token before client auth")
         client_token = spotify_get_client_token(app_version=APP_VERSION, device_id=device_id, system_id=system_id, cpu_arch=CPU_ARCH, os_build=OS_BUILD, platform=PLATFORM, os_major=OS_MAJOR, os_minor=OS_MINOR, client_model=CLIENT_MODEL)
 
     try:
         return spotify_get_access_token_from_client(device_id, system_id, user_uri_id, refresh_token, client_token)
     except Exception as e:
         err = str(e).lower()
+        debug_print(f"Client auth failed: {e}")
         if all([
             CLIENTTOKEN_URL,
             APP_VERSION,
@@ -3299,6 +3409,7 @@ def spotify_get_access_token_from_client_auto(device_id, system_id, user_uri_id,
         ]) and ("invalid client token" in err or "expired client token" in err):
             global SP_CLIENT_TOKEN_EXPIRES_AT
             SP_CLIENT_TOKEN_EXPIRES_AT = 0
+            debug_print("Client token invalid/expired, forcing refresh and retry")
 
             client_token = spotify_get_client_token(app_version=APP_VERSION, device_id=DEVICE_ID, system_id=SYSTEM_ID, cpu_arch=CPU_ARCH, os_build=OS_BUILD, platform=PLATFORM, os_major=OS_MAJOR, os_minor=OS_MINOR, client_model=CLIENT_MODEL)
 
@@ -3323,6 +3434,7 @@ def spotify_get_access_token_from_oauth_app(sp_client_id, sp_client_secret):
         return None
 
     if SP_CACHED_OAUTH_APP_TOKEN and check_token_validity(SP_CACHED_OAUTH_APP_TOKEN, oauth_app=True):
+        debug_print("Using cached OAuth app access token")
         return SP_CACHED_OAUTH_APP_TOKEN
 
     if SP_APP_TOKENS_FILE:
@@ -3336,6 +3448,7 @@ def spotify_get_access_token_from_oauth_app(sp_client_id, sp_client_secret):
     auth_manager = SpotifyClientCredentials(client_id=sp_client_id, client_secret=sp_client_secret, cache_handler=cache_handler, requests_session=session)  # type: ignore[arg-type]
 
     SP_CACHED_OAUTH_APP_TOKEN = auth_manager.get_access_token(as_dict=False)
+    debug_print("OAuth app access token refreshed successfully")
 
     return SP_CACHED_OAUTH_APP_TOKEN
 
@@ -3353,7 +3466,9 @@ def spotify_get_friends_json(access_token):
             "Client-Id": SP_CACHED_CLIENT_ID
         })
 
+    debug_print(f"HTTP GET {url} [buddylist] headers={sanitize_debug_headers(headers)}")
     response = SESSION.get(url, headers=headers, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
+    debug_print(f"HTTP GET {url} [buddylist] -> {response.status_code}")
     if response.status_code == 401:
         raise Exception("401 Unauthorized for url: " + url)
     response.raise_for_status()
@@ -3411,21 +3526,28 @@ def spotify_list_friends(friend_activity):
         sp_playlist_uri = friend["track"]["context"].get("uri")
         sp_track_uri = friend["track"].get("uri")
 
+        sp_playlist_owner = ""
+        if sp_playlist_uri:
+            sp_accessToken_oauth_app = spotify_get_access_token_from_oauth_app(SP_APP_CLIENT_ID, SP_APP_CLIENT_SECRET)
+            if sp_accessToken_oauth_app:
+                sp_playlist_owner = spotify_get_playlist_owner(sp_accessToken_oauth_app, sp_playlist_uri, oauth_app=True)
+        playlist_suffix = SPOTIFY_SUFFIX if sp_playlist_owner == "Spotify" else ""
+
         print("─" * HORIZONTAL_LINE)
         print(f"Username:\t\t\t{sp_username}")
         print(f"User URI ID:\t\t\t{sp_uri}")
         print(f"User URL:\t\t\t{spotify_convert_uri_to_url('spotify:user:' + sp_uri)}")
         print(f"\nLast played:\t\t\t{sp_artist} - {sp_track}\n")
         if 'spotify:playlist:' in sp_playlist_uri:
-            print(f"Playlist:\t\t\t{sp_playlist}{iconstring()}")
+            print(f"Playlist:\t\t\t{sp_playlist}{playlist_suffix}")
         print(f"Album:\t\t\t\t{sp_album}")
 
 #jmk    if 'spotify:album:' in sp_playlist_uri and sp_playlist != sp_album:
         if 'spotify:album:' in sp_playlist_uri and sp_playlist == sp_album:
-            print(f"\nContext (Album):\t\t{sp_playlist}{iconstring()}")
+            print(f"\nContext (Album):\t\t{sp_playlist}")
 
         if 'spotify:artist:' in sp_playlist_uri:
-            print(f"\nContext (Artist):\t\t{sp_playlist}{iconstring()}")
+            print(f"\nContext (Artist):\t\t{sp_playlist}")
 
         print(f"\nTrack URL:\t\t\t{spotify_convert_uri_to_url(sp_track_uri)}")
         if 'spotify:playlist:' in sp_playlist_uri:
@@ -3473,6 +3595,81 @@ def spotify_get_friend_info(friend_activity, uri):
     return False, {}
 
 
+# Returns information for specific Spotify playlist URI
+def spotify_get_playlist_owner(access_token, playlist_uri, oauth_app=False):
+    if not access_token:
+        raise Exception("spotify_get_playlist_owner(): access_token is empty")
+
+    playlist_id = playlist_uri.split(':', 2)[2]
+
+    url = f"https://api.spotify.com/v1/playlists/{playlist_id}?fields=name,owner"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "User-Agent": USER_AGENT
+    }
+
+    if TOKEN_SOURCE == "cookie" and not oauth_app:
+        headers.update({
+            "Client-Id": SP_CACHED_CLIENT_ID
+        })
+
+    try:
+        debug_print(f"HTTP GET {url} [playlist owner] headers={sanitize_debug_headers(headers)}")
+        response = SESSION.get(url, headers=headers, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
+        debug_print(f"HTTP GET {url} [playlist owner] -> {response.status_code}")
+        if response.status_code == 404:
+            # Spotify-curated playlists often return 404 when accessed via Client Credentials Flow
+            sp_playlist_owner = "Spotify"
+        else:
+            response.raise_for_status()
+            json_response = response.json()
+
+            sp_playlist_owner = json_response["owner"].get("display_name", "")
+        return sp_playlist_owner
+    except Exception as e:
+        # print(e)
+        print_to_log(e)
+        return False
+        # raise
+
+# Returns information for specific Spotify playlist URI
+def spotify_get_playlist_image_url(access_token, playlist_uri, oauth_app=False):
+    if not access_token:
+        raise Exception("spotify_get_playlist_owner(): access_token is empty")
+
+    playlist_id = playlist_uri.split(':', 2)[2]
+
+    url = f"https://api.spotify.com/v1/playlists/{playlist_id}?fields=name,images"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "User-Agent": USER_AGENT
+    }
+
+    if TOKEN_SOURCE == "cookie" and not oauth_app:
+        headers.update({
+            "Client-Id": SP_CACHED_CLIENT_ID
+        })
+
+    try:
+        response = SESSION.get(url, headers=headers, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
+        if response.status_code == 404:
+            # Spotify-curated playlists often return 404 when accessed via Client Credentials Flow
+            sp_playlist_image_url = get_spotify_playlist_image(playlist_id)
+            if not sp_playlist_image_url:
+                return False
+        else:
+            response.raise_for_status()
+            json_response = response.json()
+
+            sp_playlist_image_url = json_response["images"][0].get("url", "")
+        return sp_playlist_image_url
+    except Exception as e:
+        # print(e)
+        print_to_log(e)
+        return False
+        # raise
+
+
 # Returns information for specific Spotify track URI
 def spotify_get_track_info(access_token, track_uri, oauth_app=False):
     if not access_token:
@@ -3493,7 +3690,9 @@ def spotify_get_track_info(access_token, track_uri, oauth_app=False):
     si = "?si=1"
 
     try:
+        debug_print(f"HTTP GET {url} [track info] headers={sanitize_debug_headers(headers)}")
         response = SESSION.get(url, headers=headers, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
+        debug_print(f"HTTP GET {url} [track info] -> {response.status_code}")
         response.raise_for_status()
         json_response = response.json()
         sp_track_duration = int(json_response.get("duration_ms") / 1000)
@@ -3526,61 +3725,63 @@ def get_spotify_playlist_image(playlist_id: str) -> str:
 
     return tag["content"]
 
-# Returns information for specific Spotify playlist URI
-def spotify_get_playlist_info(access_token, playlist_uri, oauth_app=False):
-    if not access_token:
-        raise Exception("spotify_get_playlist_info(): access_token is empty")
 
-    if JMK_DEBUG:
-        print(f"spotify_get_playlist_info")
-        print(f"access_token: {access_token}")
-        print(f"oauth_app: {oauth_app}")
-    # return False
+# # Returns information for specific Spotify playlist URI
+# def spotify_get_playlist_info(access_token, playlist_uri, oauth_app=False):
+    # if not access_token:
+        # raise Exception("spotify_get_playlist_info(): access_token is empty")
+
+    # if JMK_DEBUG:
+        # print(f"spotify_get_playlist_info")
+        # print(f"access_token: {access_token}")
+        # print(f"oauth_app: {oauth_app}")
+    # # return False
     
-    playlist_id = playlist_uri.split(':', 2)[2]
+    # playlist_id = playlist_uri.split(':', 2)[2]
     
-    url = f"https://api.spotify.com/v1/playlists/{playlist_id}?fields=name,owner,followers,external_urls,images"
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "User-Agent": USER_AGENT
-    }
+    # url = f"https://api.spotify.com/v1/playlists/{playlist_id}?fields=name,owner,followers,external_urls,images"
+    # headers = {
+        # "Authorization": f"Bearer {access_token}",
+        # "User-Agent": USER_AGENT
+    # }
 
-    if TOKEN_SOURCE == "cookie" and not oauth_app:
-        headers.update({
-            "Client-Id": SP_CACHED_CLIENT_ID
-        })
-    # add si parameter so link opens in native Spotify app after clicking
-    si = "?si=1"
+    # if TOKEN_SOURCE == "cookie" and not oauth_app:
+        # headers.update({
+            # "Client-Id": SP_CACHED_CLIENT_ID
+        # })
+    # # add si parameter so link opens in native Spotify app after clicking
+    # si = "?si=1"
 
-    try:
-        response = SESSION.get(url, headers=headers, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
-        if JMK_DEBUG:
-            print(f"response: {response}")
-            if response.status_code != 404:
-                print(f"json_response: {json_response}")
-        if response.status_code == 404:
-            sp_playlist_image_url = get_spotify_playlist_image(playlist_id)
-            if not sp_playlist_image_url:
-                return False
-            sp_playlist_owner = "Spotify"
-        else:
-            response.raise_for_status()
-            json_response = response.json()
+    # try:
+        # response = SESSION.get(url, headers=headers, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
+        # if JMK_DEBUG:
+            # print(f"response: {response}")
+            # if response.status_code != 404:
+                # print(f"json_response: {json_response}")
+        # if response.status_code == 404:
+            # sp_playlist_image_url = get_spotify_playlist_image(playlist_id)
+            # if not sp_playlist_image_url:
+                # return False
+            # sp_playlist_owner = "Spotify"
+        # else:
+            # response.raise_for_status()
+            # json_response = response.json()
 
-            # sp_playlist_name = json_response.get("name")
-            sp_playlist_owner = json_response["owner"].get("display_name")
-            # sp_playlist_owner_url = json_response["owner"]["external_urls"].get("spotify")
-            # sp_playlist_followers = int(json_response["followers"].get("total"))
-            # sp_playlist_url = json_response["external_urls"].get("spotify") + si
-            sp_playlist_image_url = json_response["images"][0].get("url", "")
-        return {"sp_playlist_owner": sp_playlist_owner, "sp_playlist_image_url": sp_playlist_image_url}
-    except Exception as e:
-        print(e)
-        raise
+            # # sp_playlist_name = json_response.get("name")
+            # sp_playlist_owner = json_response["owner"].get("display_name", "")
+            # # sp_playlist_owner_url = json_response["owner"]["external_urls"].get("spotify")
+            # # sp_playlist_followers = int(json_response["followers"].get("total"))
+            # # sp_playlist_url = json_response["external_urls"].get("spotify") + si
+            # sp_playlist_image_url = json_response["images"][0].get("url", "")
+        # return {"sp_playlist_owner": sp_playlist_owner, "sp_playlist_image_url": sp_playlist_image_url}
+    # except Exception as e:
+        # print(e)
+        # raise
 
 # Checks if a Spotify user URI ID has been deleted
 def is_user_removed(access_token, user_uri_id, oauth_app=False):
-    url = f"https://api.spotify.com/v1/users/{user_uri_id}"
+    # Use internal Spotify API (official /users/{id} endpoint was removed in Feb 2026)
+    url = f"https://spclient.wg.spotify.com/user-profile-view/v3/profile/{user_uri_id}?playlist_limit=0&artist_limit=0&episode_limit=0&market=from_token"
 
     headers = {
         "Authorization": f"Bearer {access_token}",
@@ -3600,7 +3801,9 @@ def is_user_removed(access_token, user_uri_id, oauth_app=False):
         temp_session = req.Session()
         temp_session.headers.update(headers)
 
+        debug_print(f"HTTP GET {url} [user removed check] headers={sanitize_debug_headers(headers)}")
         response = temp_session.get(url, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
+        debug_print(f"HTTP GET {url} [user removed check] -> {response.status_code}")
 
         if response.status_code == 429:
             return False
@@ -3795,14 +3998,14 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
     last_found_playlist = False
     active_ever = False
     icon_add = False
-    playlist_append_str = ""
     hasTrack = False
     sp_playlist_owner = ""
     sp_playlist_image_url = ""
+    playlist_suffix = ""
     
     def iconstring():
-        nonlocal icon_add
-        return playlist_append_str + (ICON_SONG_MISSING_FROM_PLAYLIST if icon_add else "")
+        nonlocal icon_add, playlist_suffix 
+        return playlist_suffix + (ICON_SONG_MISSING_FROM_PLAYLIST if icon_add else "")
         
     def songstring():
         if sp_playlist and is_playlist:
@@ -3864,6 +4067,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
     # Start loop
     while True:
+        debug_print(f"Loop tick: token_source={TOKEN_SOURCE}, check_interval={SPOTIFY_CHECK_INTERVAL}, error_interval={SPOTIFY_ERROR_INTERVAL}")
 
         # Sometimes Spotify network functions halt even though we specified the timeout
         # To overcome this we use alarm signal functionality to kill it inevitably, not available on Windows
@@ -3880,6 +4084,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
             sp_friends = spotify_get_friends_json(sp_accessToken)
             sp_found, sp_data = spotify_get_friend_info(sp_friends, user_uri_id)
+            debug_print(f"Friend lookup result: found={sp_found}")
             email_sent = False
             if platform.system() != 'Windows':
                 signal.alarm(0)
@@ -3895,6 +4100,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                 signal.alarm(0)
 
             err = str(e).lower()
+            debug_print(f"Main monitor loop error: {e}")
 
             print(f"* Error, retrying in {display_time(SPOTIFY_ERROR_INTERVAL)}: {e}")
 
@@ -3933,6 +4139,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
         played_for_m_body = ""
         played_for_m_body_html = ""
         is_playlist = False
+        playlist_suffix = ""
 
         # User is found in the Spotify's friend list just after starting the tool
         if sp_found:
@@ -3943,18 +4150,17 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
             sp_album_uri = sp_data["sp_album_uri"]
             sp_playlist_uri = sp_data["sp_playlist_uri"]
 
-            sp_playlist_data = {}
+            # sp_playlist_data = {}
             try:
                 sp_track_data = spotify_get_track_info(sp_accessToken_oauth_app, sp_track_uri, oauth_app=True)
-                if 'spotify:playlist:' in sp_playlist_uri:
-                    is_playlist = True
-                    sp_playlist_data = spotify_get_playlist_info(sp_accessToken_oauth_app, sp_playlist_uri, oauth_app=True)
-                    if not sp_playlist_data:
-                        is_playlist = False
-                else:
-                    is_playlist = False
+                is_playlist = 'spotify:playlist:' in sp_playlist_uri
+                if is_playlist:
+                    sp_playlist_owner = spotify_get_playlist_owner(sp_accessToken_oauth_app, sp_playlist_uri, oauth_app=True)
+                    sp_playlist_image_url = spotify_get_playlist_image_url(sp_accessToken_oauth_app, sp_playlist_uri, oauth_app=True)
+                    playlist_suffix = SPOTIFY_SUFFIX if sp_playlist_owner == "Spotify" else ""
+                    playlist_suffix += (ICON_SONG_MISSING_FROM_PLAYLIST if icon_add else "")
             except Exception as e:
-                # print(f"* Error, retrying in {display_time(SPOTIFY_ERROR_INTERVAL)}: {e}")
+                print(f"* Error, retrying in {display_time(SPOTIFY_ERROR_INTERVAL)}: {e}")
                 print_cur_ts("Timestamp:\t\t\t")
                 time.sleep(SPOTIFY_ERROR_INTERVAL)
                 continue
@@ -3992,15 +4198,16 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
             sp_playlist_url = ""
             if is_playlist:
                 sp_playlist_url = spotify_convert_uri_to_url(sp_playlist_uri)
-                sp_playlist_image_url = sp_playlist_data.get("sp_playlist_image_url", "")
-                playlist_m_body = f"\nPlaylist: {sp_playlist}{iconstring()}"
-                playlist_m_body_html = f"<br>Playlist: <a href=\"{sp_playlist_url}\">{escape(sp_playlist)}</a>"
-                sp_playlist_owner = sp_playlist_data.get("sp_playlist_owner")
+                playlist_m_body = f"\nPlaylist: {sp_playlist}{playlist_suffix}"
+                playlist_m_body_html = f"<br>Playlist: <a href=\"{sp_playlist_url}\">{escape(sp_playlist)}{playlist_suffix}</a>"
+                sp_playlist_owner = spotify_get_playlist_owner(sp_accessToken_oauth_app, sp_playlist_uri, oauth_app=True)
+                sp_playlist_image_url = spotify_get_playlist_image_url(sp_accessToken_oauth_app, sp_playlist_uri, oauth_app=True)
+                playlist_suffix = SPOTIFY_SUFFIX if sp_playlist_owner == "Spotify" else ""
+                playlist_suffix += (ICON_SONG_MISSING_FROM_PLAYLIST if icon_add else "")
+                # sp_playlist_image_url = sp_playlist_data.get("sp_playlist_image_url", "")
+                # sp_playlist_owner = sp_playlist_data.get("sp_playlist_owner")
 
                 if JMK_MODE:
-                    if sp_playlist_owner == "Spotify":
-                        playlist_append_str = " (custom)"
-
                     hasTrack = (sp_playlist_owner == "Spotify") or (search_playlist(sp_accessToken_oauth_app, sp_playlist, sp_playlist_uri, sp_track_uri_id, sp_track, sp_artist, False))
                     if DEBUG_JMK:
                         print_debug(f"hasTrack (A1): {hasTrack}, sp_playlist_owner: {sp_playlist_owner}, sp_playlist: {sp_playlist}")
@@ -4018,11 +4225,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                         # if hasTrack:
                             # print_debug(f"*** Track [{sp_track}] was found in playlist [{sp_playlist}{iconstring()}]")
                     if not hasTrack:
-                        if (sp_playlist_owner == "Spotify"):
-                            playlist_append_str += "(unique)"
-                            # if DEBUG_JMK:
-                                # print_debug(f"*** Track [{sp_track}] IS ASSUMED in spotify 'made for' playlist [{sp_playlist}{iconstring()}]")
-                        else:
+                        if (sp_playlist_owner != "Spotify"):
                             if DEBUG_JMK:
                                 print_debug(f"SONG NOT IN REPORTED PLAYLIST (1)")
                             print_to_log(f"*** ERROR: track [{sp_track}] NOT FOUND in playlist [{sp_playlist}] with owner [{sp_playlist_owner}] and uri [{sp_playlist_uri}]")
@@ -4064,7 +4267,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                     new_playlist = True
                     print_debug(f"SPECIAL CASE: SONG IN ANOTHER MONITORED PLAYLIST, AT EXCEPTION LIMIT FOR CURRENT (1) - old: {last_found_playlist.get('name', 'A')} new: {found_playlist.get('name', 'A')}")
                     reset_playlist_counts() 
-                    count_overridden = False
+                    ridden = False
             # else it should be considered an exception
 #jmkfix can this case every happen. is it in log?
                 else:
@@ -4098,7 +4301,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                     sp_playlist_url = found_playlist.get('url', '')
                     sp_track = sp_track + found_playlist.get('icon', '')
                     playlist_m_body = f"\nPlaylist: {sp_playlist}{iconstring()}"
-                    playlist_m_body_html = f"<br>Playlist: <a href=\"{sp_playlist_url}\">{escape(sp_playlist)}</a>"
+                    playlist_m_body_html = f"<br>Playlist: <a href=\"{sp_playlist_url}\">{escape(sp_playlist)}{iconstring()}</a>"
 
                 dz_message = build_dz_string(found_playlist)
                 if DEBUG_JMK and dz_message != "":
@@ -4161,24 +4364,24 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
             print(f"\nLast played:\t\t\t{sp_artist} - {sp_track}")
             print(f"Duration:\t\t\t{display_time(sp_track_duration)}\n")
             if is_playlist:
-                print(f"Playlist:\t\t\t{sp_playlist}{iconstring()}")
+                print(f"Playlist:\t\t\t{sp_playlist}{playlist_suffix}")
 
             print(f"Album:\t\t\t\t{sp_album}")
 
             if JMK_MODE:
                 if 'spotify:album:' in sp_playlist_uri and sp_playlist == sp_album:
-                    print(f"\nContext (Album):\t\t{sp_playlist}{iconstring()}")
-                    context_m_body += f"\nContext (Album): {sp_playlist}{iconstring()}"
+                    print(f"\nContext (Album):\t\t{sp_playlist}")
+                    context_m_body += f"\nContext (Album): {sp_playlist}"
                     context_m_body_html += f"<br>Context (Album): <a href=\"{spotify_convert_uri_to_url(sp_playlist_uri)}\">{escape(sp_playlist)}</a>"
             else:
                 if 'spotify:album:' in sp_playlist_uri and sp_playlist != sp_album:
-                    print(f"\nContext (Album):\t\t{sp_playlist}{iconstring()}")
-                    context_m_body += f"\nContext (Album): {sp_playlist}{iconstring()}"
+                    print(f"\nContext (Album):\t\t{sp_playlist}")
+                    context_m_body += f"\nContext (Album): {sp_playlist}"
                     context_m_body_html += f"<br>Context (Album): <a href=\"{spotify_convert_uri_to_url(sp_playlist_uri)}\">{escape(sp_playlist)}</a>"
 
             if 'spotify:artist:' in sp_playlist_uri:
-                print(f"\nContext (Artist):\t\t{sp_playlist}{iconstring()}")
-                context_m_body += f"\nContext (Artist): {sp_playlist}{iconstring()}"
+                print(f"\nContext (Artist):\t\t{sp_playlist}")
+                context_m_body += f"\nContext (Artist): {sp_playlist}"
                 context_m_body_html += f"<br>Context (Artist): <a href=\"{spotify_convert_uri_to_url(sp_playlist_uri)}\">{escape(sp_playlist)}</a>"
 
             print(f"\nTrack URL:\t\t\t{sp_track_url}")
@@ -4355,10 +4558,9 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                         # send_notification(dz_message)
             disappeared_counter = 0
 
+            playlist_suffix = ""
             if ALT_VIEW:
                 icon_add = False
-            if JMK_MODE:
-                playlist_append_str = ""
             hastrack = False
             if DEBUG_JMK:
                 print_debug(f"LOOP B - PRIMARY LOOP")
@@ -4516,15 +4718,14 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                     sp_playlist_uri = sp_data["sp_playlist_uri"]
                     try:
                         sp_track_data = spotify_get_track_info(sp_accessToken_oauth_app, sp_track_uri, oauth_app=True)
-                        if 'spotify:playlist:' in sp_playlist_uri:
-                            is_playlist = True
-                            sp_playlist_data = spotify_get_playlist_info(sp_accessToken_oauth_app, sp_playlist_uri, oauth_app=True)
-                            if not sp_playlist_data:
-                                is_playlist = False
-                        else:
-                            is_playlist = False
+                        is_playlist = 'spotify:playlist:' in sp_playlist_uri
+                        if is_playlist:
+                            sp_playlist_owner = spotify_get_playlist_owner(sp_accessToken_oauth_app, sp_playlist_uri, oauth_app=True)
+                            sp_playlist_image_url = spotify_get_playlist_image_url(sp_accessToken_oauth_app, sp_playlist_uri, oauth_app=True)
+                            playlist_suffix = SPOTIFY_SUFFIX if sp_playlist_owner == "Spotify" else ""
+                            playlist_suffix += (ICON_SONG_MISSING_FROM_PLAYLIST if icon_add else "")
                     except Exception as e:
-                        # print(f"* Error, retrying in {display_time(SPOTIFY_ERROR_INTERVAL)}: {e}")
+                        print(f"* Error, retrying in {display_time(SPOTIFY_ERROR_INTERVAL)}: {e}")
                         print_cur_ts("Timestamp:\t\t\t")
                         time.sleep(SPOTIFY_ERROR_INTERVAL)
                         continue
@@ -4563,12 +4764,12 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                             spotify_linux_play_song(sp_track_uri_id)
 
                     if is_playlist:
-                        sp_playlist_owner = sp_playlist_data.get("sp_playlist_owner")
+                        # sp_playlist_owner = sp_playlist_data.get("sp_playlist_owner")
+                        sp_playlist_owner = spotify_get_playlist_owner(sp_accessToken_oauth_app, sp_playlist_uri, oauth_app=True)
+                        playlist_suffix = SPOTIFY_SUFFIX if sp_playlist_owner == "Spotify" else ""
+                        playlist_suffix += (ICON_SONG_MISSING_FROM_PLAYLIST if icon_add else "")
 
                         if JMK_MODE:
-                            if sp_playlist_owner == "Spotify":
-                                playlist_append_str = " (custom)"
-
                             hasTrack = (sp_playlist_owner == "Spotify") or (search_playlist(sp_accessToken_oauth_app, sp_playlist, sp_playlist_uri, sp_track_uri_id, sp_track, sp_artist, False))
                             if DEBUG_JMK:
                                 print_debug(f"hasTrack (B1): {hasTrack}, sp_playlist_owner: {sp_playlist_owner}, sp_playlist: {sp_playlist}")
@@ -4583,10 +4784,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                                 print_debug(f"hasTrack (B3): {hasTrack}, sp_playlist_owner: {sp_playlist_owner}")
 
                             if not hasTrack:
-                                if (sp_playlist_owner == "Spotify"):
-                                    playlist_append_str += "(unique)"
-                                    # print_to_log(f"track: {sp_track}, IS ASSUMED in 'made for' playlist: {sp_playlist} ({sp_track})")
-                                else:
+                                if (sp_playlist_owner != "Spotify"):
                                     if DEBUG_JMK:
                                         print_debug(f"SONG NOT IN REPORTED PLAYLIST (2)")
                                     print_to_log(f"ERROR: track: {sp_track}, NOT FOUND in playlist: {sp_playlist} ({sp_track})")
@@ -4600,9 +4798,10 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
                     if is_playlist:
                         sp_playlist_url = spotify_convert_uri_to_url(sp_playlist_uri)
-                        sp_playlist_image_url = sp_playlist_data.get("sp_playlist_image_url", "")
-                        playlist_m_body = f"\nPlaylist: {sp_playlist}{iconstring()}"
-                        playlist_m_body_html = f"<br>Playlist: <a href=\"{sp_playlist_url}\">{escape(sp_playlist)}</a>"
+                        sp_playlist_image_url = spotify_get_playlist_image_url(sp_accessToken_oauth_app, sp_playlist_uri, oauth_app=True)
+                        # sp_playlist_image_url = sp_playlist_data.get("sp_playlist_image_url", "")
+                        playlist_m_body = f"\nPlaylist: {sp_playlist}{playlist_suffix}"
+                        playlist_m_body_html = f"<br>Playlist: <a href=\"{sp_playlist_url}\">{escape(sp_playlist)}{playlist_suffix}</a>"
                     else:
                         playlist_m_body = ""
                         playlist_m_body_html = ""
@@ -4806,7 +5005,6 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                     print(f"\nLast played:\t\t\t{sp_artist} - {sp_track}")
                     print(f"Duration:\t\t\t{display_time(sp_track_duration)}")
 
-
                     # Suppress "Played for" if this track is the first after inactivity
                     cur_ts = int(time.time())
                     resumed_after_offline = (sp_active_ts_stop > 0) and ((cur_ts - sp_ts_old) > SPOTIFY_INACTIVITY_CHECK)
@@ -4865,7 +5063,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                         recent_songs_session.pop(0)
 
                     if is_playlist:
-                        print(f"Playlist:\t\t\t{sp_playlist}{iconstring()}")
+                        print(f"Playlist:\t\t\t{sp_playlist}{playlist_suffix}")
 
                     print(f"Album:\t\t\t\t{sp_album}")
 
@@ -4874,13 +5072,13 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
 #jmk                if 'spotify:album:' in sp_playlist_uri and sp_playlist != sp_album:
                     if 'spotify:album:' in sp_playlist_uri and sp_playlist == sp_album:
-                        print(f"\nContext (Album):\t\t{sp_playlist}{iconstring()}")
-                        context_m_body += f"\nContext (Album): {sp_playlist}{iconstring()}"
+                        print(f"\nContext (Album):\t\t{sp_playlist}")
+                        context_m_body += f"\nContext (Album): {sp_playlist}"
                         context_m_body_html += f"<br>Context (Album): <a href=\"{spotify_convert_uri_to_url(sp_playlist_uri)}\">{escape(sp_playlist)}</a>"
 
                     if 'spotify:artist:' in sp_playlist_uri:
-                        print(f"\nContext (Artist):\t\t{sp_playlist}{iconstring()}")
-                        context_m_body += f"\nContext (Artist): {sp_playlist}{iconstring()}"
+                        print(f"\nContext (Artist):\t\t{sp_playlist}")
+                        context_m_body += f"\nContext (Artist): {sp_playlist}"
                         context_m_body_html += f"<br>Context (Artist): <a href=\"{spotify_convert_uri_to_url(sp_playlist_uri)}\">{escape(sp_playlist)}</a>"
 
                     print(f"Last activity:\t\t\t{get_date_from_ts(sp_ts)}")
@@ -5105,14 +5303,11 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                                 lyrics_section_text = ""
                                 lyrics_section_html = ""
                         m_subject = f"Spotify user {sp_username} plays song on loop: '{sp_artist} - {sp_track}'"
-                        m_body = f"Last played: {sp_artist} - {sp_track}\nDuration: {display_time(sp_track_duration)}{played_for_m_body}{playlist_m_body}\nAlbum: {sp_album}{context_m_body}{music_section_text}{lyrics_section_text}User plays song on LOOP ({song_on_loop} times)\n\nSongs played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})\n{body_dz}Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-                        m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{sp_artist_url}\">{escape(sp_artist)}</a> - <a href=\"{sp_track_url}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{played_for_m_body_html}{playlist_m_body_html}<br>Album: <a href=\"{sp_album_url}\">{escape(sp_album)}</a>{context_m_body_html}{music_section_html}{lyrics_section_html}User plays song on LOOP (<b>{song_on_loop}</b> times)<br><br>Songs played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})<br>{body_dz_html}Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
+                        m_body = f"Last played: {sp_artist} - {sp_track}\nDuration: {display_time(sp_track_duration)}{played_for_m_body}{playlist_m_body}\nAlbum: {sp_album}{context_m_body}{music_section_text}{lyrics_section_text}User plays song on LOOP ({song_on_loop} times)\n\nSongs played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})\n\nLast activity: {get_date_from_ts(sp_ts)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
+                        m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{sp_artist_url}\">{escape(sp_artist)}</a> - <a href=\"{sp_track_url}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{played_for_m_body_html}{playlist_m_body_html}<br>Album: <a href=\"{sp_album_url}\">{escape(sp_album)}</a>{context_m_body_html}{music_section_html}{lyrics_section_html}User plays song on LOOP (<b>{song_on_loop}</b> times)<br><br>Songs played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})<br><br>Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
                         print(f"Sending email notification to {RECEIVER_EMAIL}")
+                        send_email(m_subject, m_body, m_body_html, SMTP_SSL)
                         email_sent = True
-                        if JMK_MODE:
-                            send_email(f"{GMAIL_TAG}[{time_diff_str()}] {timestring()} {songstring()}", m_body, m_body_html, SMTP_SSL)
-                        if not JMK_MODE or ORIG_EMAILS:
-                            send_email(m_subject, m_body, m_body_html, SMTP_SSL)
 
                     if (TRACK_NOTIFICATION and on_the_list and not email_sent) or (SONG_NOTIFICATION and not email_sent):
                         music_urls_text = format_music_urls_email_text(apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url)
@@ -5139,7 +5334,11 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                         m_body = f"Last played: {sp_artist} - {sp_track}\nDuration: {display_time(sp_track_duration)}{played_for_m_body}{playlist_m_body}\nAlbum: {sp_album}{context_m_body}{music_section_text}{lyrics_section_text}Songs played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})\n{body_dz}Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
                         m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{sp_artist_url}\">{escape(sp_artist)}</a> - <a href=\"{sp_track_url}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{played_for_m_body_html}{playlist_m_body_html}<br>Album: <a href=\"{sp_album_url}\">{escape(sp_album)}</a>{context_m_body_html}{music_section_html}{lyrics_section_html}Songs played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})<br>{body_dz_html}Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
                         print(f"Sending email notification to {RECEIVER_EMAIL}")
-                        send_email(m_subject, m_body, m_body_html, SMTP_SSL)
+                        email_sent = True
+                        if JMK_MODE:
+                            send_email(f"{GMAIL_TAG}[{time_diff_str()}] {timestring()} {songstring()}", m_body, m_body_html, SMTP_SSL)
+                        if not JMK_MODE or ORIG_EMAILS:
+                            send_email(m_subject, m_body, m_body_html, SMTP_SSL)
 
                     try:
                         if csv_file_name:
@@ -5152,12 +5351,9 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                     if dz_message:
                         print(dz_message)
                     if listened_songs:
-                        print(f"Songs Played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})")
-#                        print(f"\nSongs played:\t\t\t{listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})")
+                        print(f"Songs played:\t\t\t{listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})")
                     if ALT_VIEW:
                         icon_add = False
-                    if JMK_MODE:
-                        playlist_append_str = ""
                     hastrack = False
                     
                     print_cur_ts("\nTimestamp:\t\t\t")
@@ -5195,8 +5391,11 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                             listened_songs_mbody += looped_songs_mbody
                             listened_songs_mbody_html += looped_songs_mbody_html
 
+                        if is_playlist:
+                            playlist_suffix = SPOTIFY_SUFFIX if sp_playlist_owner == "Spotify" else ""
+                            playlist_suffix += (ICON_SONG_MISSING_FROM_PLAYLIST if icon_add else "")
+
                         if JMK_MODE:
-#                            print_to_both(f"{timestring()}: {ERR_CODE}, *** End text sent. [{time_diff_str()}]: {songstring()}")
                             print_to_both(f"{timestring()}: {ERR_CODE}, *** End notification sent")
                             if SEND_TEXTS:
                                 # send_notification(f"END: [{time_diff_str()}]: {songstring()}, Song Count: {listened_songs}", sp_album_image_url)
@@ -5322,7 +5521,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
 
 def main():
-    global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_CHECK_COUNTER, LOGIN_REQUEST_BODY_FILE, CLIENTTOKEN_REQUEST_BODY_FILE, REFRESH_TOKEN, LOGIN_URL, USER_AGENT, DEVICE_ID, SYSTEM_ID, USER_URI_ID, SP_DC_COOKIE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, SP_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, ERROR_NOTIFICATION, SPOTIFY_CHECK_INTERVAL, SPOTIFY_INACTIVITY_CHECK, SPOTIFY_ERROR_INTERVAL, SPOTIFY_DISAPPEARED_CHECK_INTERVAL, TRACK_SONGS, SMTP_PASSWORD, stdout_bck, APP_VERSION, CPU_ARCH, OS_BUILD, PLATFORM, OS_MAJOR, OS_MINOR, CLIENT_MODEL, TOKEN_SOURCE, ALARM_TIMEOUT, pyotp, USER_AGENT, FLAG_FILE, TRUNCATE_CHARS, SP_APP_TOKENS_FILE, SP_APP_CLIENT_ID, SP_APP_CLIENT_SECRET
+    global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_CHECK_COUNTER, LOGIN_REQUEST_BODY_FILE, CLIENTTOKEN_REQUEST_BODY_FILE, REFRESH_TOKEN, LOGIN_URL, USER_AGENT, DEVICE_ID, SYSTEM_ID, USER_URI_ID, SP_DC_COOKIE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, DEBUG_MODE, SP_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, ERROR_NOTIFICATION, SPOTIFY_CHECK_INTERVAL, SPOTIFY_INACTIVITY_CHECK, SPOTIFY_ERROR_INTERVAL, SPOTIFY_DISAPPEARED_CHECK_INTERVAL, TRACK_SONGS, SMTP_PASSWORD, stdout_bck, APP_VERSION, CPU_ARCH, OS_BUILD, PLATFORM, OS_MAJOR, OS_MINOR, CLIENT_MODEL, TOKEN_SOURCE, ALARM_TIMEOUT, pyotp, USER_AGENT, FLAG_FILE, TRUNCATE_CHARS, SP_APP_TOKENS_FILE, SP_APP_CLIENT_ID, SP_APP_CLIENT_SECRET
     global ALT_VIEW, JMK_MODE, INITIAL_STARTUP, GMAIL_TAG, ERR_CODE, SEND_TEXTS, DZ_ALERTS, ORIG_EMAILS, USER_ID, ALT_COOKIE, ADD_PLAYLISTS_TO_MONITOR, DEBUG_JMK
     global FINAL_LOG_PATH, log_logger
 
@@ -5331,7 +5530,22 @@ def main():
 #    global log_logger, screen_logger, both_logger, FINAL_LOG_PATH
 
     if "--generate-config" in sys.argv:
-        print(CONFIG_BLOCK.strip("\n"))
+        config_content = CONFIG_BLOCK.strip("\n") + "\n"
+        # Check if a filename was provided after --generate-config
+        try:
+            idx = sys.argv.index("--generate-config")
+            if idx + 1 < len(sys.argv) and not sys.argv[idx + 1].startswith("-"):
+                # Write directly to file (bypasses PowerShell UTF-16 encoding issue on Windows)
+                output_file = sys.argv[idx + 1]
+                with open(output_file, "w", encoding="utf-8") as f:
+                    f.write(config_content)
+                print(f"Config written to: {output_file}")
+                sys.exit(0)
+        except (ValueError, IndexError):
+            pass
+        # No filename provided - write to stdout using buffer to ensure UTF-8
+        sys.stdout.buffer.write(config_content.encode("utf-8"))
+        sys.stdout.buffer.flush()
         sys.exit(0)
 
     if "--version" in sys.argv:
@@ -5378,8 +5592,11 @@ def main():
     )
     conf.add_argument(
         "--generate-config",
-        action="store_true",
-        help="Print default config template and exit",
+        dest="generate_config",
+        nargs="?",
+        const=True,
+        metavar="FILENAME",
+        help="Print default config template and exit (on Windows PowerShell, specify a filename to avoid redirect encoding issues)",
     )
     conf.add_argument(
         "--env-file",
@@ -5573,6 +5790,13 @@ def main():
         help="Disable logging to spotify_monitor_<user_uri_id/file_suffix>.log"
     )
     opts.add_argument(
+        "--debug",
+        dest="debug_mode",
+        action="store_true",
+        default=None,
+        help="Enable debug mode for technical logging"
+    )
+    opts.add_argument(
         "--truncate",
         dest="truncate",
         metavar="N",
@@ -5609,6 +5833,9 @@ def main():
         except Exception as e:
             print(f"* Error loading config file '{cfg_path}': {e}")
             sys.exit(1)
+
+    if args.debug_mode is not None:
+        DEBUG_MODE = args.debug_mode
 
     if args.env_file:
         DOTENV_FILE = os.path.expanduser(args.env_file)
@@ -6016,6 +6243,7 @@ def main():
     print(f"* CSV logging enabled:\t\t{bool(CSV_FILE)}" + (f" ({CSV_FILE})" if CSV_FILE else ""))
     print(f"* Alert on monitored tracks:\t{bool(MONITOR_LIST_FILE)}" + (f" ({MONITOR_LIST_FILE})" if MONITOR_LIST_FILE else ""))
     print(f"* Output logging enabled:\t{not DISABLE_LOGGING}" + (f" ({FINAL_LOG_PATH})" if not DISABLE_LOGGING else ""))
+    print(f"* Debug mode:\t\t\t{DEBUG_MODE}")
     if not DISABLE_LOGGING and TRUNCATE_CHARS > 0:
         print(f"* Truncate terminal lines:\t{TRUNCATE_CHARS} chars")
     print(f"* Spotify OAuth cache file:\t{SP_APP_TOKENS_FILE if SP_APP_TOKENS_FILE else 'None (memory only)'}")

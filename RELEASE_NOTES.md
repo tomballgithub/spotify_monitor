@@ -2,6 +2,16 @@
 
 This is a high-level summary of the most important changes.
 
+# Changes in 2.8 (07 Feb 2026)
+
+**Features and Improvements**:
+
+- **IMPROVE:** Migrated deprecated `GET /browse/categories` and `GET /users/{id}` endpoints to handle **Spotify API changes** scheduled for **February 11, 2026**; used `GET /tracks/{id}` for oauth_app token validation and `spclient` internal API for user status checks
+- **IMPROVE:** Enhanced `--generate-config` to support writing directly to a file (e.g. `spotify_monitor --generate-config spotify_monitor.conf`). This avoids UTF-16 encoding issues on **Windows PowerShell**
+- **IMPROVE:** Expanded tabs to spaces in output log files to ensure **consistent alignment across different viewers**
+- **IMPROVE:** Enhanced error handling for empty or malformed secret files
+- **IMPROVE:** Added `spotify_monitor_secret_grabber` and `spotify_monitor_totp_test` as pip-installed **console scripts**
+
 # Changes in 2.7 (27 Dec 2025)
 
 **Features and Improvements**:

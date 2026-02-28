@@ -1,32 +1,64 @@
 # spotify_monitor
 
-Tool for real-time monitoring of **Spotify friends' music activity feed**.
+<p align="left">
+  <img src="https://img.shields.io/github/v/release/misiektoja/spotify_monitor?style=flat-square&color=blue" alt="GitHub Release" />
+  <img src="https://img.shields.io/pypi/v/spotify_monitor?style=flat-square&color=teal" alt="PyPI Version" />
+  <img src="https://img.shields.io/github/stars/misiektoja/spotify_monitor?style=flat-square&color=magenta" alt="GitHub Stars" />
+  <img src="https://img.shields.io/badge/python-3.6+-blueviolet?style=flat-square" alt="Python Versions" />
+  <img src="https://img.shields.io/github/license/misiektoja/spotify_monitor?style=flat-square&color=blue" alt="License" />
+  <img src="https://img.shields.io/github/last-commit/misiektoja/spotify_monitor?style=flat-square&color=green" alt="Last Commit" />
+  <img src="https://img.shields.io/badge/maintenance-active-brightgreen?style=flat-square" alt="Maintenance" />
+</p>
+
+Powerful real-time tracker for Spotify friend music activity: monitor listening habits, auto-sync playback to your local client, detect skipped tracks and receive instant notifications for every beat your friends play.
+
+### 🚀 Quick Install
+```sh
+pip install spotify_monitor
+```
+
+<p align="center">
+   <img src="https://raw.githubusercontent.com/misiektoja/spotify_monitor/refs/heads/main/assets/spotify_monitor_skipped.png" alt="spotify_monitor_skipped" width="90%"/>
+</p>
+
+<a id="features"></a>
+## Features
+
+### 🔍 Real-time Tracking
+- **Friend Activity**: Monitor songs listened by Spotify users in real-time.
+- **Presence Detection**: Detect when friends get **online** or **offline**.
+- **Session Stats**: Display **duration, track counts** and **songs on loop**.
+
+### 🎮 Playback Control
+- **Auto-Sync**: Automatically **play friends' songs** in your local Spotify client.
+- **Smart Pause**: **Pause** or **switch** tracks when the monitored user goes offline.
+- **Crossfade Support**: Detect and annotate **crossfaded songs** during transitions.
+
+### 📊 Rich Insights
+- **Track Context**: View **playlist, artist** and **album info** with clickable URLs.
+- **Skip Detection**: Identify exactly when and how long a song was played.
+- **Global Search**: Instant links to **Spotify, YouTube Music, Apple Music, Tidal, lyrics** and more.
+
+### 🔔 Smart Notifications
+- **Instant Alerts**: Detailed **Email notifications** for activity and songs on loop.
+- **Session Summaries**: Receive detailed reports when a friend finishes a session.
+- **Error Reporting**: Be notified if the monitoring process hits a snag.
+
+### ⚙️ Power Features
+- **Auth Flexibility**: Hybrid support for `sp_dc` cookie, Desktop Client and OAuth app.
+- **CSV Logging**: Save every listened song with full timestamps to a CSV file.
+- **Flexible Config**: Support for files, dotenv and environment variables.
+- **Signal Control**: Manage the running script via system signals (macOS/Linux).
+
+<p align="center">
+   <img src="https://raw.githubusercontent.com/misiektoja/spotify_monitor/refs/heads/main/assets/spotify_monitor.png" alt="spotify_monitor_screenshot" width="90%"/>
+</p>
 
 🎵 For even better real-time tracking with pause/resume detection, track progress indicators, enhanced stats and offline mode support, check out [lastfm_monitor](https://github.com/misiektoja/lastfm_monitor) - it is much easier to set up, simply ask your friend to connect Last.fm to Spotify (Last.fm Settings → Applications → Connect Spotify Scrobbling) and you're ready to go!
 
 ✨ If you're interested in tracking changes to Spotify users' profiles including their playlists, take a look at another tool I've developed: [spotify_profile_monitor](https://github.com/misiektoja/spotify_profile_monitor).
 
 🛠️ If you're looking for debug tools to get Spotify Web Player access tokens and extract secret keys: [click here](#debugging-tools)
-
-<a id="features"></a>
-## Features
-
-- **Real-time tracking** of songs listened by Spotify users (including detection when user gets online & offline)
-- Possibility to **automatically play songs** listened by the tracked user in your local Spotify client
-- Information about the **duration** the user listened to a song and whether the **song was skipped**
-- Detection and annotation for **crossfaded songs** during playback with configurable thresholds
-- Information about the **context of the listened song** (playlist/artist/album) with clickable URLs
-- **Email notifications** for various events (user becomes active/inactive, specific or all songs, songs on loop, errors)
-- **Saving all listened songs** with timestamps to the **CSV file**
-- **Clickable** **Spotify**, **Apple Music**, **YouTube Music**, **Amazon Music**, **Deezer**, **Tidal**, **Genius Lyrics**, **AZLyrics**, **Tekstowo.pl**, **Musixmatch** and **Lyrics.com** search URLs printed in the console and included in email notifications (configurable per service)
-- Displaying **basic statistics for the user's playing session** (duration, time span, number of listened and skipped songs, songs on loop)
-- Support for **hybrid authentication approach** to get a **Spotify access token** (`sp_dc cookie`/`desktop client` + `OAuth app`)
-- Possibility to **control the running copy** of the script via signals
-- **Functional, procedural Python** (minimal OOP)
-
-<p align="center">
-   <img src="https://raw.githubusercontent.com/misiektoja/spotify_monitor/refs/heads/main/assets/spotify_monitor.png" alt="spotify_monitor_screenshot" width="90%"/>
-</p>
 
 <a id="table-of-contents"></a>
 ## Table of Contents
@@ -140,10 +172,6 @@ To get the list of all supported command-line arguments / flags:
 spotify_monitor --help
 ```
 
-<p align="center">
-   <img src="https://raw.githubusercontent.com/misiektoja/spotify_monitor/refs/heads/main/assets/spotify_monitor_skipped.png" alt="spotify_monitor_skipped" width="90%"/>
-</p>
-
 <a id="configuration"></a>
 ## Configuration
 
@@ -155,9 +183,14 @@ Most settings can be configured via command-line arguments.
 If you want to have it stored persistently, generate a default config template and save it to a file named `spotify_monitor.conf`:
 
 ```sh
+# On macOS, Linux or Windows Command Prompt (cmd.exe)
 spotify_monitor --generate-config > spotify_monitor.conf
 
+# On Windows PowerShell (recommended to avoid encoding issues)
+spotify_monitor --generate-config spotify_monitor.conf
 ```
+
+> **IMPORTANT**: On **Windows PowerShell**, using redirection (`>`) can cause the file to be encoded in UTF-16, which will lead to "null bytes" errors when running the tool. It is highly recommended to provide the filename directly as an argument to `--generate-config` to ensure UTF-8 encoding.
 
 Edit the `spotify_monitor.conf` file and change any desired configuration options (detailed comments are provided for each).
 
