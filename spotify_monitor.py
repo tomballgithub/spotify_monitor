@@ -1,5 +1,3 @@
-JMK_DEBUG = False
-
 # Any DZ song should always get a heart
 # Discovery Zone says (custom)(unique) [ignore those on detected playlists]
 
@@ -1076,13 +1074,11 @@ def build_dz_string(playlist_data):
     count_start = playlist_data['count_start']
     count_shuffle = playlist_data['count_shuffle']
     shuffle_details = f"({count_shuffle} via smart shuffle)" if count_shuffle > 0 else ""
-    if DEBUG_JMK:
-        print_debug(f"BUILDING DZ -> name: {name}, count_start: {count_start}, count_shuffle: {count_shuffle}")
-        print_debug(f"BUILDING DZ -> shuffle_details: {shuffle_details}")
-        print_debug(f"BUILDING DZ -> override: {count_overridden}")
+    print_debug(f"BUILDING DZ -> name: {name}, count_start: {count_start}, count_shuffle: {count_shuffle}")
+    print_debug(f"BUILDING DZ -> shuffle_details: {shuffle_details}")
+    print_debug(f"BUILDING DZ -> override: {count_overridden}")
     if count_start < playlist_data['qty_start']:
-        if DEBUG_JMK:
-            print_debug(f"CLEARING DZ DUE TO START_CNT < QTY_CNT -> name: {name}, count_start: {count_start}, count_end: {playlist_data['qty_start']}")
+        print_debug(f"CLEARING DZ DUE TO START_CNT < QTY_CNT -> name: {name}, count_start: {count_start}, count_end: {playlist_data['qty_start']}")
         return ""
     if count_overridden:
         count_start -= (playlist_data['qty_start'] - 1)
@@ -1161,6 +1157,7 @@ def print_to_both(message):
     sys.__stdout__.write(str(message) + "\n")  # Force writing to actual console
     sys.__stdout__.flush()
 
+# DEBUG_JMK: 0 = disabled, 1 = log only, 2 = screen & log, 3 = screen only
 def print_to_screen(message):
     """Prints only to the screen, bypassing sys.stdout redirection, unless debugging."""
     if DEBUG_JMK in (1, 2):
@@ -1171,17 +1168,19 @@ def print_to_screen(message):
     sys.__stdout__.write(str(message) + "\n")  # Force writing to actual console
     sys.__stdout__.flush()
 
+# DEBUG_JMK: 0 = disabled, 1 = log only, 2 = screen & log, 3 = screen only
 def print_debug(message):
     """Prints to the log file and/or screen, depending on configuration."""
-    message = "DEBUG: " + message
-    if not DISABLE_LOGGING:
-        if DEBUG_JMK in (1, 2):
-            log_logger.write(str(message).expandtabs(8) + "\n")
-    if DEBUG_JMK in (2, 3):
-        if (TRUNCATE_CHARS):
-            message = truncate_string_per_line(message.expandtabs(8), TRUNCATE_CHARS)
-        sys.__stdout__.write(str(message) + "\n")  # Force writing to actual console
-        sys.__stdout__.flush()
+    if DEBUG_JMK:
+        message = "DEBUG: " + message
+        if not DISABLE_LOGGING:
+            if DEBUG_JMK in (1, 2):
+                log_logger.write(str(message).expandtabs(8) + "\n")
+        if DEBUG_JMK in (2, 3):
+            if (TRUNCATE_CHARS):
+                message = truncate_string_per_line(message.expandtabs(8), TRUNCATE_CHARS)
+            sys.__stdout__.write(str(message) + "\n")  # Force writing to actual console
+            sys.__stdout__.flush()
 
 def timestring():
     now = datetime.now()
@@ -1238,13 +1237,12 @@ def send_ntfy(message, image_url, track, artist, album, playlist, timediffstr, c
 
     if not playlist:
         playlist = "unknown playlist"
-    if DEBUG_JMK:
-        print_debug(f"send_ntfy_msg -> {message}")
-        print_debug(f"send_ntfy_url -> {image_url}")
+    print_debug(f"send_ntfy_msg -> {message}")
+    print_debug(f"send_ntfy_url -> {image_url}")
     if (message[0:3] == "***") and ("Discovery Zone" in message):
         if "' Detected" in message:
             title = f"Playlist '{playlist}' Detected"
-            body = f"{track}\n{artist}\n{album}"
+            body = f"{track}\n{artist}\n{album}\n[{playlist}]"
             image_url = URL_DZ
             icon = ICON_DZ
             emoji = "heart"       
@@ -1291,7 +1289,7 @@ def send_ntfy(message, image_url, track, artist, album, playlist, timediffstr, c
         priority = priority_stop # change priority from default
 
     else:
-        title = ""
+        body = ""
         title = f'{ERR_CODE} @ {timediffstr} mins & {count} songs'
         if playlist == "unknown playlist":
             body = f"{track}\n{artist}\n{album}"
@@ -1360,8 +1358,7 @@ def send_ntfy(message, image_url, track, artist, album, playlist, timediffstr, c
         print(f"Sending notification, NTFY Body: {body}")
 
         if ntfy.send_ntfy(topic, title, body, priority, tags=emoji, attach=attach_url, verbose=True):
-            if DEBUG_JMK:
-                print_debug(f"NTFY Notification sent successfully! ✅: {body}")
+            print_debug(f"NTFY Notification sent successfully! ✅: {body}")
 
     except Exception as e:
         print(f"NTFY: An unexpected error occurred: {e}")
@@ -1534,10 +1531,9 @@ def configcat_on_config_changed_new(config_data):
     return
 
 def spotify_get_playlist_items(access_token, playlist_uri, fields, limit, offset, oauth_app=False):
-    if JMK_DEBUG:
-        print(f"spotify_get_playlist_items")
-        print(f"access_token: {access_token}")
-        # print(f"oauth_app: {oauth_app}")
+    print_debug(f"spotify_get_playlist_items")
+    print_debug(f"access_token: {access_token}")
+    # print_debug(f"oauth_app: {oauth_app}")
     playlist_id = playlist_uri.split(':', 2)[2]
     url = f"https://api.spotify.com/v1/playlists/{playlist_id}/tracks?fields={fields}&limit={limit}&offset={offset}"
 
@@ -1556,10 +1552,9 @@ def spotify_get_playlist_items(access_token, playlist_uri, fields, limit, offset
 
     try:
         response = SESSION.get(url, headers=headers, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
-        if JMK_DEBUG:
-            print_debug(f"spotify_get_playlist_items")
-            print_debug(f"{response}")
-            print_debug(f"{response.json()}")
+        print_debug(f"spotify_get_playlist_items")
+        print_debug(f"{response}")
+        print_debug(f"{response.json()}")
         response.raise_for_status()
         return response.json()
     except Exception:
@@ -1577,18 +1572,16 @@ def search_playlist(access_token, search_playlist_name, search_playlist_uri, sea
         if search_playlist_name.upper() in {LIKED_PLAYLIST_NAME.upper()}:
             return True
         
-        if DEBUG_JMK:
-            print_debug(f"SEARCHING PLAYLIST -> search_playlist_name: {search_playlist_name}, search_track_name: {search_track_name}, search_artist_name: {search_artist_name}")
-            print_debug(f"SEARCHING PLAYLIST -> search_playlist_uri: {search_playlist_uri}, search_song_id: {search_song_id}")
-            print_debug(f"-- playlist_offset: {playlist_offset}, playlist_size: {playlist_size}")
+        print_debug(f"SEARCHING PLAYLIST -> search_playlist_name: {search_playlist_name}, search_track_name: {search_track_name}, search_artist_name: {search_artist_name}")
+        print_debug(f"SEARCHING PLAYLIST -> search_playlist_uri: {search_playlist_uri}, search_song_id: {search_song_id}")
+        print_debug(f"-- playlist_offset: {playlist_offset}, playlist_size: {playlist_size}")
 
         while playlist_offset < playlist_size and not found_track:
             context_json = spotify_get_playlist_items(access_token, search_playlist_uri, "total,items(track(id,name,artists))", playlist_limit, playlist_offset, oauth_app=True)
             playlist_size = context_json.get("total", playlist_size)
 
-            # if DEBUG_JMK:
-                # print_debug(f"-- context_json: {context_json}")
-                # print_debug(f"-- playlist_offset: {playlist_offset}, playlist_size: {playlist_size}")
+            # print_debug(f"-- context_json: {context_json}")
+            # print_debug(f"-- playlist_offset: {playlist_offset}, playlist_size: {playlist_size}")
 
             if not context_json or 'items' not in context_json:
                 print("searchPlaylist error: No items in playlist response")
@@ -1604,8 +1597,7 @@ def search_playlist(access_token, search_playlist_name, search_playlist_uri, sea
                 for item in context_json["items"]
             )
 
-            if DEBUG_JMK:
-                print_debug(f"-- found_track: {found_track}")
+            print_debug(f"-- found_track: {found_track}")
 
             playlist_offset += playlist_limit
 
@@ -1621,20 +1613,17 @@ def find_song_in_playlists(song_name: str, current_playlist, playlist_name):
 
     # Prioritize playlist name match, then existing playlist, then new playlist
     # 1. Playlist Name Match
-    if DEBUG_JMK:
-        print_debug(f"FIND_SONG_IN_PLAYLIST - NAME MATCH (A) -> {playlist_name}, {song_name}")
+    print_debug(f"FIND_SONG_IN_PLAYLIST - NAME MATCH (A) -> {playlist_name}, {song_name}")
     for playlist_data in monitored_playlists_data.values():
         # Detect if playlist name is a match
         if playlist_name and (playlist_name.upper() == playlist_data.get('name', "B").upper()):
-            if DEBUG_JMK:
-                print_debug(f"*** ACTUAL PLAYLIST NAME MATCH!!! (A) *** : {playlist_name} = {playlist_data.get('name', 'MissingB')}, {playlist_data['count_start']}, {playlist_data['qty_start']}")
+            print_debug(f"*** ACTUAL PLAYLIST NAME MATCH!!! (A) *** : {playlist_name} = {playlist_data.get('name', 'MissingB')}, {playlist_data['count_start']}, {playlist_data['qty_start']}")
             if playlist_data['count_start'] < (playlist_data['qty_start'] - 1):
-                if DEBUG_JMK:
-                    print_debug(f"*** OVERRIDE COUNT - START NEW PL (A1): from {playlist_data['count_start']} to {playlist_data['qty_start'] - 1}")
-                    if current_playlist:
-                        print_debug(f"*** OVERRIDE COUNT - END LAST PL  (A2): from {current_playlist['count_end']} to {current_playlist['qty_end']}")
-                    else:
-                        print_debug(f"*** OVERRIDE COUNT END SKIPPED - CURRENT PLAYLIST IS FALSE - (A3): {current_playlist}")
+                print_debug(f"*** OVERRIDE COUNT - START NEW PL (A1): from {playlist_data['count_start']} to {playlist_data['qty_start'] - 1}")
+                if current_playlist:
+                    print_debug(f"*** OVERRIDE COUNT - END LAST PL  (A2): from {current_playlist['count_end']} to {current_playlist['qty_end']}")
+                else:
+                    print_debug(f"*** OVERRIDE COUNT END SKIPPED - CURRENT PLAYLIST IS FALSE - (A3): {current_playlist}")
                 playlist_data['count_start'] = playlist_data['qty_start'] - 1 # gets incremented after return
                 count_overridden = True
                 if current_playlist:
@@ -1643,24 +1632,20 @@ def find_song_in_playlists(song_name: str, current_playlist, playlist_name):
 
     # 2. Check existing playlist for continuity in case track is in multiple monitored playlists
     if current_playlist:
-        if DEBUG_JMK:
-            print_debug(f"FIND_SONG_IN_PLAYLIST - EXISTING PLAYLIST (B) -> {playlist_name}, {song_name}")
+        print_debug(f"FIND_SONG_IN_PLAYLIST - EXISTING PLAYLIST (B) -> {playlist_name}, {song_name}")
         tracks_set = current_playlist.get('tracks_set', False)
         if tracks_set and isinstance(tracks_set, set):
             if song_name_upper in tracks_set:
-                if DEBUG_JMK:
-                    print_debug(f"EXISTING PLAYLIST PRIORITY MATCHED!!! (B) : {current_playlist.get('name', 'Missing')}, {song_name}")
+                print_debug(f"EXISTING PLAYLIST PRIORITY MATCHED!!! (B) : {current_playlist.get('name', 'Missing')}, {song_name}")
                 return current_playlist
 
     # 3. Search for new playlist match 
-    if DEBUG_JMK:
-        print_debug(f"FIND_SONG_IN_PLAYLIST - NEW PLAYLIST (C) -> {playlist_name}, {song_name}")
+    print_debug(f"FIND_SONG_IN_PLAYLIST - NEW PLAYLIST (C) -> {playlist_name}, {song_name}")
     for playlist_data in monitored_playlists_data.values():
         tracks_set = playlist_data.get('tracks_set', False)
         if tracks_set and isinstance(tracks_set, set):
             if song_name_upper in tracks_set:
-                if DEBUG_JMK:
-                    print_debug(f"FOUND SONG IN MONITORED PLAYLIST -> {playlist_name}, {song_name}")
+                print_debug(f"FOUND SONG IN MONITORED PLAYLIST -> {playlist_name}, {song_name}")
                 return playlist_data 
     
     return False # Song not found in any playlist
@@ -1679,8 +1664,7 @@ def periodic_load_tracks_flexible(playlist_info):
         
         # Ensure the playlist entry exists in the global dictionary and has a 'tracks_set' key
         if playlist_name not in monitored_playlists_data:
-            if DEBUG_JMK:
-                print_debug(f"FOUND NEW PERIODIC PLAYLIST: {playlist_name}")
+            print_debug(f"FOUND NEW PERIODIC PLAYLIST: {playlist_name}")
             monitored_playlists_data[playlist_name] = playlist_info.copy() # Copy original info
             monitored_playlists_data[playlist_name]['tracks_set'] = set() # Initialize empty set for tracks
             # Initialize new count variables here
@@ -1688,8 +1672,7 @@ def periodic_load_tracks_flexible(playlist_info):
             monitored_playlists_data[playlist_name]['count_end'] = 0
             monitored_playlists_data[playlist_name]['count_shuffle'] = 0
         else:
-            # if DEBUG_JMK:
-                # print_debug(f"RESCANNING PERIODIC PLAYLIST FOR CHANGES: {playlist_name}")
+            # print_debug(f"RESCANNING PERIODIC PLAYLIST FOR CHANGES: {playlist_name}")
             pass
         raw_tracks_list = load_spotify_tracks_from_file(filename)
         unique_tracks_set = set()
@@ -1706,8 +1689,7 @@ def periodic_load_tracks_flexible(playlist_info):
 
         # this will be printed only if checked at designated interval and there is a change in the playlist
         if new_tracks_set != old_tracks_set:
-            if DEBUG_JMK:
-                print_debug(f"PERIODIC PLAYLIST CHANGE FOUND - {playlist_info.get('name', 'Missing')}")
+            print_debug(f"PERIODIC PLAYLIST CHANGE FOUND - {playlist_info.get('name', 'Missing')}")
             if (abs(new_len-old_len) > MAX_PLAYLIST_DIFFERENTIAL) and not INITIAL_STARTUP:
                 msg = f"*** Loading Monitored Tracks ({playlist_name}) Aborted! {get_cur_ts()} -> Playlist changed by {abs(new_len-old_len)} (limit: {MAX_PLAYLIST_DIFFERENTIAL})"
             else:
@@ -1724,19 +1706,16 @@ def periodic_load_tracks_flexible(playlist_info):
                 print_to_log(msg)
         else:
             pass
-            # if DEBUG_JMK:
-                # print_debug(f"PERIODIC CHECK - NO PLAYLIST CHANGE DETECTED - {playlist_info.get('name', 'Missing')}")
+            # print_debug(f"PERIODIC CHECK - NO PLAYLIST CHANGE DETECTED - {playlist_info.get('name', 'Missing')}")
                 
         # Schedule the next run with the specific refresh frequency for this playlist
         if reload_frequency > 0:
-            # if DEBUG_JMK:
-                # print_debug(f"SCHEDULING RELOAD @ {reload_frequency} seconds")
+            # print_debug(f"SCHEDULING RELOAD @ {reload_frequency} seconds")
             timer = threading.Timer(reload_frequency, task)
             timer.daemon = True
             timer.start()
         else:
-            if DEBUG_JMK:
-                print_debug(f"NOT RELOADING AS FREQ = {reload_frequency}")
+            print_debug(f"NOT RELOADING AS FREQ = {reload_frequency}")
         
     task() # Initial call to start the loading process
     
@@ -3732,10 +3711,9 @@ def get_spotify_playlist_image(playlist_id: str) -> str:
     # if not access_token:
         # raise Exception("spotify_get_playlist_info(): access_token is empty")
 
-    # if JMK_DEBUG:
-        # print(f"spotify_get_playlist_info")
-        # print(f"access_token: {access_token}")
-        # print(f"oauth_app: {oauth_app}")
+    # print_debug(f"spotify_get_playlist_info")
+    # print_debug(f"access_token: {access_token}")
+    # print_debug(f"oauth_app: {oauth_app}")
     # # return False
     
     # playlist_id = playlist_uri.split(':', 2)[2]
@@ -3755,10 +3733,9 @@ def get_spotify_playlist_image(playlist_id: str) -> str:
 
     # try:
         # response = SESSION.get(url, headers=headers, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
-        # if JMK_DEBUG:
-            # print(f"response: {response}")
-            # if response.status_code != 404:
-                # print(f"json_response: {json_response}")
+        # print_debug(f"response: {response}")
+        # if response.status_code != 404:
+            # print_debug(f"json_response: {json_response}")
         # if response.status_code == 404:
             # sp_playlist_image_url = get_spotify_playlist_image(playlist_id)
             # if not sp_playlist_image_url:
@@ -4026,30 +4003,26 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
         
         if ALT_VIEW:
             icon_add = False
-        if DEBUG_JMK:
-            if playlist_name_to_protect:
-                print_debug(f"CLEARING ALL PLAYLIST COUNTS/STRINGS, BUT PROTECTING PLAYLIST START CNT -> {playlist_name_to_protect}")
-            else:
-                print_debug(f"CLEARING ALL PLAYLIST COUNTS/STRINGS, BUT NO PLAYLIST PROTECTION")
+        if playlist_name_to_protect:
+            print_debug(f"CLEARING ALL PLAYLIST COUNTS/STRINGS, BUT PROTECTING PLAYLIST START CNT -> {playlist_name_to_protect}")
+        else:
+            print_debug(f"CLEARING ALL PLAYLIST COUNTS/STRINGS, BUT NO PLAYLIST PROTECTION")
         dz_message = ""
         dz_msg_screen = ""
         body_dz = ""
         body_dz_html = ""
         for playlist_name, playlist_data in monitored_playlists_data.items():
-            if DEBUG_JMK:
-                print_debug(f"-- CHECKING PLAYLIST {playlist_name}")
+            print_debug(f"-- CHECKING PLAYLIST {playlist_name}")
             if (playlist_name == playlist_name_to_protect):
                 # playlist_data['count_start'] = 0
                 playlist_data['count_end'] = 0
                 # playlist_data['count_shuffle'] = 0
-                if DEBUG_JMK:
-                    print_debug(f"-- PROTECTED PLAYLIST COUNTS (start: {playlist_data['count_start']}, end: {playlist_data['count_end']}, shuffle: {playlist_data['count_shuffle']}) -> {playlist_name}")
+                print_debug(f"-- PROTECTED PLAYLIST COUNTS (start: {playlist_data['count_start']}, end: {playlist_data['count_end']}, shuffle: {playlist_data['count_shuffle']}) -> {playlist_name}")
             else:
                 playlist_data['count_start'] = 0
                 playlist_data['count_end'] = 0
                 playlist_data['count_shuffle'] = 0
-                if DEBUG_JMK:
-                    print_debug(f"-- UNPROTECTED PLAYLIST COUNTS (start: {playlist_data['count_start']}, end: {playlist_data['count_end']}, shuffle: {playlist_data['count_shuffle']}) -> {playlist_name}")
+                print_debug(f"-- UNPROTECTED PLAYLIST COUNTS (start: {playlist_data['count_start']}, end: {playlist_data['count_end']}, shuffle: {playlist_data['count_shuffle']}) -> {playlist_name}")
 
     try:
         if csv_file_name:
@@ -4210,8 +4183,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
                 if JMK_MODE:
                     hasTrack = (sp_playlist_owner == "Spotify") or (search_playlist(sp_accessToken_oauth_app, sp_playlist, sp_playlist_uri, sp_track_uri_id, sp_track, sp_artist, False))
-                    if DEBUG_JMK:
-                        print_debug(f"hasTrack (A1): {hasTrack}, sp_playlist_owner: {sp_playlist_owner}, sp_playlist: {sp_playlist}")
+                    print_debug(f"hasTrack (A1): {hasTrack}, sp_playlist_owner: {sp_playlist_owner}, sp_playlist: {sp_playlist}")
                     if hasTrack:
                         for playlist_data in monitored_playlists_data.values():
                             if sp_playlist and (sp_playlist.upper() == playlist_data.get('name', "B").upper()):
@@ -4219,16 +4191,13 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                                 print_debug(f"hastrack Playlist Match (A2a): hastrack = FALSE, sp_playlist: {sp_playlist}")
                         print_debug(f"hasTrack (A2b): {hasTrack}, sp_playlist: {sp_playlist}")
                     
-                    if DEBUG_JMK:
-                        print_debug(f"hasTrack (A3): {hasTrack}, sp_playlist_owner: {sp_playlist_owner}")
+                    print_debug(f"hasTrack (A3): {hasTrack}, sp_playlist_owner: {sp_playlist_owner}")
 
-                    # if DEBUG_JMK:
-                        # if hasTrack:
-                            # print_debug(f"*** Track [{sp_track}] was found in playlist [{sp_playlist}{iconstring()}]")
+                    # if hasTrack:
+                        # print_debug(f"*** Track [{sp_track}] was found in playlist [{sp_playlist}{iconstring()}]")
                     if not hasTrack:
                         if (sp_playlist_owner != "Spotify"):
-                            if DEBUG_JMK:
-                                print_debug(f"SONG NOT IN REPORTED PLAYLIST (1)")
+                            print_debug(f"SONG NOT IN REPORTED PLAYLIST (1)")
                             print_to_log(f"*** ERROR: track [{sp_track}] NOT FOUND in playlist [{sp_playlist}] with owner [{sp_playlist_owner}] and uri [{sp_playlist_uri}]")
                             #sp_playlist = sp_playlist + ICON_SONG_MISSING_FROM_PLAYLIST
                             if ALT_VIEW and JMK_MODE: # 'hasTrack' is a JMK-specific code change
@@ -4241,8 +4210,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
 # this section is executed only during first boot up of script
 # ------------------------------------------------------------
-            if DEBUG_JMK:
-                print_debug(f"LOOP A - FIRST BOOT UP")
+            print_debug(f"LOOP A - FIRST BOOT UP")
             # must be in front of possible 'icon' appending or search URLs will errantly include the icon
             context_m_body = ""
             context_m_body_html = ""
@@ -4257,8 +4225,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
             else:
                 found_playlist = False
                 last_found_playlist = False
-                if DEBUG_JMK:
-                    print_debug(f"SKIPPED FIND_SONG IN_PLAYLIST (1A) -> hasTrack: {hasTrack}")                   
+                print_debug(f"SKIPPED FIND_SONG IN_PLAYLIST (1A) -> hasTrack: {hasTrack}")                   
 
             # if song is not in currently tracked playlist, but a different one, it might be an exception or the start of a new detected playlist
             if found_playlist and last_found_playlist and (found_playlist.get('name', 'A') != last_found_playlist.get('name', 'B')):
@@ -4280,23 +4247,19 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
             # playlist detected
             # if playlist changed, need to handle it as an exception first
             if found_playlist and new_playlist:
-                if DEBUG_JMK:
-                    print_debug(f"FOUND PLAYLIST IN MONITORING LIST (1) -> {found_playlist['name']}")
-                    print_debug(f"COUNT START: {found_playlist['count_start']}, {found_playlist['qty_start']}")
+                print_debug(f"FOUND PLAYLIST IN MONITORING LIST (1) -> {found_playlist['name']}")
+                print_debug(f"COUNT START: {found_playlist['count_start']}, {found_playlist['qty_start']}")
                 reset_playlist_counts(found_playlist['name'] if found_playlist else "")
                 found_playlist['count_start'] += 1
-                if DEBUG_JMK:
-                    print_debug(f"COUNT START +1: {found_playlist['count_start']}")
+                print_debug(f"COUNT START +1: {found_playlist['count_start']}")
                 if found_playlist.get('override', OVERRIDE_PLAYLIST_AT_START):
-                    if DEBUG_JMK:
-                        print_debug(f"FIRST BOOT PLAYLIST COUNT OVERRIDE")
-                        print_debug(f"OVERRIDE COUNT (1): from {found_playlist['count_start']} to {found_playlist['qty_start']}")
+                    print_debug(f"FIRST BOOT PLAYLIST COUNT OVERRIDE")
+                    print_debug(f"OVERRIDE COUNT (1): from {found_playlist['count_start']} to {found_playlist['qty_start']}")
                     if found_playlist['count_start'] < found_playlist['qty_start']:
                         found_playlist['count_start'] = found_playlist['qty_start']
                         count_overridden = True
                 if found_playlist['count_start'] >= found_playlist['qty_start']:
-                    if DEBUG_JMK:
-                        print_debug(f"PLAYLIST_DETECTED (1): {found_playlist['count_start']}, {found_playlist['qty_start']}")
+                    print_debug(f"PLAYLIST_DETECTED (1): {found_playlist['count_start']}, {found_playlist['qty_start']}")
                     is_playlist = True
                     sp_playlist = found_playlist['name']
                     sp_playlist_url = found_playlist.get('url', '')
@@ -4319,15 +4282,12 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                 # actually, if not allowing exception during counting up to > 2, may never get there since smart shuffle puts a new song every 3
                 # if last_found_playlist and (last_found_playlist['count_start'] >= last_found_playlist['qty_start']):
                 if last_found_playlist:
-                    if DEBUG_JMK:
-                        print_debug(f"COUNT END: {last_found_playlist['count_end']}")
+                    print_debug(f"COUNT END: {last_found_playlist['count_end']}")
                     last_found_playlist['count_end'] += 1
-                    if DEBUG_JMK:
-                        print_debug(f"COUNT END + 1: {last_found_playlist['count_end']}")
+                    print_debug(f"COUNT END + 1: {last_found_playlist['count_end']}")
                     if found_playlist:
                         found_playlist['count_start'] += 1
-                        if DEBUG_JMK:
-                            print_debug(f"COUNT START + 1 - {found_playlist['name']}: {found_playlist['count_start']}")
+                        print_debug(f"COUNT START + 1 - {found_playlist['name']}: {found_playlist['count_start']}")
                     if last_found_playlist['count_end'] >= last_found_playlist['qty_end']:
                         reset_playlist_counts(found_playlist['name'] if found_playlist else "")
                         count_overridden = False
@@ -4342,17 +4302,14 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                         sp_playlist_url = found_playlist.get('url', '')
                         playlist_m_body = f"\nPlaylist: {sp_playlist}{iconstring()}"
                         playlist_m_body_html = f"<br>Playlist: <a href=\"{sp_playlist_url}\">{escape(sp_playlist)}</a>"
-                        if DEBUG_JMK:
-                            print_debug(f"COUNT_SHUFFLE: {found_playlist['count_shuffle']}")
+                        print_debug(f"COUNT_SHUFFLE: {found_playlist['count_shuffle']}")
                         found_playlist['count_shuffle'] += 1
-                        if DEBUG_JMK:
-                            print_debug(f"COUNT SHUFFLE + 1: {found_playlist['count_shuffle']}")
+                        print_debug(f"COUNT SHUFFLE + 1: {found_playlist['count_shuffle']}")
                         # don't show icon in this case, but OK to show playlist with an *
                         # sp_track = sp_track + found_playlist.get('icon', '')
                         if ALT_VIEW:
                             icon_add = True
-                        if DEBUG_JMK:
-                            print_debug(f"HAVEN'T HIT LIMIT TO DISCONTINUE PLAYLIST (1) -> {found_playlist['name']}")
+                        print_debug(f"HAVEN'T HIT LIMIT TO DISCONTINUE PLAYLIST (1) -> {found_playlist['name']}")
                 else:
                     reset_playlist_counts()
                     count_overridden = False
@@ -4481,8 +4438,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
             # Friend is currently offline (does not play music)
             else:
-                if DEBUG_JMK:
-                    print_debug(f"LOOP A - BOOT - FRIEND INACTIVE")
+                print_debug(f"LOOP A - BOOT - FRIEND INACTIVE")
                 sp_active_ts_stop = sp_ts
                 print(f"\n*** Friend is OFFLINE for: {calculate_timespan(int(cur_ts), int(sp_ts))}")
 
@@ -4516,8 +4472,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
             # Print after timestamp
             if ALT_VIEW and jmk_send:
-                if DEBUG_JMK:
-                    print_debug(f"JMK SEND")
+                print_debug(f"JMK SEND")
 #                song_count = 1
                 print_to_screen(f" ")
                 print_to_screen(f"----------------------")               
@@ -4529,19 +4484,14 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                     found_playlist = find_song_in_playlists(dz_str, found_playlist, sp_playlist if is_playlist else "")
                 else:
                     found_playlist = False
-                    if DEBUG_JMK:
-                        print_debug(f"SKIPPED FIND_SONG_IN_PLAYLIST (1B) -> hasTrack: {hasTrack}")                   
-                if DEBUG_JMK:
-                    print_debug(f"PLAYLIST CHECK: {found_playlist}, {dz_str}")
+                    print_debug(f"SKIPPED FIND_SONG_IN_PLAYLIST (1B) -> hasTrack: {hasTrack}")                   
+                print_debug(f"PLAYLIST CHECK: {found_playlist}, {dz_str}")
 # this is executed during first boot up only
                 if found_playlist:
-                    if DEBUG_JMK:
-                        print_debug(f"PLAYLIST FOUND: count: {found_playlist['count_start']}")
+                    print_debug(f"PLAYLIST FOUND: count: {found_playlist['count_start']}")
                     if found_playlist['count_start'] >= found_playlist['qty_start']:
-                        if DEBUG_JMK:
-                            print_debug(f"BOOTUP PLAYLIST DETECTED")
-                        if DEBUG_JMK:
-                            print_debug(f"PLAYLIST_DETECT (1): {found_playlist['count_start']}")
+                        print_debug(f"BOOTUP PLAYLIST DETECTED")
+                        print_debug(f"PLAYLIST_DETECT (1): {found_playlist['count_start']}")
                         body_dz, body_dz_html, dz_message, dz_msg_screen = monitored_playlist_detected(found_playlist, songstring(), time_diff_str(), True, sp_track, sp_artist, sp_album)
                     else:
                         dz_message = build_dz_string(found_playlist)
@@ -4563,8 +4513,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
             if ALT_VIEW:
                 icon_add = False
             hastrack = False
-            if DEBUG_JMK:
-                print_debug(f"LOOP B - PRIMARY LOOP")
+            print_debug(f"LOOP B - PRIMARY LOOP")
             # Primary loop
             while True:
 
@@ -4772,8 +4721,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
                         if JMK_MODE:
                             hasTrack = (sp_playlist_owner == "Spotify") or (search_playlist(sp_accessToken_oauth_app, sp_playlist, sp_playlist_uri, sp_track_uri_id, sp_track, sp_artist, False))
-                            if DEBUG_JMK:
-                                print_debug(f"hasTrack (B1): {hasTrack}, sp_playlist_owner: {sp_playlist_owner}, sp_playlist: {sp_playlist}")
+                            print_debug(f"hasTrack (B1): {hasTrack}, sp_playlist_owner: {sp_playlist_owner}, sp_playlist: {sp_playlist}")
                             if hasTrack:
                                 for playlist_data in monitored_playlists_data.values():
                                     if sp_playlist and (sp_playlist.upper() == playlist_data.get('name', "B").upper()):
@@ -4781,13 +4729,11 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                                         print_debug(f"hastrack Playlist Match (B2a): hastrack = FALSE, sp_playlist: {sp_playlist}")
                                 print_debug(f"hasTrack (B2b): {hasTrack}, sp_playlist: {sp_playlist}")
 
-                            if DEBUG_JMK:
-                                print_debug(f"hasTrack (B3): {hasTrack}, sp_playlist_owner: {sp_playlist_owner}")
+                            print_debug(f"hasTrack (B3): {hasTrack}, sp_playlist_owner: {sp_playlist_owner}")
 
                             if not hasTrack:
                                 if (sp_playlist_owner != "Spotify"):
-                                    if DEBUG_JMK:
-                                        print_debug(f"SONG NOT IN REPORTED PLAYLIST (2)")
+                                    print_debug(f"SONG NOT IN REPORTED PLAYLIST (2)")
                                     print_to_log(f"ERROR: track: {sp_track}, NOT FOUND in playlist: {sp_playlist} ({sp_track})")
     #                                sp_playlist = sp_playlist + ICON_SONG_MISSING_FROM_PLAYLIST
                                     if ALT_VIEW and JMK_MODE: # 'hasTrack' is a JMK-specific code change
@@ -4821,8 +4767,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 # is that true?
 # below definitely does ("SONG NOT IN A MONITORED PLAYLIST (2)")
 # what's the difference?
-                    if DEBUG_JMK:
-                        print_debug(f"LOOP C - FOR ALL SONGS")
+                    print_debug(f"LOOP C - FOR ALL SONGS")
                     # move this in front of possible 'icon' appending or that will impact search URLs
                     # apple_search_url, genius_search_url, youtube_music_search_url = get_apple_genius_search_urls(str(sp_artist), str(sp_track))
                     apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url = get_apple_genius_search_urls(str(sp_artist), str(sp_track))
@@ -4890,18 +4835,15 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                     # playlist detected
                     # if playlist changed, need to handle it as an exception first
                     if found_playlist and new_playlist:
-                        if DEBUG_JMK:
-                            print_debug(f"FOUND PLAYLIST IN MONITORING LIST (2) -> {found_playlist['name']}")
-                            print_debug(f"COUNT START: {found_playlist['count_start']}, {found_playlist['qty_start']}")
+                        print_debug(f"FOUND PLAYLIST IN MONITORING LIST (2) -> {found_playlist['name']}")
+                        print_debug(f"COUNT START: {found_playlist['count_start']}, {found_playlist['qty_start']}")
                         reset_playlist_counts(found_playlist['name'] if found_playlist else "")
                         found_playlist['count_start'] += 1
-                        if DEBUG_JMK:
-                            print_debug(f"COUNT START + 1: {found_playlist['count_start']}")
+                        print_debug(f"COUNT START + 1: {found_playlist['count_start']}")
 
                         # count was high enough to trigger detection
                         if found_playlist['count_start'] >= found_playlist['qty_start']:
-                            if DEBUG_JMK:
-                                print_debug(f"PLAYLIST_DETECTED (2): {found_playlist['count_start']}, {found_playlist['qty_start']}")
+                            print_debug(f"PLAYLIST_DETECTED (2): {found_playlist['count_start']}, {found_playlist['qty_start']}")
                             is_playlist = True
                             sp_playlist = found_playlist['name']
                             sp_playlist_url = found_playlist.get('url', '')
@@ -4913,8 +4855,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                         if not ((cur_ts - sp_ts_old) > SPOTIFY_INACTIVITY_CHECK and sp_active_ts_stop > 0):
                             # enough to start playlist?
                             if found_playlist['count_start'] == found_playlist['qty_start']:
-                                if DEBUG_JMK:
-                                    print_debug(f"PLAYLIST_DETECT (2): {found_playlist['count_start']}")
+                                print_debug(f"PLAYLIST_DETECT (2): {found_playlist['count_start']}")
                                 body_dz, body_dz_html, dz_message, dz_msg_screen = monitored_playlist_detected(found_playlist, songstring(), time_diff_str(), False, sp_track, sp_artist, sp_album) # False is because dz_msg_screen is printed below in sequence after the song name gets printed
                             else:
                             # not enough to start playlist
@@ -4954,15 +4895,12 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                         # process a possible exception if last song was in a playlist (even if as exception) AND it's an active playlist (not counting up towards it)
                         # actually, if not allowing exception during counting up to > 2, may never get there since smart shuffle puts a new song every 3
                         # if last_found_playlist and (last_found_playlist['count_start'] >= last_found_playlist['qty_start']):
-                        if DEBUG_JMK:
-                            print_debug(f"ACTIVE USER, CHECKING FOR PLAYLIST (2)")
+                        print_debug(f"ACTIVE USER, CHECKING FOR PLAYLIST (2)")
                         if last_found_playlist:
-                            if DEBUG_JMK:
-                                print_debug(f"BUT LAST SONG WAS IN PLAYLIST")
-                                print_debug(f"COUNT END - {last_found_playlist['name']}: {last_found_playlist['count_end']}")
+                            print_debug(f"BUT LAST SONG WAS IN PLAYLIST")
+                            print_debug(f"COUNT END - {last_found_playlist['name']}: {last_found_playlist['count_end']}")
                             last_found_playlist['count_end'] += 1
-                            if DEBUG_JMK:
-                                print_debug(f"COUNT END + 1 - {last_found_playlist['name']}: {last_found_playlist['count_end']}")
+                            print_debug(f"COUNT END + 1 - {last_found_playlist['name']}: {last_found_playlist['count_end']}")
                             if found_playlist:
                                 found_playlist['count_start'] += 1
                                 print_debug(f"COUNT START + 1 - {found_playlist['name']}: {found_playlist['count_start']}")
@@ -5009,19 +4947,16 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                                     if ALT_VIEW:
                                         icon_add = True
                                 else:
-                                    if DEBUG_JMK:
-                                        print_debug(f"SPECIAL CASE 2: PLAYLIST FOUND BUT PREVIOUS ONE WAS STILL COUNTING UP -> {found_playlist['name']}")
+                                    print_debug(f"SPECIAL CASE 2: PLAYLIST FOUND BUT PREVIOUS ONE WAS STILL COUNTING UP -> {found_playlist['name']}")
 
-                                if DEBUG_JMK:
-                                    print_debug(f"HAVEN'T HIT LIMIT TO DISCONTINUE PLAYLIST (2) -> {found_playlist['name']}")
+                                print_debug(f"HAVEN'T HIT LIMIT TO DISCONTINUE PLAYLIST (2) -> {found_playlist['name']}")
                         else:
                             reset_playlist_counts()
                             count_overridden = False
                             #8/4/2025 fixed in reset_playlist_counts
                             #dz_message = ""
                         # else:
-                            # if DEBUG_JMK:
-                                # print_debug(f"INACTIVE USER, SKIPPING PLAYLIST CHECKS (2)")
+                            # print_debug(f"INACTIVE USER, SKIPPING PLAYLIST CHECKS (2)")
                             #---
                     listened_songs += 1
         # print song line if NOT just becoming active
@@ -5031,8 +4966,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                             print_to_screen(f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}")
                             send_notification(f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}", sp_album_image_url, sp_track, sp_artist, sp_album, (sp_playlist+iconstring()) if is_playlist else '', time_diff_str(), listened_songs)
                             if dz_msg_screen:
-                                if DEBUG_JMK:
-                                    print_debug(f"DZ_MSG_SCREEN: {dz_msg_screen}")
+                                print_debug(f"DZ_MSG_SCREEN: {dz_msg_screen}")
                                 print_to_screen(dz_msg_screen)
 
                     print(f"Spotify user:\t\t\t{sp_username}")
@@ -5159,8 +5093,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                         song_on_loop = 1
                         recent_songs_session = [{'artist': sp_artist, 'track': sp_track, 'timestamp': sp_ts, 'skipped': False}]
                         active_ever = True
-                        if DEBUG_JMK:
-                            print_debug(f"ACTIVE EVER: {active_ever} (3)")
+                        print_debug(f"ACTIVE EVER: {active_ever} (3)")
 
                         if FLAG_FILE:
                             flag_file_create()
@@ -5180,8 +5113,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                                 sp_active_ts_start = sp_active_ts_start_old
                         sp_active_ts_stop = 0
 
-                        if DEBUG_JMK:
-                            print_debug(f"LOOP C - FOR ALL SONGS - FRIEND ACTIVE AFTER BEING OFFLINE")
+                        print_debug(f"LOOP C - FOR ALL SONGS - FRIEND ACTIVE AFTER BEING OFFLINE")
                         if ALT_VIEW:
 #                            song_count = 1
                             print_to_screen(f" ")
@@ -5201,20 +5133,17 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                             else:
                                 found_playlist = False
                                 last_found_playlist = False
-                                if DEBUG_JMK:
-                                    print_debug(f"SKIPPED FIND_SONG_IN_PLAYLIST (3) -> hasTrack: {hasTrack}")                   
+                                print_debug(f"SKIPPED FIND_SONG_IN_PLAYLIST (3) -> hasTrack: {hasTrack}")                   
 
                             if found_playlist:
-                                if DEBUG_JMK:
-                                    print_debug(f"FOUND PLAYLIST IN MONITORING LIST (3) -> {found_playlist['name']}")
-                                    print_debug(f"COUNT START: {found_playlist['count_start']}, {found_playlist['qty_start']}")
+                                print_debug(f"FOUND PLAYLIST IN MONITORING LIST (3) -> {found_playlist['name']}")
+                                print_debug(f"COUNT START: {found_playlist['count_start']}, {found_playlist['qty_start']}")
 # already handled above for every song (2), THEN this (3) gets executed for the 'got ACTIVE' messaging
 # so this +1 is extra and double-counts
                                 # save_count = found_playlist['count_start']
                                 # reset_playlist_counts()
                                 # found_playlist['count_start'] = save_count + 1
-                                # if DEBUG_JMK:
-                                    # print_debug(f"COUNT START + 1: {found_playlist['count_start']}")
+                                # print_debug(f"COUNT START + 1: {found_playlist['count_start']}")
 
                                 # don't check to override count here; only do it when starting up, not when user starts back up later
                                 # count was high enough to trigger detection
@@ -5222,8 +5151,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 # so this is redundant
                                 # this is needed to cause detection messaging/notifications when user becomes active and already on a detected playlist
                                 if found_playlist['count_start'] >= found_playlist['qty_start']:
-                                    if DEBUG_JMK:
-                                        print_debug(f"PLAYLIST_DETECTED (3): {found_playlist['count_start']}, {found_playlist['qty_start']}")
+                                    print_debug(f"PLAYLIST_DETECTED (3): {found_playlist['count_start']}, {found_playlist['qty_start']}")
                                     is_playlist = True
                                     sp_playlist = found_playlist['name']
                                     sp_playlist_url = found_playlist.get('url', '')
@@ -5245,11 +5173,9 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                                 # actually, if not allowing exception during counting up to > 2, may never get there since smart shuffle puts a new song every 3
                                 # if last_found_playlist and (last_found_playlist['count_start'] >= last_found_playlist['qty_start']):
                                 # if last_found_playlist:
-                                    # if DEBUG_JMK:
-                                        # print_debug(f"COUNT END: {last_found_playlist['count_end']}")
+                                    # print_debug(f"COUNT END: {last_found_playlist['count_end']}")
                                     # last_found_playlist['count_end'] += 1
-                                    # if DEBUG_JMK:
-                                        # print_debug(f"COUNT END + 1: {last_found_playlist['count_end']}")
+                                    # print_debug(f"COUNT END + 1: {last_found_playlist['count_end']}")
                                     # if last_found_playlist['count_end'] >= last_found_playlist['qty_end']:
                                         # # limit achieved
                                         # # reset_playlist_counts()
@@ -5264,8 +5190,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                                         # # sp_track = sp_track + found_playlist.get('icon', '')
                                         # if ALT_VIEW:
                                             # icon_add = True
-                                        # if DEBUG_JMK:
-                                            # print_debug(f"HAVEN'T HIT LIMIT TO DISCONTINUE PLAYLIST (3) -> {found_playlist['name']}")
+                                        # print_debug(f"HAVEN'T HIT LIMIT TO DISCONTINUE PLAYLIST (3) -> {found_playlist['name']}")
                                 # # else:
                                     # reset_playlist_counts()
 
@@ -5395,8 +5320,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                 # Track has not changed
                 else:
                     # Removed because it happens every 9 minutes (timeout)
-                    # if DEBUG_JMK:
-                        # print_debug(f"LOOP C - FOR ALL SONGS - SONG HAS NOT CHANGED")
+                    # print_debug(f"LOOP C - FOR ALL SONGS - SONG HAS NOT CHANGED")
                     alive_counter += 1
                     # Friend got inactive
                     if (cur_ts - sp_ts) > SPOTIFY_INACTIVITY_CHECK and sp_active_ts_start > 0:
