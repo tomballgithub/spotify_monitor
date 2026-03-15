@@ -159,7 +159,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v2.9
+v2.9.1
 
 Tool implementing real-time tracking of Spotify friends music activity:
 https://github.com/misiektoja/spotify_monitor/
@@ -175,7 +175,7 @@ wcwidth (optional, needed by TRUNCATE_CHARS feature)
 spotipy (required since v2.7 due to new Spotify restrictions introduced on 22 Dec 2025)
 """
 
-VERSION = "2.9"
+VERSION = "2.9.1"
 
 # API 401 error means sp_dc cookie has expired. Lasts one year. 03/15/2025
 
@@ -624,13 +624,13 @@ TOKEN_RETRY_TIMEOUT = 0.5  # 0.5 second
 # Newest secrets are downloaded automatically from SECRET_CIPHER_DICT_URL (see below)
 # Can also be fetched via spotify_monitor_secret_grabber.py utility - see debug dir
 SECRET_CIPHER_DICT = {
-#    "61": [44, 55, 47, 42, 70, 40, 34, 114, 76, 74, 50, 111, 120, 97, 75, 76, 94, 102, 43, 69, 49, 120, 118, 80, 64, 78],
+    "61": [44, 55, 47, 42, 70, 40, 34, 114, 76, 74, 50, 111, 120, 97, 75, 76, 94, 102, 43, 69, 49, 120, 118, 80, 64, 78],
 }
 
 # Remote or local URL used to fetch updated secrets needed for TOTP generation
 # Set to empty string to disable
 # If you used "spotify_monitor_secret_grabber.py --secretdict > secretDict.json" specify the file location below
-SECRET_CIPHER_DICT_URL = "https://github.com/xyloflake/spot-secrets-go/blob/main/secrets/secretDict.json?raw=true"
+SECRET_CIPHER_DICT_URL = "https://raw.githubusercontent.com/xyloflake/spot-secrets-go/main/secrets/secretDict.json"
 # SECRET_CIPHER_DICT_URL = file:///C:/your_path/secretDict.json
 # SECRET_CIPHER_DICT_URL = "file:///your_path/secretDict.json"
 
