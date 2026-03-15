@@ -265,6 +265,8 @@ VERSION = "2.9.1"
 # 2025/02/22: Fixed exception crash if error (but not 404) occurs during fetching playlist image URL
 # 2025/02/27: Fixed exception crash if error (but not 404) occurs during spotify_get_playlist_owner
 # 2025/02/28: Fixed missing 'discovery zone cleared' messages
+# 2025/03/14: Check DEBUG_JMK within print_debug, eliminating all those IF statements. Rename JMK_DEBUG to DEBUG_JMK
+# 2025/03/14: Rename 'texts' to 'notify'
 
 # bugs and to-dos:
 # start/end texts include DZ count if > 0?
@@ -894,7 +896,7 @@ CONFIGCAT_EMAIL_SONGS_TRACKED = ""
 CONFIGCAT_EMAIL_SONGS_LOOPED  = ""
 CONFIGCAT_TIMER_INCREASE      = ""
 CONFIGCAT_TIMER_DECREASE      = ""
-CONFIGCAT_TEXTS               = ""
+CONFIGCAT_NOTIFY              = ""
 CONFIGCAT_DZ_ALERTS           = ""
 CONFIGCAT_ORIG_EMAILS         = ""
 CONFIGCAT_USERNAME_LEGACY = ""
@@ -916,7 +918,7 @@ INITIAL_STARTUP = True
 USER_ID       = ""
 GMAIL_TAG     = ""
 ERR_CODE      = ""
-SEND_TEXTS    = False
+SEND_NOTIFY   = False
 DZ_ALERTS     = False
 ORIG_EMAILS   = False
 SHOW_CONFIGCAT_FLAGS = True
@@ -1407,9 +1409,9 @@ def configcat_set_flag(flag_id, flag_value, username, password, sdkkey):
     return(response)
 
 def configcat_on_config_changed(config_data):
-    global SEND_TEXTS, DZ_ALERTS, ORIG_EMAILS, USER_ID, SHOW_CONFIGCAT_FLAGS # Needed to modify global variables
+    global SEND_NOTIFY, DZ_ALERTS, ORIG_EMAILS, USER_ID, SHOW_CONFIGCAT_FLAGS # Needed to modify global variables
 
-    TEXTS_FLAG = CONFIGCAT_TEXTS + USER_ID
+    NOTIFY_FLAG = CONFIGCAT_NOTIFY + USER_ID
     DZ_ALERTS_FLAG = CONFIGCAT_DZ_ALERTS + USER_ID
     ORIG_EMAILS_FLAG = CONFIGCAT_ORIG_EMAILS + USER_ID
 
@@ -1421,34 +1423,34 @@ def configcat_on_config_changed(config_data):
         # --- Extract new values from the config_data dictionary ---
         # Use .get() for safe access in case keys or nested structures are missing
         # The final '.get('b', None)' fetches the boolean value, defaulting to None if not found
-        raw_send_texts  = config_data.get(TEXTS_FLAG, {}).get('v', {}).get('b', None)
+        raw_send_notify  = config_data.get(NOTIFY_FLAG, {}).get('v', {}).get('b', None)
         raw_dz_alerts   = config_data.get(DZ_ALERTS_FLAG, {}).get('v', {}).get('b', None)
         raw_orig_emails = config_data.get(ORIG_EMAILS_FLAG, {}).get('v', {}).get('b', None)
         # --- Apply Fallback Logic ---
         # If a value wasn't found in config_data (raw_* is None), keep the existing global value.
         # Otherwise, use the value extracted from config_data.
-        new_send_texts  = SEND_TEXTS if raw_send_texts is None else raw_send_texts
+        new_send_notify  = SEND_NOTIFY if raw_send_notify is None else raw_send_notify
         new_dz_alerts   = DZ_ALERTS if raw_dz_alerts is None else raw_dz_alerts
         new_orig_emails = ORIG_EMAILS if raw_orig_emails is None else raw_orig_emails
 
         # --- Log toggled flags (if not suppressed) ---
         if SHOW_CONFIGCAT_FLAGS and not INITIAL_STARTUP:
-            if SEND_TEXTS != new_send_texts:
-                print(f"\nsendtexts flag toggled to: {new_send_texts}\n")
+            if SEND_NOTIFY != new_send_notify:
+                print(f"\nsend notifications flag toggled to: {new_send_notify}\n")
             if DZ_ALERTS != new_dz_alerts:
                 print(f"\ndz_alerts flag toggled to: {new_dz_alerts}\n")
             if ORIG_EMAILS != new_orig_emails:
                 print(f"\norig_emails flag toggled to: {new_orig_emails}\n")
 
         # --- Update Global Variables ---
-        SEND_TEXTS = new_send_texts
+        SEND_NOTIFY = new_send_notify
         DZ_ALERTS = new_dz_alerts
         ORIG_EMAILS = new_orig_emails
 
-        if (SHOW_CONFIGCAT_FLAGS and INITIAL_STARTUP) or (SHOW_CONFIGCAT_FLAGS and (raw_send_texts or raw_dz_alerts or raw_orig_emails)):
+        if (SHOW_CONFIGCAT_FLAGS and INITIAL_STARTUP) or (SHOW_CONFIGCAT_FLAGS and (raw_send_notify or raw_dz_alerts or raw_orig_emails)):
             print(f"      -----")
-            print(f"      Discovery Zone alerts:      {DZ_ALERTS!s:5} {'  (flag missing via Configcat)' if raw_send_texts is None else ''}")
-            print(f"      Send SMS for updates:       {SEND_TEXTS!s:5} {'  (flag missing via Configcat)' if raw_dz_alerts is None else ''}")
+            print(f"      Discovery Zone alerts:      {DZ_ALERTS!s:5} {'  (flag missing via Configcat)' if raw_dz_alerts is None else ''}")
+            print(f"      Send SMS for updates:       {SEND_NOTIFY!s:5} {'  (flag missing via Configcat)' if raw_send_notify is None else ''}")
             print(f"      Send standard emails:       {ORIG_EMAILS!s:5} {'  (flag missing via Configcat)' if raw_orig_emails is None else ''}")
             print("")
 
@@ -3900,7 +3902,7 @@ def notify_playlist_detected(notify_playlist, songstr, timediff, track, artist, 
     dz_msg_screen = f"{timestring()}: {ERR_CODE}, [{timediff}] *** Playlist '{notify_playlist['name']}' Detected"
     if notify_playlist.get('notify', NOTIFY_PLAYLIST_DETECTED):
         send_email(f"{GMAIL_TAG}----------------- {notify_playlist['name']} Detected -----", "  ", "  ", SMTP_SSL)
-        if SEND_TEXTS:
+        if SEND_NOTIFY:
             dz_message = f"*** Playlist '{notify_playlist['name']}' Detected: {songstr}"
             # send_notification(dz_message)
             send_notification(dz_message, "", track, artist, album, notify_playlist['name'], "", 0)
@@ -3912,7 +3914,7 @@ def notify_playlist_cleared(notify_playlist, songstr, timediff, track, artist, a
     dz_msg_screen = f"{timestring()}: {ERR_CODE}, [{timediff}] *** Playlist '{notify_playlist['name']}' Cleared, Song Count: {notify_playlist['count_start']}"
     if notify_playlist.get('notify', NOTIFY_PLAYLIST_DETECTED):
         send_email(f"{GMAIL_TAG}----------------- {notify_playlist['name']} Cleared -----", "  ", "  ", SMTP_SSL)
-        if SEND_TEXTS:
+        if SEND_NOTIFY:
             # send_notification(dz_message)
             send_notification(dz_message, "", track, artist, album, notify_playlist['name'], "", notify_playlist['count_start'])
     return dz_message, dz_msg_screen
@@ -4501,7 +4503,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                 print_to_screen(f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}")
                 send_notification(f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}", sp_album_image_url, sp_track, sp_artist, sp_album, (sp_playlist+iconstring()) if is_playlist else '', time_diff_str(), listened_songs)
 
-                if SEND_TEXTS:
+                if SEND_NOTIFY:
                     # send_notification(f"START: {songstring()}", sp_album_image_url)
                     send_notification(f"START: {songstring()}", sp_playlist_image_url if sp_playlist_image_url else sp_album_image_url, sp_track, sp_artist, sp_album, (sp_playlist+iconstring()) if is_playlist else '')
 
@@ -5197,7 +5199,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                             #---
                             print_to_screen(f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}")
                             send_notification(f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}", sp_album_image_url, sp_track, sp_artist, sp_album, (sp_playlist+iconstring()) if is_playlist else '', time_diff_str(), listened_songs)
-                            if SEND_TEXTS:
+                            if SEND_NOTIFY:
                                 # send_notification(f"START: {songstring()}", sp_album_image_url)
                                 send_notification(f"START: {songstring()}", sp_playlist_image_url if sp_playlist_image_url else sp_album_image_url, sp_track, sp_artist, sp_album, (sp_playlist+iconstring()) if is_playlist else '')
                              
@@ -5355,7 +5357,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
                         if JMK_MODE:
                             print_to_both(f"{timestring()}: {ERR_CODE}, *** End notification sent")
-                            if SEND_TEXTS:
+                            if SEND_NOTIFY:
                                 # send_notification(f"END: [{time_diff_str()}]: {songstring()}, Song Count: {listened_songs}", sp_album_image_url)
                                 send_notification(f"END: [{time_diff_str()}]: {songstring()}, Song Count: {listened_songs}", sp_playlist_image_url if sp_playlist_image_url else sp_album_image_url, sp_track, sp_artist, sp_album, (sp_playlist+iconstring()) if is_playlist else '', time_diff_str(), listened_songs)
 
@@ -5480,7 +5482,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
 def main():
     global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_CHECK_COUNTER, LOGIN_REQUEST_BODY_FILE, CLIENTTOKEN_REQUEST_BODY_FILE, REFRESH_TOKEN, LOGIN_URL, USER_AGENT, DEVICE_ID, SYSTEM_ID, USER_URI_ID, SP_DC_COOKIE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, DEBUG_MODE, SP_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, ERROR_NOTIFICATION, SPOTIFY_CHECK_INTERVAL, SPOTIFY_INACTIVITY_CHECK, SPOTIFY_ERROR_INTERVAL, SPOTIFY_DISAPPEARED_CHECK_INTERVAL, TRACK_SONGS, SMTP_PASSWORD, stdout_bck, APP_VERSION, CPU_ARCH, OS_BUILD, PLATFORM, OS_MAJOR, OS_MINOR, CLIENT_MODEL, TOKEN_SOURCE, ALARM_TIMEOUT, pyotp, USER_AGENT, FLAG_FILE, TRUNCATE_CHARS, SP_APP_TOKENS_FILE, SP_APP_CLIENT_ID, SP_APP_CLIENT_SECRET
-    global ALT_VIEW, JMK_MODE, INITIAL_STARTUP, GMAIL_TAG, ERR_CODE, SEND_TEXTS, DZ_ALERTS, ORIG_EMAILS, USER_ID, ALT_COOKIE, ADD_PLAYLISTS_TO_MONITOR, DEBUG_JMK
+    global ALT_VIEW, JMK_MODE, INITIAL_STARTUP, GMAIL_TAG, ERR_CODE, SEND_NOTIFY, DZ_ALERTS, ORIG_EMAILS, USER_ID, ALT_COOKIE, ADD_PLAYLISTS_TO_MONITOR, DEBUG_JMK
     global FINAL_LOG_PATH, log_logger
 
     log_logger = None  # Initialize to None
@@ -5864,7 +5866,7 @@ def main():
         LOGIN_REQUEST_BODY_FILE = LOGIN_REQUEST_BODY_FILE2
         GMAIL_TAG    = GMAIL_TAG2
         ERR_CODE     = ERR_CODE2
-        SEND_TEXTS   = SEND_TEXTS2
+        SEND_NOTIFY  = SEND_NOTIFY2
         DZ_ALERTS    = DZ_ALERTS2
         ORIG_EMAILS  = ORIG_EMAILS2
         USER_ID      = USER_ID2
