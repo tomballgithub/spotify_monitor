@@ -266,6 +266,7 @@ VERSION = "2.9"
 # 2025/02/19: Fixed duplicate listened_songs += 1 introduced with catching up to latest code base
 # 2025/02/22: Fixed exception crash if error (but not 404) occurs during fetching playlist image URL
 # 2025/02/27: Fixed exception crash if error (but not 404) occurs during spotify_get_playlist_owner
+# 2025/02/28: Fixed missing 'discovery zone cleared' messages
 
 # bugs and to-dos:
 # start/end texts include DZ count if > 0?
@@ -4412,8 +4413,9 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
             # Friend is currently active (listens to music)
             if (cur_ts - sp_ts) <= SPOTIFY_INACTIVITY_CHECK:
-                if DEBUG_JMK:
-                    print_debug(f"LOOP A - BOOT - FRIEND ACTIVE")
+                active_ever = True # added 2/28/2026
+                print_debug(f"ACTIVE EVER: {active_ever} (0)")
+                print_debug(f"LOOP A - BOOT - FRIEND ACTIVE")
                 if JMK_MODE:
                     sp_active_ts_start = sp_ts # reset start time to [00] instead starting at length of the first song (ex:[04])
                 else:
@@ -4422,8 +4424,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                 listened_songs = 1
                 song_on_loop = 1
                 recent_songs_session = [{'artist': sp_artist, 'track': sp_track, 'timestamp': sp_ts, 'skipped': False}]
-                if DEBUG_JMK:
-                    print_debug(f"ACTIVE EVER: {active_ever} (1)")
+                print_debug(f"ACTIVE EVER: {active_ever} (1)")
                 print("\n*** Friend is currently ACTIVE !")
 
                 if FLAG_FILE:
@@ -4826,8 +4827,9 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                     # apple_search_url, genius_search_url, youtube_music_search_url = get_apple_genius_search_urls(str(sp_artist), str(sp_track))
                     apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url = get_apple_genius_search_urls(str(sp_artist), str(sp_track))
 
-                    if DEBUG_JMK:
-                        print_debug(f"SONG CHANGE -> {sp_artist} - {sp_track}")
+                    print_debug(f"SONG CHANGE -> {sp_artist} - {sp_track}")
+                    print_debug(f"ACTIVE EVER: {active_ever} (2)")
+                    print_debug(f"hasTrack: {hasTrack}")
                     #---
                     dz_msg_screen = ""
                     dz_str = f"{sp_artist} - {sp_track}"
@@ -4835,20 +4837,41 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                     if not hasTrack:
                         found_playlist = find_song_in_playlists(dz_str, found_playlist, sp_playlist if is_playlist else "")
                     else:
+                        # DZ cleared is lost here - 2/28/2026 try to fix #jmk
+                        if active_ever and last_found_playlist:
+                            print_debug(f"last_found_playlist: {last_found_playlist}")
+                            print_debug(f"songstring(): {songstring}, time_diff_str: {time_diff_str}")
+                            print_debug(f"sp_track: {sp_track}, sp_artist: {sp_artist}, sp_album: {sp_album}")
+                            dz_message, dz_msg_screen = monitored_playlist_cleared(last_found_playlist, songstring(), time_diff_str(), sp_track, sp_artist, sp_album)
+                            print_debug(f"dz_message: {dz_message}, dz_msg_screen: {dz_msg_screen}")
+                            if ALT_VIEW:
+                                print_to_screen(dz_msg_screen) # could get overwritten in next section
+                                dz_msg_screen = "" # prevent duplicate printing below
+                        # reset after 'monitored_playlist_cleared' to ensure 'song count' is available for it
+                        reset_playlist_counts(found_playlist['name'] if found_playlist else "") 
+                        count_overridden = False
+                        # DZ cleared is lost here - 2/28/2026 try to fix #jmk
+
+                        # copied above here from just below where it's not triggering due to the next two lines
                         found_playlist = False
                         last_found_playlist = False
-                        if DEBUG_JMK:
-                            print_debug(f"SKIPPED FIND_SONG_IN_PLAYLIST (2) -> hasTrack: {hasTrack}")                   
+                        
+                        print_debug(f"SKIPPED FIND_SONG_IN_PLAYLIST (2) -> hasTrack: {hasTrack}")                   
                     # if song is not in currently tracked playlist, but a different one, it might be an exception or the start of a new detected playlist
+                    if DEBUG_JMK:
+                        if found_playlist:
+                            print_debug(f"playlist A: {found_playlist.get('name', 'A')}")
+                        if last_found_playlist:
+                            print_debug(f"playlist B: {last_found_playlist.get('name', 'B')}")
                     if found_playlist and last_found_playlist and (found_playlist.get('name', 'A') != last_found_playlist.get('name', 'B')):
                     # if this song puts currently tracked playlist over the exception limit, then it can be start of a newly detected playlist
+                        print_debug(f"count_end: {last_found_playlist['count_end']}, qty_end: {last_found_playlist['qty_end']}")
                         if last_found_playlist['count_end'] >= (last_found_playlist['qty_end']):
                             new_playlist = True
                             print_debug(f"SPECIAL CASE: SONG IN ANOTHER MONITORED PLAYLIST, AT EXCEPTION LIMIT FOR CURRENT (2) - old: {last_found_playlist.get('name', 'A')} new: {found_playlist.get('name', 'A')}")
                             # force notify_playlist_cleared before going down code path for new playlist
                             # skip if never active after boot, because any existing monitored playlist was 'assumed'
-                            if DEBUG_JMK:
-                                print_debug(f"ACTIVE EVER: {active_ever} (2)")
+                            print_debug(f"ACTIVE EVER: {active_ever} (2)")
                             if active_ever:
                                 dz_message, dz_msg_screen = monitored_playlist_cleared(last_found_playlist, songstring(), time_diff_str(), sp_track, sp_artist, sp_album)
                             if ALT_VIEW:
@@ -4942,8 +4965,10 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                                 print_debug(f"COUNT END + 1 - {last_found_playlist['name']}: {last_found_playlist['count_end']}")
                             if found_playlist:
                                 found_playlist['count_start'] += 1
-                                if DEBUG_JMK:
-                                    print_debug(f"COUNT START + 1 - {found_playlist['name']}: {found_playlist['count_start']}")
+                                print_debug(f"COUNT START + 1 - {found_playlist['name']}: {found_playlist['count_start']}")
+
+                            print_debug(f"count_end: {last_found_playlist['count_end']}, qty_end: {last_found_playlist['qty_end']}")
+
                             if last_found_playlist['count_end'] >= last_found_playlist['qty_end']:
                                 # limit achieved
                                 # 7/31: actually don't want to show a "cleared" message when first coming up
@@ -4952,10 +4977,19 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                                 # only clear if last playlist was active
                                 if last_found_playlist['count_start'] >= last_found_playlist['qty_start']:
                                     dz_message, dz_msg_screen = monitored_playlist_cleared(last_found_playlist, songstring(), time_diff_str(), sp_track, sp_artist, sp_album)
+
+                                #jmkfix 2/28/2026
+                                if ALT_VIEW:
+                                    print_to_screen(dz_msg_screen) # could get overwritten in next section
+                                    dz_msg_screen = "" # prevent duplicate printing below
                                 # reset after 'monitored_playlist_cleared' to ensure 'song count' is available for it
-                                
-                                #jmkfix this will delete the dz_messages from _cleared call just above
                                 reset_playlist_counts(found_playlist['name'] if found_playlist else "") 
+                                count_overridden = False
+                                
+                                #jmkfix 2/28/2026
+                                # # reset after 'monitored_playlist_cleared' to ensure 'song count' is available for it
+                                # #jmkfix this will delete the dz_messages from _cleared call just above
+                                # reset_playlist_counts(found_playlist['name'] if found_playlist else "") 
                                 
                                 #8/4/2025 fixed in reset_playlist_counts
                                 # dz_message = ""
