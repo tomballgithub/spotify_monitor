@@ -159,7 +159,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v2.9.1
+v2.9.2
 
 Tool implementing real-time tracking of Spotify friends music activity:
 https://github.com/misiektoja/spotify_monitor/
@@ -175,7 +175,7 @@ wcwidth (optional, needed by TRUNCATE_CHARS feature)
 spotipy (required since v2.7 due to new Spotify restrictions introduced on 22 Dec 2025)
 """
 
-VERSION = "2.9.1"
+VERSION = "2.9.2"
 
 # API 401 error means sp_dc cookie has expired. Lasts one year. 03/15/2025
 
@@ -2602,16 +2602,24 @@ def fetch_server_time(session: req.Session, ua: str) -> int:
     return int(parsedate_to_datetime(date_hdr).timestamp())
 
 
+# Resolves the effective TOTP version, falling back to the highest available when the configured TOTP_VER is missing from SECRET_CIPHER_DICT
+def resolve_totp_ver() -> int:
+    if not SECRET_CIPHER_DICT:
+        raise SecretsUnavailableError("resolve_totp_ver(): SECRET_CIPHER_DICT is empty")
+    if TOTP_VER and str(TOTP_VER) in SECRET_CIPHER_DICT:
+        return TOTP_VER
+    available = sorted(map(int, SECRET_CIPHER_DICT))
+    fallback = available[-1]
+    if TOTP_VER:
+        print(f"Warning: configured TOTP_VER ({TOTP_VER}) is missing from SECRET_CIPHER_DICT (available: {available}); falling back to auto-selected version {fallback}")
+    return fallback
+
+
 # Creates a TOTP object using a secret derived from transformed cipher bytes
 def generate_totp():
     import pyotp
 
-    if not SECRET_CIPHER_DICT:
-        raise SecretsUnavailableError("generate_totp(): SECRET_CIPHER_DICT is empty")
-
-    ver = TOTP_VER or max(map(int, SECRET_CIPHER_DICT))
-    if str(ver) not in SECRET_CIPHER_DICT:
-        raise SecretsUnavailableError(f"generate_totp(): Defined TOTP_VER ({ver}) is missing in SECRET_CIPHER_DICT")
+    ver = resolve_totp_ver()
 
     secret_cipher_bytes = SECRET_CIPHER_DICT[str(ver)]
 
@@ -2704,7 +2712,7 @@ def refresh_access_token_from_sp_dc(sp_dc: str) -> dict:
     client_time = int(time_ns() / 1000 / 1000)
     otp_value = totp_obj.at(server_time)
 
-    totp_ver = TOTP_VER or max(map(int, SECRET_CIPHER_DICT))
+    totp_ver = resolve_totp_ver()
 
     params = {
         "reason": "transport",
@@ -2829,7 +2837,10 @@ def spotify_get_access_token_from_sp_dc(sp_dc: str):
             last_error = str(e)
             debug_print(f"TOTP secrets unavailable: {e}")
             if fetch_and_update_secrets():
-                debug_print("TOTP secrets updated, retrying token refresh immediately")
+                debug_print("TOTP secrets updated, retrying token refresh")
+                retry += 1
+                if retry < max_retries:
+                    time.sleep(TOKEN_RETRY_TIMEOUT)
                 continue
             raise RuntimeError(f"Failed to obtain TOTP secrets for token refresh: {e}")
         except Exception as e:
