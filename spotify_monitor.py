@@ -261,6 +261,7 @@ VERSION = "2.9.2"
 # 2025/02/28: Fixed missing 'discovery zone cleared' messages
 # 2025/03/14: Check DEBUG_JMK within print_debug, eliminating all those IF statements. Rename JMK_DEBUG to DEBUG_JMK
 # 2025/03/14: Rename 'texts' to 'notify'
+# 2025/07/12: Added code to update google sheet directly (via Claude)
 # 2025/07/13: Removed configcat
 
 # bugs and to-dos:
@@ -864,6 +865,10 @@ ALT_VIEW = False
 ALT_COOKIE = False
 DISCOVERY_ZONE_FOUND_COUNT = 3
 DISCOVERY_ZONE_EXCEPTIONS_ALLOWED = 1
+UPDATE_SPREADSHEET = False
+SPREADSHEET_ID = ""
+GOOGLE_OAUTH_CLIENT_FILE = ""
+GOOGLE_OAUTH_TOKEN_FILE = ""
 #DZ_PLAYLIST_NAME = "Discovery Zone"
 #LIKED_PLAYLIST_NAME = "Liked Songs"
 INITIAL_STARTUP = True
@@ -984,6 +989,7 @@ from typing import Optional
 from email.utils import parsedate_to_datetime
 import uuid #jmk ntfy album/song images
 import ntfy #jmk ntfy
+import sheets_helper
 
 import urllib3
 if not VERIFY_SSL:
@@ -1806,6 +1812,55 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
         print(f"Error sending email: {e}")
         return 1
     return 0
+
+
+# Text used for the sheet row inserted when a new listening session starts (mirrors the divider
+# email sent alongside it); matches the visual divider row previously produced when the Apps
+# Script sliced the "SpotifyJ ---------------------------------" subject down to its tail
+SPREADSHEET_DIVIDER_TEXT = "-" * 21
+
+
+# Writes one row to the spreadsheet tab matching the active ERR_CODE (if UPDATE_SPREADSHEET is
+# enabled), draining any previously queued rows first. Sends an error email/ntfy alert the moment
+# a write failure starts queuing rows, and a recovery email/ntfy alert the moment the queue fully
+# drains again - not on every retry in between.
+# When want_footer is True, returns the "spreadsheet updated"/"spreadsheet error" text to append
+# to a song-change email body (blank strings otherwise, or when UPDATE_SPREADSHEET is disabled).
+def update_spreadsheet_row(col_b_text, want_footer):
+    if not UPDATE_SPREADSHEET:
+        return "", ""
+
+    # Date-only, matching the legacy Apps Script column (which stored msg.getDate() but the sheet
+    # displays date-only) - the clock time already lives at the front of col_b_text, so putting a
+    # full timestamp here too would be redundant and renders differently (date+time) than the
+    # existing rows above it.
+    row_ts = datetime.now().strftime("%Y-%m-%d")
+    success, entered_error, recovered = sheets_helper.update_spreadsheet(ERR_CODE, SPREADSHEET_ID, ERR_CODE, [row_ts, col_b_text], GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE)
+
+    if entered_error:
+        print(f"* Error: failed to update Google Sheet (tab '{ERR_CODE}') - row queued for retry")
+        if ERROR_NOTIFICATION:
+            err_subject = f"spotify_monitor: failed to update Google Sheet (tab '{ERR_CODE}') - row queued for retry"
+            err_body = f"Could not write to the spreadsheet (tab '{ERR_CODE}'). The row has been queued locally and will be retried automatically on the next check.\n\nRow: {row_ts} | {col_b_text}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+            err_body_html = f"<html><head></head><body>Could not write to the spreadsheet (tab '{escape(ERR_CODE)}'). The row has been queued locally and will be retried automatically on the next check.<br><br>Row: {escape(row_ts)} | {escape(col_b_text)}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
+            send_email(err_subject, err_body, err_body_html, SMTP_SSL)
+        if SEND_NOTIFY:
+            send_notification(f"spotify_monitor: Google Sheet update failed (tab '{ERR_CODE}') - row queued for retry")
+    elif recovered:
+        print(f"* Google Sheet (tab '{ERR_CODE}') queue caught up")
+        if ERROR_NOTIFICATION:
+            rec_subject = f"spotify_monitor: Google Sheet (tab '{ERR_CODE}') caught up"
+            rec_body = f"The spreadsheet queue has been fully drained and the sheet (tab '{ERR_CODE}') is now up to date.{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+            rec_body_html = f"<html><head></head><body>The spreadsheet queue has been fully drained and the sheet (tab '{escape(ERR_CODE)}') is now up to date.{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
+            send_email(rec_subject, rec_body, rec_body_html, SMTP_SSL)
+        if SEND_NOTIFY:
+            send_notification(f"spotify_monitor: Google Sheet (tab '{ERR_CODE}') caught up")
+
+    if not want_footer:
+        return "", ""
+    if success:
+        return "\n\nspreadsheet updated", "<br><br>spreadsheet updated"
+    return "\n\nspreadsheet error", "<br><br>spreadsheet error"
 
 
 # Initializes the CSV file
@@ -3703,6 +3758,7 @@ def resolve_executable(path):
 def notify_playlist_detected(notify_playlist, songstr, timediff, track, artist, album):
     dz_msg_screen = f"{timestring()}: {ERR_CODE}, [{timediff}] *** Playlist '{notify_playlist['name']}' Detected"
     if notify_playlist.get('notify', NOTIFY_PLAYLIST_DETECTED):
+        update_spreadsheet_row(f"----------------- {notify_playlist['name']} Detected -----", False)
         send_email(f"{GMAIL_TAG}----------------- {notify_playlist['name']} Detected -----", "  ", "  ", SMTP_SSL)
         if SEND_NOTIFY:
             dz_message = f"*** Playlist '{notify_playlist['name']}' Detected: {songstr}"
@@ -3715,6 +3771,7 @@ def notify_playlist_cleared(notify_playlist, songstr, timediff, track, artist, a
     dz_message = f"*** Playlist '{notify_playlist['name']}' Cleared: {songstr} - Song Count: {notify_playlist['count_start']}"
     dz_msg_screen = f"{timestring()}: {ERR_CODE}, [{timediff}] *** Playlist '{notify_playlist['name']}' Cleared, Song Count: {notify_playlist['count_start']}"
     if notify_playlist.get('notify', NOTIFY_PLAYLIST_DETECTED):
+        update_spreadsheet_row(f"----------------- {notify_playlist['name']} Cleared -----", False)
         send_email(f"{GMAIL_TAG}----------------- {notify_playlist['name']} Cleared -----", "  ", "  ", SMTP_SSL)
         if SEND_NOTIFY:
             # send_notification(dz_message)
@@ -4227,7 +4284,11 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                     m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{sp_artist_url}\">{escape(sp_artist)}</a> - <a href=\"{sp_track_url}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{playlist_m_body_html}<br>Album: <a href=\"{sp_album_url}\">{escape(sp_album)}</a>{context_m_body_html}{music_section_html}{lyrics_section_html}Songs played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})<br><br>Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
                     print(f"Sending email notification to {RECEIVER_EMAIL}")
                     if JMK_MODE:
+                        update_spreadsheet_row(SPREADSHEET_DIVIDER_TEXT, False)
                         send_email(f"{GMAIL_TAG}---------------------------------", "  ", "  ", SMTP_SSL)
+                        song_footer_txt, song_footer_html = update_spreadsheet_row(f"{datetime.now().strftime('%H:%M:%S')} {songstring()}", True)
+                        m_body += song_footer_txt
+                        m_body_html = m_body_html.replace("</body></html>", song_footer_html + "</body></html>")
                         send_email(f"{GMAIL_TAG}[{time_diff_str()}] {timestring()} {songstring()}", m_body, m_body_html, SMTP_SSL)
                     if not JMK_MODE or ORIG_EMAILS:
                         send_email(m_subject, m_body, m_body_html, SMTP_SSL)
@@ -5032,9 +5093,14 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                         if ACTIVE_NOTIFICATION:
                             print(f"Sending email notification to {RECEIVER_EMAIL}")
                             email_sent = True
+                            if JMK_MODE:
+                                song_footer_txt, song_footer_html = update_spreadsheet_row(f"{datetime.now().strftime('%H:%M:%S')} {songstring()}", True)
+                                m_body += song_footer_txt
+                                m_body_html = m_body_html.replace("</body></html>", song_footer_html + "</body></html>")
                             if not JMK_MODE or ORIG_EMAILS:
                                 send_email(m_subject, m_body, m_body_html, SMTP_SSL)
                             if JMK_MODE:
+                                update_spreadsheet_row(SPREADSHEET_DIVIDER_TEXT, False)
                                 send_email(f"{GMAIL_TAG}---------------------------------", "  ", "  ", SMTP_SSL)
                                 send_email(f"{GMAIL_TAG}[{time_diff_str()}] {timestring()} {songstring()}", m_body, m_body_html, SMTP_SSL)
 
@@ -5099,6 +5165,9 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                         print(f"Sending email notification to {RECEIVER_EMAIL}")
                         email_sent = True
                         if JMK_MODE:
+                            song_footer_txt, song_footer_html = update_spreadsheet_row(f"{datetime.now().strftime('%H:%M:%S')} {songstring()}", True)
+                            m_body += song_footer_txt
+                            m_body_html = m_body_html.replace("</body></html>", song_footer_html + "</body></html>")
                             send_email(f"{GMAIL_TAG}[{time_diff_str()}] {timestring()} {songstring()}", m_body, m_body_html, SMTP_SSL)
                         if not JMK_MODE or ORIG_EMAILS:
                             send_email(m_subject, m_body, m_body_html, SMTP_SSL)
@@ -5284,7 +5353,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
 def main():
     global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_CHECK_COUNTER, LOGIN_REQUEST_BODY_FILE, CLIENTTOKEN_REQUEST_BODY_FILE, REFRESH_TOKEN, LOGIN_URL, USER_AGENT, DEVICE_ID, SYSTEM_ID, USER_URI_ID, SP_DC_COOKIE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, DEBUG_MODE, SP_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, ERROR_NOTIFICATION, SPOTIFY_CHECK_INTERVAL, SPOTIFY_INACTIVITY_CHECK, SPOTIFY_ERROR_INTERVAL, SPOTIFY_DISAPPEARED_CHECK_INTERVAL, TRACK_SONGS, SMTP_PASSWORD, stdout_bck, APP_VERSION, CPU_ARCH, OS_BUILD, PLATFORM, OS_MAJOR, OS_MINOR, CLIENT_MODEL, TOKEN_SOURCE, ALARM_TIMEOUT, pyotp, USER_AGENT, FLAG_FILE, TRUNCATE_CHARS, SP_APP_TOKENS_FILE, SP_APP_CLIENT_ID, SP_APP_CLIENT_SECRET
-    global ALT_VIEW, JMK_MODE, INITIAL_STARTUP, GMAIL_TAG, ERR_CODE, SEND_NOTIFY, DZ_ALERTS, ORIG_EMAILS, USER_ID, ALT_COOKIE, ADD_PLAYLISTS_TO_MONITOR, DEBUG_JMK
+    global ALT_VIEW, JMK_MODE, INITIAL_STARTUP, GMAIL_TAG, ERR_CODE, SEND_NOTIFY, DZ_ALERTS, ORIG_EMAILS, USER_ID, ALT_COOKIE, ADD_PLAYLISTS_TO_MONITOR, DEBUG_JMK, UPDATE_SPREADSHEET
     global FINAL_LOG_PATH, log_logger
 
     log_logger = None  # Initialize to None
@@ -5674,6 +5743,7 @@ def main():
         USER_ID      = USER_ID2
         ADD_PLAYLISTS_TO_MONITOR = ADD_PLAYLISTS_TO_MONITOR2
         DEBUG_JMK    = DEBUG_JMK2
+        UPDATE_SPREADSHEET = UPDATE_SPREADSHEET2
 
     if args.jmk:
         JMK_MODE = True
@@ -5980,6 +6050,7 @@ def main():
         print(f"* Flag file:\t\t\t{FLAG_FILE}")
     print(f"* Configuration file:\t\t{cfg_path}")
     print(f"* Dotenv file:\t\t\t{env_path or 'None'}\n")
+    print(f"* Spreadsheet updates:\t\t{UPDATE_SPREADSHEET}" + (f" (tab: {ERR_CODE})" if UPDATE_SPREADSHEET else ""))
 
     # We define signal handlers only for Linux, Unix & MacOS since Windows has limited number of signals supported
     if platform.system() != 'Windows':
