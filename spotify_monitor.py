@@ -117,7 +117,6 @@
 #?? NO printed *** notifications----------------------
 #?? made print_to_screen write to log if DEBUG to log is enabled
 #?? configurable debug to write to screen/log/none
-#?? Configcat support for legacy flags
 #?? PR - flag file delete at start
 #?? PR - wrong comment (-l) reference
 #?? use generic routine of send_notification instead of send_sms
@@ -211,8 +210,6 @@ VERSION = "2.9.2"
 # 2025/04/04: Updated spotify_profile_monitor to avoid this due to spotify fetch error: *** Load Tracks: Fri Apr  4 06:20:35 2025, 1 songs [was: 302] in dz_songs.txt [0 duplicates removed]
 # 2025/04/06: Don't overwrite valid existing playlist name to [liked songs]
 # 2025/04/11: Remove 2nd space between timestamp and song names in JMK_MODE emails
-# 2025/04/14: Added configcat support
-# 2025/04/15: Setup configcat internal error logging to go to log file and not screen
 # 2025/04/16: Add a \n in DZ message before "DZ Count & DZ Playlist" to put those on another line
 # 2025/04/16: Strip \n from text messages in send_sms
 # 2025/04/16: Change formatting of the SUCCESS and ERROR logged events in send_sms
@@ -226,11 +223,8 @@ VERSION = "2.9.2"
 # 2025/06/21: Don't show songs played on first boot when active
 # 2025/06/25: Removed redundant variables for tracks_upper (used) and sp_tracks (unused)
 # 2025/06/25: Removed song_count variable, since it's already there (listened_songs)
-# 2025/06/27: Configcat can be used to control runtime info instead of SIGUSR/etc that are Linux-only
-# 2025/06/28: Hide ConfigCat JSON fetch errors
 # 2025/06/28: Show elapsed-session-time after "Songs Played:" on each email update
 # 2025/06/28: Fixed truncation by treating tabs as spaces. Removed subtracting two from screen width during truncation auto-calculation
-# 2025/06/28: Added ConfigCat feature flag definitions for Jeoff's special items into the .CONF file
 # 2025/06/29: Optional flag file to indicate streaming state to other apps
 # 2025/06/29: Fix first email not going out for [00] song when user becomes active in JMK_MODE
 # 2025/07/02: Pull in latest source changes
@@ -267,11 +261,11 @@ VERSION = "2.9.2"
 # 2025/02/28: Fixed missing 'discovery zone cleared' messages
 # 2025/03/14: Check DEBUG_JMK within print_debug, eliminating all those IF statements. Rename JMK_DEBUG to DEBUG_JMK
 # 2025/03/14: Rename 'texts' to 'notify'
+# 2025/07/13: Removed configcat
 
 # bugs and to-dos:
 # start/end texts include DZ count if > 0?
 # *** PR: identify playlists via song lists and auto-refresh
-# *** PR: use configcat to refresh cookie & directly update values (documentation, configuration, boottime data - refresh & emails, error level)
 # *** PR: NTFY (a free notification service would be better)
 # profile monitor: * Error, retrying in 5 minutes: fetch_server_time() head network request error: HTTPSConnectionPool(host='open.spotify.com', port=443): Read timed out. (read timeout=15)
 # *** alternate notification method (pushover, gotify, ntfy.sh )
@@ -768,27 +762,6 @@ CLIENT_MODEL = 34404
 # Leave empty to auto-generate from USER_AGENT
 APP_VERSION = ""
 
-# ---------------------------------------------------------------------
-
-# The following is for using the ConfigCat feature flag service to control features during run-time.
-# The primary way is detailed in the documentation under 'Signal Controls (macOS/Linux/Unix)'
-# This method works for any operating system supported by ConfigCat, which has a free tier sufficient for this.
-
-# Replace with the USERNAME (API Key) and PASSWORD (API Secret) generated in the ConfigCat Dashboard via 'My API Credentials'.
-# The SDK_KEY is is provided via the 'View SDK Key' button.
-CONFIGCAT_USERNAME = ""
-CONFIGCAT_PASSWORD = ""
-CONFIGCAT_SDK_KEY  = ""
-
-# Name of each flag assigned in ConfigCat (it's OK to remove ones you will not use)
-CONFIGCAT_RELOAD_SECRETS      = ""
-CONFIGCAT_EMAIL_USERS         = ""
-CONFIGCAT_EMAIL_SONGS_ALL     = ""
-CONFIGCAT_EMAIL_SONGS_TRACKED = ""
-CONFIGCAT_EMAIL_SONGS_LOOPED  = ""
-CONFIGCAT_TIMER_INCREASE      = ""
-CONFIGCAT_TIMER_DECREASE      = ""
-
 """
 
 # -------------------------
@@ -886,23 +859,6 @@ FLAG_FILE = ""
 TRUNCATE_CHARS = 0
 SPOTIFY_SUFFIX = ""
 
-CONFIGCAT_USERNAME = ""
-CONFIGCAT_PASSWORD = ""
-CONFIGCAT_SDK_KEY  = ""
-CONFIGCAT_RELOAD_SECRETS      = ""
-CONFIGCAT_EMAIL_USERS         = ""
-CONFIGCAT_EMAIL_SONGS_ALL     = ""
-CONFIGCAT_EMAIL_SONGS_TRACKED = ""
-CONFIGCAT_EMAIL_SONGS_LOOPED  = ""
-CONFIGCAT_TIMER_INCREASE      = ""
-CONFIGCAT_TIMER_DECREASE      = ""
-CONFIGCAT_NOTIFY              = ""
-CONFIGCAT_DZ_ALERTS           = ""
-CONFIGCAT_ORIG_EMAILS         = ""
-CONFIGCAT_USERNAME_LEGACY = ""
-CONFIGCAT_PASSWORD_LEGACY = ""
-CONFIGCAT_SDK_KEY_LEGACY  = ""
-
 JMK_MODE = False
 ALT_VIEW = False
 ALT_COOKIE = False
@@ -921,7 +877,6 @@ ERR_CODE      = ""
 SEND_NOTIFY   = False
 DZ_ALERTS     = False
 ORIG_EMAILS   = False
-SHOW_CONFIGCAT_FLAGS = True
 SP_DC_COOKIE2 = ""
 LOGIN_REQUEST_BODY_FILE2 = ""
 LOAD_TRACKS_FREQUENCY = 3600 # 1 hour
@@ -937,9 +892,6 @@ NTFY_TOPIC_JMK = "jeoff_spotify_stream_jmk"
 from datetime import timezone
 import threading
 
-from configcatclient.configcatclient import ConfigCatClient
-from configcatclient.configcatoptions import ConfigCatOptions, Hooks
-from configcatclient.pollingmode import PollingMode
 import logging
 from io import StringIO, BytesIO
 from PIL import Image
@@ -951,7 +903,7 @@ DEFAULT_CONFIG_FILENAME = "spotify_monitor.conf"
 
 # List of secret keys to load from env/config
 SECRET_KEYS = ("REFRESH_TOKEN", "SP_DC_COOKIE", "SMTP_PASSWORD", "SP_APP_CLIENT_ID", "SP_APP_CLIENT_SECRET")
-SECRET_KEYS+= ("SP_DC_COOKIE2", "CONFIGCAT_USERNAME", "CONFIGCAT_PASSWORD", "CONFIGCAT_SDK_KEY", "CONFIGCAT_USERNAME_LEGACY", "CONFIGCAT_PASSWORD_LEGACY", "CONFIGCAT_SDK_KEY_LEGACY")
+SECRET_KEYS+= ("SP_DC_COOKIE2", ) # comma needed to make this a tuple, otherwise error
 
 # Strings removed from track names for generating proper Genius search URLs
 re_search_str = r'remaster|extended|original mix|remix|original soundtrack|radio( |-)edit|\(feat\.|( \(.*version\))|( - .*version)'
@@ -1339,198 +1291,37 @@ def send_ntfy(message, image_url, track, artist, album, playlist, timediffstr, c
             unique_filename = f"{uuid.uuid4().hex}.jpeg"
             full_local_path = os.path.join(local_directory, unique_filename)
             
-            print(f"NTFY Saving resized image to: {full_local_path}")
+            print_debug(f"NTFY Saving resized image to: {full_local_path}")
             canvas.save(full_local_path, format='JPEG')
             
             # Step 3: Construct the public URL for the 'Attach' header
             attach_url = f"{public_base_url}{unique_filename}"
             
-            # print("NTFY Notification sent successfully! ✅")
+            # print_debug("NTFY Notification sent successfully! ✅")
 
         except req.exceptions.RequestException as e:
-            print(f"NTFY: Image generation error: {e}")
+            print_debug(f"NTFY: Image generation error: {e}")
         except Exception as e:
-            print(f"NTFY: Image generation error: {e}")
+            print_debug(f"NTFY: Image generation error: {e}")
     else:
         attach_url = ""
 
     try:
         # Prepare the ntfy request
         # Step 4: Send the ntfy request with the multi-line message in the body
-        print(f"Sending notification, NTFY Body: {body}")
+        print_debug(f"Sending notification, NTFY Body: {body}")
 
-        if ntfy.send_ntfy(topic, title, body, priority, tags=emoji, attach=attach_url, verbose=True):
+        if jmk_send_ntfy(title, body, topic=topic, priority=priority, tags=emoji, attach=attach_url, verbose=0, verify_verbose=0):
             print_debug(f"NTFY Notification sent successfully! ✅: {body}")
-
+ 
     except Exception as e:
-        print(f"NTFY: An unexpected error occurred: {e}")
+        debug_print(f"NTFY: An unexpected error occurred: {e}")
         img_error = True
     
 
 def send_notification(message, image_url="", track="", artist="", album="", playlist="", timediffstr="", count=0):
     send_ntfy(message, image_url, track.strip(), artist.strip(), album.strip(), playlist.strip(), timediffstr.strip(), count)
     
-def configcat_on_ready():
-#    print("✅ Client is ready.")
-    pass
-
-def configcat_on_error(error):
-    if not str(error).startswith("Request timed out while trying to fetch config JSON") and not str(error).startswith("Unexpected error occurred while trying to fetch config JSON"):
-        print_to_log(f"❌ ConfigCat Error: {error}\n")
-
-def configcat_set_flag(flag_id, flag_value, username, password, sdkkey):
-    """
-    Retrieves a specific ConfigCat product by its ID.
-    """
-    url = f"https://api.configcat.com/v2/settings/{flag_id}/value"
-
-    # Encode credentials for Basic Authentication
-    credentials = f"{CONFIGCAT_USERNAME}:{CONFIGCAT_PASSWORD}"
-    encoded_credentials = base64.b64encode(credentials.encode()).decode()
-
-    headers = {
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-        "X-CONFIGCAT-SDKKEY": f"{CONFIGCAT_SDK_KEY}",
-        "Authorization": f"Basic {encoded_credentials}"
-    }
-
-    try:
-        response = req.get(url, headers=headers)
-        response.raise_for_status()  # Raise an exception for bad status codes (4xx or 5xx)
-        payload = response.json()
-        payload['defaultValue']['boolValue'] = flag_value
-        response = req.put(url, headers=headers, data=json.dumps(payload))
-
-    except req.exceptions.RequestException as e:
-        print(f"Error setting Configcat feature flag '{flag_id}': {e}")
-        return None
-
-    return(response)
-
-def configcat_on_config_changed(config_data):
-    global SEND_NOTIFY, DZ_ALERTS, ORIG_EMAILS, USER_ID, SHOW_CONFIGCAT_FLAGS # Needed to modify global variables
-
-    NOTIFY_FLAG = CONFIGCAT_NOTIFY + USER_ID
-    DZ_ALERTS_FLAG = CONFIGCAT_DZ_ALERTS + USER_ID
-    ORIG_EMAILS_FLAG = CONFIGCAT_ORIG_EMAILS + USER_ID
-
-    if SHOW_CONFIGCAT_FLAGS:
-#    print(f"🔄 Configuration has changed: {config_data}")
-        pass
-
-    try:
-        # --- Extract new values from the config_data dictionary ---
-        # Use .get() for safe access in case keys or nested structures are missing
-        # The final '.get('b', None)' fetches the boolean value, defaulting to None if not found
-        raw_send_notify  = config_data.get(NOTIFY_FLAG, {}).get('v', {}).get('b', None)
-        raw_dz_alerts   = config_data.get(DZ_ALERTS_FLAG, {}).get('v', {}).get('b', None)
-        raw_orig_emails = config_data.get(ORIG_EMAILS_FLAG, {}).get('v', {}).get('b', None)
-        # --- Apply Fallback Logic ---
-        # If a value wasn't found in config_data (raw_* is None), keep the existing global value.
-        # Otherwise, use the value extracted from config_data.
-        new_send_notify  = SEND_NOTIFY if raw_send_notify is None else raw_send_notify
-        new_dz_alerts   = DZ_ALERTS if raw_dz_alerts is None else raw_dz_alerts
-        new_orig_emails = ORIG_EMAILS if raw_orig_emails is None else raw_orig_emails
-
-        # --- Log toggled flags (if not suppressed) ---
-        if SHOW_CONFIGCAT_FLAGS and not INITIAL_STARTUP:
-            if SEND_NOTIFY != new_send_notify:
-                print(f"\nsend notifications flag toggled to: {new_send_notify}\n")
-            if DZ_ALERTS != new_dz_alerts:
-                print(f"\ndz_alerts flag toggled to: {new_dz_alerts}\n")
-            if ORIG_EMAILS != new_orig_emails:
-                print(f"\norig_emails flag toggled to: {new_orig_emails}\n")
-
-        # --- Update Global Variables ---
-        SEND_NOTIFY = new_send_notify
-        DZ_ALERTS = new_dz_alerts
-        ORIG_EMAILS = new_orig_emails
-
-        if (SHOW_CONFIGCAT_FLAGS and INITIAL_STARTUP) or (SHOW_CONFIGCAT_FLAGS and (raw_send_notify or raw_dz_alerts or raw_orig_emails)):
-            print(f"      -----")
-            print(f"      Discovery Zone alerts:      {DZ_ALERTS!s:5} {'  (flag missing via Configcat)' if raw_dz_alerts is None else ''}")
-            print(f"      Send SMS for updates:       {SEND_NOTIFY!s:5} {'  (flag missing via Configcat)' if raw_send_notify is None else ''}")
-            print(f"      Send standard emails:       {ORIG_EMAILS!s:5} {'  (flag missing via Configcat)' if raw_orig_emails is None else ''}")
-            print("")
-
-    except Exception as err: # Catch potential errors during dictionary access
-        print("Config Data Access Error", readconfigID, logging.ERROR) # Use ERROR level
-        print(f"Error details: {err}", readconfigID, logging.ERROR)
-
-    if SHOW_CONFIGCAT_FLAGS and not INITIAL_STARTUP:
-        print_cur_ts("Timestamp:\t\t\t")
-
-
-def configcat_on_config_changed_new(config_data):    
-# 7/27/2025 this is via a 2nd configcat instantiation, so don't need this
-    # if JMK_MODE:
-        # configcat_on_config_changed(config_data)
-        
-    # if SHOW_CONFIGCAT_FLAGS:
-        # print(f"🔄 Configuration has changed: {config_data}")
-        # pass
-
-    try:
-        # --- Extract new values from the config_data dictionary ---
-        # Use .get() for safe access in case keys or nested structures are missing
-        # The final '.get('b', None)' fetches the boolean value, defaulting to None if not found
-        raw_reload         = config_data.get(CONFIGCAT_RELOAD_SECRETS,      {}).get('v', {}).get('b', None)
-        raw_users          = config_data.get(CONFIGCAT_EMAIL_USERS,         {}).get('v', {}).get('b', None)
-        raw_songs_all      = config_data.get(CONFIGCAT_EMAIL_SONGS_ALL,     {}).get('v', {}).get('b', None)
-        raw_songs_tracked  = config_data.get(CONFIGCAT_EMAIL_SONGS_TRACKED, {}).get('v', {}).get('b', None)
-        raw_songs_looped   = config_data.get(CONFIGCAT_EMAIL_SONGS_LOOPED,  {}).get('v', {}).get('b', None)
-        raw_timer_increase = config_data.get(CONFIGCAT_TIMER_INCREASE,      {}).get('v', {}).get('b', None)
-        raw_timer_decrease = config_data.get(CONFIGCAT_TIMER_DECREASE,      {}).get('v', {}).get('b', None)
-
-        if (SHOW_CONFIGCAT_FLAGS and INITIAL_STARTUP) or (SHOW_CONFIGCAT_FLAGS and (raw_reload or raw_users or raw_songs_all or raw_songs_tracked or raw_songs_looped or raw_timer_increase or raw_timer_decrease)):
-            print(f"*** Configuration Flags Loaded")
-            print(f"      Reload Secrets:             {raw_reload}")
-            print(f"      Email user active/inactive: {raw_users}")
-            print(f"      Email on songs, all:        {raw_songs_all}")
-            print(f"      Email on songs, tracked:    {raw_songs_tracked}")
-            print(f"      Email on songs, looped:     {raw_songs_looped}")
-            print(f"      Increase inactivity timer:  {raw_timer_increase}")
-            print(f"      Decrease inactivity timer:  {raw_timer_decrease}")
-        if not JMK_MODE:
-            print("")
-
-        if raw_reload:
-            result = configcat_set_flag(CONFIGCAT_RELOAD_SECRETS, False, CONFIGCAT_USERNAME, CONFIGCAT_PASSWORD, CONFIGCAT_SDK_KEY)
-            reload_secrets_signal_handler(f"'Configcat {CONFIGCAT_RELOAD_SECRETS}'", None)
-        
-        if raw_users:
-            result = configcat_set_flag(CONFIGCAT_EMAIL_USERS, False, CONFIGCAT_USERNAME, CONFIGCAT_PASSWORD, CONFIGCAT_SDK_KEY)
-            toggle_active_inactive_notifications_signal_handler(f"'Configcat {CONFIGCAT_EMAIL_USERS}'", None)
-
-        if raw_songs_all:
-            result = configcat_set_flag(CONFIGCAT_EMAIL_SONGS_ALL, False, CONFIGCAT_USERNAME, CONFIGCAT_PASSWORD, CONFIGCAT_SDK_KEY)
-            toggle_song_notifications_signal_handler(f"'Configcat {CONFIGCAT_EMAIL_SONGS_ALL}'", None)
-
-        if raw_songs_tracked:
-            result = configcat_set_flag(CONFIGCAT_EMAIL_SONGS_TRACKED, False, CONFIGCAT_USERNAME, CONFIGCAT_PASSWORD, CONFIGCAT_SDK_KEY)
-            toggle_track_notifications_signal_handler(f"'Configcat {CONFIGCAT_EMAIL_SONGS_TRACKED}'", None)
-
-        if raw_songs_looped:
-            result = configcat_set_flag(CONFIGCAT_EMAIL_SONGS_LOOPED, False, CONFIGCAT_USERNAME, CONFIGCAT_PASSWORD, CONFIGCAT_SDK_KEY)
-            toggle_songs_on_loop_notifications_signal_handler(f"'Configcat {CONFIGCAT_EMAIL_SONGS_LOOPED}'", None)
-
-        if raw_timer_increase:
-            result = configcat_set_flag(CONFIGCAT_TIMER_INCREASE, False, CONFIGCAT_USERNAME, CONFIGCAT_PASSWORD, CONFIGCAT_SDK_KEY)
-            increase_inactivity_check_signal_handler(f"'Configcat {CONFIGCAT_TIMER_INCREASE}'", None)
-
-        if raw_timer_decrease:
-            result = configcat_set_flag(CONFIGCAT_TIMER_DECREASE, False, CONFIGCAT_USERNAME, CONFIGCAT_PASSWORD, CONFIGCAT_SDK_KEY)
-            decrease_inactivity_check_signal_handler(f"'Configcat {CONFIGCAT_TIMER_DECREASE}'", None)
-
-    except Exception as e:
-        print(f"Error during Configcat processing: {e}")
-        return None
-
-    if SHOW_CONFIGCAT_FLAGS and not INITIAL_STARTUP:
-        print_cur_ts("Timestamp:\t\t\t")
-
-    return
 
 def spotify_get_playlist_items(access_token, playlist_uri, fields, limit, offset, oauth_app=False):
     print_debug(f"spotify_get_playlist_items")
@@ -6143,39 +5934,6 @@ def main():
         #both_logger = Logger(FINAL_LOG_PATH, mode="both")
 
     
-    ## BEGIN SETUP CONFIGCAT - must be after custom log is set up because the error logging routine uses print_to_log
-    if JMK_MODE:
-        hooks = Hooks()
-        hooks.add_on_config_changed(configcat_on_config_changed_new)
-        hooks.add_on_error(configcat_on_error)
-        client = ConfigCatClient.get(CONFIGCAT_SDK_KEY,
-            ConfigCatOptions(
-                polling_mode=PollingMode.auto_poll(poll_interval_seconds=60), hooks=hooks
-            )
-        )
-        client.force_refresh()
-        logger = logging.getLogger('configcat')
-        logger.setLevel(logging.CRITICAL) # all errors are still handled by the error handler routine (configcat_on_error) and sent to log
-    ## END SETUP CONFIGCAT
-
-    ## BEGIN SETUP CONFIGCAT - must be after custom log is set up because the error logging routine uses print_to_log
-    if JMK_MODE:
-        hooks_legacy = Hooks()
-        hooks_legacy.add_on_config_changed(configcat_on_config_changed)
-        hooks_legacy.add_on_error(configcat_on_error)
-        client = ConfigCatClient.get(CONFIGCAT_SDK_KEY_LEGACY,
-            ConfigCatOptions(
-                polling_mode=PollingMode.auto_poll(poll_interval_seconds=60), hooks=hooks_legacy
-            )
-        )
-        client.force_refresh()
-        print_cur_ts("Timestamp:\t\t\t")
-
-# #handled in previous conficat initialization
-        # logger = logging.getLogger('configcat')
-        # logger.setLevel(logging.CRITICAL) # all errors are still handled by the error handler routine (configcat_on_error) and sent to log
-    ## END SETUP CONFIGCAT
-
     if args.notify_active is True:
         ACTIVE_NOTIFICATION = True
 
