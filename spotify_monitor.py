@@ -261,6 +261,7 @@ VERSION = "2.9.2"
 # 2025/02/28: Fixed missing 'discovery zone cleared' messages
 # 2025/03/14: Check DEBUG_JMK within print_debug, eliminating all those IF statements. Rename JMK_DEBUG to DEBUG_JMK
 # 2025/03/14: Rename 'texts' to 'notify'
+# 2025/04/19: Fixed errant blank line
 # 2025/07/12: Added code to update google sheet directly (via Claude)
 # 2025/07/13: Removed configcat
 
@@ -4783,7 +4784,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
                                 #jmkfix 2/28/2026
                                 if ALT_VIEW:
-                                    print_to_screen(dz_msg_screen) # could get overwritten in next section
+                                    #4/19 jmk creating a blank line: print_to_screen(dz_msg_screen) # could get overwritten in next section
                                     dz_msg_screen = "" # prevent duplicate printing below
                                 # reset after 'monitored_playlist_cleared' to ensure 'song count' is available for it
                                 reset_playlist_counts(found_playlist['name'] if found_playlist else "") 
