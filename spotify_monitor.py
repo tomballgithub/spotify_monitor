@@ -5734,7 +5734,7 @@ def main():
     if not check_internet():
         sys.exit(1)
 
-    if args.alt_cookie:
+    if args.alt_cookie or ALT_COOKIE:
         ALT_COOKIE   = True
         SP_DC_COOKIE = SP_DC_COOKIE2
         LOGIN_REQUEST_BODY_FILE = LOGIN_REQUEST_BODY_FILE2
