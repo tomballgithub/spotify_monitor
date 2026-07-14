@@ -1134,7 +1134,8 @@ def print_to_screen(message):
 def print_debug(message):
     """Prints to the log file and/or screen, depending on configuration."""
     if DEBUG_JMK:
-        message = "DEBUG: " + message
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        message = f"[DEBUG {timestamp}] {message}"
         if not DISABLE_LOGGING:
             if DEBUG_JMK in (1, 2):
                 log_logger.write(str(message).expandtabs(8) + "\n")
@@ -1274,16 +1275,16 @@ def send_ntfy(message, image_url, track, artist, album, playlist, timediffstr, c
     if NTFY_IMAGES and image_url: # don't do this if ""
         try:
             # Step 1: Download and process the image
-            print(f"NTFY Downloading image... {image_url}")
+            print_debug(f"NTFY Downloading image... {image_url}")
             response = req.get(image_url)
             response.raise_for_status()
             
             content_fit = (160, 160)
             original_img = Image.open(BytesIO(response.content))
-            print(f"NTFY Original image dimensions: {original_img.size}")
+            print_debug(f"NTFY Original image dimensions: {original_img.size}")
             resized_img = original_img.copy()
             resized_img.thumbnail(content_fit, Image.LANCZOS)
-            print(f"NTFY Resized image dimensions: {resized_img.size}")
+            print_debug(f"NTFY Resized image dimensions: {resized_img.size}")
             
             target_size=(400, 160)
             # background_color="black"
@@ -1385,11 +1386,11 @@ def search_playlist(access_token, search_playlist_name, search_playlist_uri, sea
             # print_debug(f"-- playlist_offset: {playlist_offset}, playlist_size: {playlist_size}")
 
             if not context_json or 'items' not in context_json:
-                print("searchPlaylist error: No items in playlist response")
+                debug_print("searchPlaylist error: No items in playlist response")
                 break
 
             if show_size and playlist_offset == 0:
-                print(f"playlist size: {playlist_size}")
+                debug_print(f"playlist size: {playlist_size}")
 
             # Updated search logic per 3/28/2025 ChatGPT change to check all artists not just [0]
             found_track = any(
@@ -1403,7 +1404,7 @@ def search_playlist(access_token, search_playlist_name, search_playlist_uri, sea
             playlist_offset += playlist_limit
 
     except Exception as err:
-        print(f"searchPlaylist error: {err}")
+        debug_print(f"searchPlaylist error: {err}")
 
     return found_track
 
