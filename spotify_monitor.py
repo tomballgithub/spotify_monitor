@@ -264,6 +264,7 @@ VERSION = "2.9.2"
 # 2025/04/19: Fixed errant blank line
 # 2025/07/12: Added code to update google sheet directly (via Claude)
 # 2025/07/13: Removed configcat
+# 2025/07/13: Added printing of JMK added items in configuration items at startup`
 
 # bugs and to-dos:
 # start/end texts include DZ count if > 0?
@@ -6051,7 +6052,12 @@ def main():
         print(f"* Flag file:\t\t\t{FLAG_FILE}")
     print(f"* Configuration file:\t\t{cfg_path}")
     print(f"* Dotenv file:\t\t\t{env_path or 'None'}\n")
+    print(f"* Visual Mode:\t\t\t" + (f"Alternate" if JMK_MODE else "Standard") + (f" (with DEBUG_JMK level {DEBUG_JMK})" if JMK_MODE else ""))
+    print(f"* Send original emails:\t\t{ORIG_EMAILS}")
+    print(f"* Send NTFY notifications:\t{SEND_NOTIFY}")
+    print(f"* Discovery Zone Alerts:\t{DZ_ALERTS}")
     print(f"* Spreadsheet updates:\t\t{UPDATE_SPREADSHEET}" + (f" (tab: {ERR_CODE})" if UPDATE_SPREADSHEET else ""))
+    print("")
 
     # We define signal handlers only for Linux, Unix & MacOS since Windows has limited number of signals supported
     if platform.system() != 'Windows':
