@@ -990,7 +990,7 @@ import secrets
 from typing import Optional
 from email.utils import parsedate_to_datetime
 import uuid #jmk ntfy album/song images
-import ntfy #jmk ntfy
+from jmktools.ntfy import send_ntfy as jmk_send_ntfy, NTFY_STATUS_HIDE, NTFY_STATUS, NTFY_ALERTS, NTFY_STATUS_HIDE, NTFY_STATUS, NTFY_ALERTS #jmk ntfy
 import sheets_helper
 
 import urllib3
