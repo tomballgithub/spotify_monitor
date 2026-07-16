@@ -1185,7 +1185,8 @@ def send_ntfy(message, image_url, track, artist, album, playlist, timediffstr, c
     
 
 def send_notification(message, image_url="", track="", artist="", album="", playlist="", timediffstr="", count=0):
-    send_ntfy(message, image_url, track.strip(), artist.strip(), album.strip(), playlist.strip(), timediffstr.strip(), count)
+    if SEND_NOTIFY:
+        send_ntfy(message, image_url, track.strip(), artist.strip(), album.strip(), playlist.strip(), timediffstr.strip(), count)
     
 
 def spotify_get_playlist_items(access_token, playlist_uri, fields, limit, offset, oauth_app=False):
@@ -1703,7 +1704,6 @@ def update_spreadsheet_row(col_b_text, want_footer):
             err_body = f"Could not write to the spreadsheet (tab '{ERR_CODE}'). The row has been queued locally and will be retried automatically on the next check.\n\nRow: {row_ts} | {col_b_text}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
             err_body_html = f"<html><head></head><body>Could not write to the spreadsheet (tab '{escape(ERR_CODE)}'). The row has been queued locally and will be retried automatically on the next check.<br><br>Row: {escape(row_ts)} | {escape(col_b_text)}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
             send_email(err_subject, err_body, err_body_html, SMTP_SSL)
-        if SEND_NOTIFY:
             send_notification(f"spotify_monitor: Google Sheet update failed (tab '{ERR_CODE}') - row queued for retry")
     elif recovered:
         print(f"* Google Sheet (tab '{ERR_CODE}') queue caught up")
@@ -1712,7 +1712,6 @@ def update_spreadsheet_row(col_b_text, want_footer):
             rec_body = f"The spreadsheet queue has been fully drained and the sheet (tab '{ERR_CODE}') is now up to date.{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
             rec_body_html = f"<html><head></head><body>The spreadsheet queue has been fully drained and the sheet (tab '{escape(ERR_CODE)}') is now up to date.{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
             send_email(rec_subject, rec_body, rec_body_html, SMTP_SSL)
-        if SEND_NOTIFY:
             send_notification(f"spotify_monitor: Google Sheet (tab '{ERR_CODE}') caught up")
 
     if not want_footer:
@@ -3619,10 +3618,8 @@ def notify_playlist_detected(notify_playlist, songstr, timediff, track, artist, 
     if notify_playlist.get('notify', NOTIFY_PLAYLIST_DETECTED):
         update_spreadsheet_row(f"----------------- {notify_playlist['name']} Detected -----", False)
         send_email(f"{GMAIL_TAG}----------------- {notify_playlist['name']} Detected -----", "  ", "  ", SMTP_SSL)
-        if SEND_NOTIFY:
-            dz_message = f"*** Playlist '{notify_playlist['name']}' Detected: {songstr}"
-            # send_notification(dz_message)
-            send_notification(dz_message, "", track, artist, album, notify_playlist['name'], "", 0)
+        dz_message = f"*** Playlist '{notify_playlist['name']}' Detected: {songstr}"
+        send_notification(dz_message, "", track, artist, album, notify_playlist['name'], "", 0)
     return dz_msg_screen
 
 
@@ -3632,12 +3629,9 @@ def notify_playlist_cleared(notify_playlist, songstr, timediff, track, artist, a
     if notify_playlist.get('notify', NOTIFY_PLAYLIST_DETECTED):
         update_spreadsheet_row(f"----------------- {notify_playlist['name']} Cleared -----", False)
         send_email(f"{GMAIL_TAG}----------------- {notify_playlist['name']} Cleared -----", "  ", "  ", SMTP_SSL)
-        if SEND_NOTIFY:
-            # send_notification(dz_message)
-            send_notification(dz_message, "", track, artist, album, notify_playlist['name'], "", notify_playlist['count_start'])
+        send_notification(dz_message, "", track, artist, album, notify_playlist['name'], "", notify_playlist['count_start'])
     return dz_message, dz_msg_screen
-#send_notification(f"END: [{time_diff_str()}]: {songstring()}, Song Count: {listened_songs}", sp_album_image_url, sp_track, sp_artist, sp_album, (sp_playlist+iconstring()) if is_playlist else '', time_diff_str(), listened_songs)
-#def send_notification(message, image_url="", track="", artist="", album="", playlist="", timediffstr="", count=0):
+
 
 def monitored_playlist_detected(detected_playlist, songstr, timediff, print_msg, track="", artist="", album=""):
     msg = build_dz_string(detected_playlist)
@@ -4190,8 +4184,8 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 #                song_count = 1
                 print_to_screen(f" ")
                 print_to_screen(f"----------------------")               
-#                print_to_both(f"{timestring()}: {ERR_CODE}, *** Start text sent. Track: {songstring()}")
                 print_to_both(f"{timestring()}: {ERR_CODE}, *** Start notification sent")
+                send_notification(f"START: {songstring()}", sp_playlist_image_url if sp_playlist_image_url else sp_album_image_url, sp_track, sp_artist, sp_album, (sp_playlist+iconstring()) if is_playlist else '')
                 #---
 #                dz_str = f"{sp_artist} - {sp_track}"
                 if not hasTrack and (sp_playlist_owner != "Spotify"):
@@ -4215,12 +4209,6 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                 print_to_screen(f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}")
                 send_notification(f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}", sp_album_image_url, sp_track, sp_artist, sp_album, (sp_playlist+iconstring()) if is_playlist else '', time_diff_str(), listened_songs)
 
-                if SEND_NOTIFY:
-                    # send_notification(f"START: {songstring()}", sp_album_image_url)
-                    send_notification(f"START: {songstring()}", sp_playlist_image_url if sp_playlist_image_url else sp_album_image_url, sp_track, sp_artist, sp_album, (sp_playlist+iconstring()) if is_playlist else '')
-
-                    # if dz_message:
-                        # send_notification(dz_message)
             disappeared_counter = 0
 
             playlist_suffix = ""
@@ -4830,10 +4818,6 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                         print_debug(f"LOOP C - FOR ALL SONGS - FRIEND ACTIVE AFTER BEING OFFLINE")
                         if ALT_VIEW:
 #                            song_count = 1
-                            print_to_screen(f" ")
-                            print_to_screen(f"----------------------")
-#                            print_to_both(f"{timestring()}: {ERR_CODE}, *** Start text sent. Track: {songstring()}")
-                            print_to_both(f"{timestring()}: {ERR_CODE}, *** Start notification sent")
 # this is executed when friend becomes active
 # already handled above for every song (2), THEN this (3) gets executed for the 'got ACTIVE' messaging
                             # #---
@@ -4909,11 +4893,13 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                                     # reset_playlist_counts()
 
                             #---
+                            print_to_screen(f" ")
+                            print_to_screen(f"----------------------")
+                            print_to_both(f"{timestring()}: {ERR_CODE}, *** Start notification sent")
+                            send_notification(f"START: {songstring()}", sp_playlist_image_url if sp_playlist_image_url else sp_album_image_url, sp_track, sp_artist, sp_album, (sp_playlist+iconstring()) if is_playlist else '')
+                            #---
                             print_to_screen(f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}")
                             send_notification(f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}", sp_album_image_url, sp_track, sp_artist, sp_album, (sp_playlist+iconstring()) if is_playlist else '', time_diff_str(), listened_songs)
-                            if SEND_NOTIFY:
-                                # send_notification(f"START: {songstring()}", sp_album_image_url)
-                                send_notification(f"START: {songstring()}", sp_playlist_image_url if sp_playlist_image_url else sp_album_image_url, sp_track, sp_artist, sp_album, (sp_playlist+iconstring()) if is_playlist else '')
                              
                         music_urls_text = format_music_urls_email_text(apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url)
                         music_urls_html = format_music_urls_email_html(apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url, sp_artist, sp_track)
@@ -5077,9 +5063,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
                         if JMK_MODE:
                             print_to_both(f"{timestring()}: {ERR_CODE}, *** End notification sent")
-                            if SEND_NOTIFY:
-                                # send_notification(f"END: [{time_diff_str()}]: {songstring()}, Song Count: {listened_songs}", sp_album_image_url)
-                                send_notification(f"END: [{time_diff_str()}]: {songstring()}, Song Count: {listened_songs}", sp_playlist_image_url if sp_playlist_image_url else sp_album_image_url, sp_track, sp_artist, sp_album, (sp_playlist+iconstring()) if is_playlist else '', time_diff_str(), listened_songs)
+                            send_notification(f"END: [{time_diff_str()}]: {songstring()}, Song Count: {listened_songs}", sp_playlist_image_url if sp_playlist_image_url else sp_album_image_url, sp_track, sp_artist, sp_album, (sp_playlist+iconstring()) if is_playlist else '', time_diff_str(), listened_songs)
 
                         print(listened_songs_text)
 
