@@ -1,160 +1,3 @@
-# Any DZ song should always get a heart
-# Discovery Zone says (custom)(unique) [ignore those on detected playlists]
-
-# some items have  ♥ ♥
-# alerts on bedroom playlists?
-# always add icon if theres a match
-# option on whether to count up during search for playlist
-
-# should always cause an asteriks#
-# ERROR: track: Umbrella, NOT FOUND in playlist: And, baby, that’s show business for you ❤️‍🔥 (Umbrella)
-
-# found_playlist['
-
-# count_end
-# qty_end
-# count_start
-# qty_start
-# playlist name
-# count_shuffle
-
-# count_overridden
-# icon_add
-# new_playlist
-
-# _detected
-# _cleared
-
-# dz_message = ""
-# dz_msg_screen = ""
-# body_dz = ""
-# body_dz_html = ""
-
-# jmk_send = False
-# found_playlist = False
-# last_found_playlist = False
-# active_ever = False
-# icon_add = False
-# playlist_suffix_string = ""
-# hasTrack = False
-# sp_playlist_owner = ""
-# sp_playlist_image_url = ""        
-
-# monitored_playlists_data = {}
-# DEBUG_JMK = False
-# count_overridden = False
-# icon if found in playlist or not?
-
-# notify if sp_dc error
-# write song info straight to google sheet
-# option to notify for all email types
-# generatic notifcation and print strings real time instead of storing strings?
-# do this centrally? sp_track = sp_track + found_playlist.get('icon', '')
-# switching from DZ to actual playlist doesnt 'cleared'
-# don't assume spotify playlist has song - I saw this broken yesterday - Party Mix instead of liked songs
-# - hastrack = search playlist not working for Party Mix
-# - because it is custom to the person
-# - is it viable to still track count_start and if it gets to limit than its good?
-#
-# improve comments and delete old code
-# add # of sessions - need check on profile_monitor if # of songs changes by 100+/- to filter that out
-# should DZ count be capped at listening song cap (or at least clarify it never resets)
-
-# rearchitect my playlist monitoring PR tracking/counting/messaging? (it's convoluted)
-# variables to indicate in a playlist, which one, first time loading, first time starting?, detected SMS/email, cleared SMS/email state
-# centralize processing?
-# - song strings for each song to screen
-# - detected to screen/email
-# - cleared to screen/email
-
-# only show after first? or if at startup retry? * Error, retrying in 3 minutes: Failed to obtain a valid Spotify access token after 3 attempts: refresh_access_token_from_sp_dc(): Unsuccessful token request: 400 Client Error: Bad Request for url: https://open.spotify.com/api/token?reason=init&productType=web-player&totp=577757&totpServer=577757&totpVer=0&sTime=1753718266&cTime=1753718265688&buildDate=2025-07-28&buildVer=web-player_2025-07-28_1753718266000_016bf795
-# -* Error: sp_dc may be invalid/expired or Spotify has broken sth again!
-
-# design & try test cases - test transitioning from one playlist to another (given I zero everything out)
-# - compare old to new, screen view, emails, etc
-#
-#?? change NTFY resized image hosting to krontz.nakattack.com to avoid Microsoft filtering
-#?? added playlist on 'detected' NTFY messages
-#?? add icons to start and stop NTFY essages
-#?? clear sp_playlist_image_url if not a playlist
-#?? listened_songs was showing -1 on NTFY stream updates
-#?? Send full stream via NTFY
-#?? Use NTFY for notifications including locally hosted image of the album or song
-#?? Dz count shouldnt be 4 after 1st dong
-#?? if it's a real playlist and song is in it, that takes priority? (ex: Soft 10s (custom), Rihanna - Love On The Brain) - startup problem?
-#?? reset override count when streaming stops permanently (not inactive))
-#?? custom/unique tag do it differently
-#?? playlists not in email - also incorrect today with two different names
-#?? protect new playlist count while expiring old one
-#?? fixed active_ever
-#?? prioritize playlist exact name match check in find_song_in_playlists
-#?? put * on Liked Songs in emails/logs if *
-#?? build_dz ONLY if count is high enough to start - errant playlist counts in emails/log (DZ_MESSAGE(4a))
-#?? don't show cleared message/sms IFF first boot (never active) AND inactive
-#?? fixed missing cleared messages and added more debug to track how code operates
-#?? abort loading periodic playlist is length changes by > MAX_PLAYLIST_DIFFERENTIAL 
-#?? use nonlocal within reset_playlist_counts to adjust variables up-level - every email has Song Count: 1 for liked songs
-#?? don't show playlist cleared if user just starting up
-#?? removed active user check near SONG NOT IN A MONITORED PLAYLIST (2) since IN A PLAYLIST didn't have that same check
-#?? playlist name match mean automatic switch to new playlist? (better if name just changed?)
-#?? missing 'detected' after KARA becomes active  (first time or every time?)
-#?? fixed count messages in log email -> was sometimes this -> # *** Playlist 'Liked Songs' Cleared: Don't - Bryson Tiller (T R A P S O U L) - Song Count: 8
-#?? fixed errant case of * playlist assignment (also added a SPECIAL CASE2 debug message)
-#?? fixed missing * on emails
-#?? only override count if < than qty_start (don't go backwards)
-#?? fix duplicate 'cleared' messages
-#?? fix incorrect DZ count shown in emails
-#?? show song count on END texts
-#?? change wording of the message to indicate it's a playlist that was detected -> #*** Liked Songs Detected
-#?? change wording of the email 'counts' to indicate it's a playlist that was counted rather than Liked Songs Count: XX
-#?? properly handle case of exception song is from a different monitored playlist
-#?? and in above case force '*** cleared' message
-#?? track smart shuffle count and show it if > 0 when showing DZ song count
-#?? removed count on 'detected' texts and fixed count always being 0 for 'cleared' texts
-#?? need to allow exception while counting up because otherwise may never get there if '3'
-#?? correctly match playlist name in find_song_in_playlists by sending sp_playlist
-#?? clearer debug to indicate when PLAYLIST NAME IS ACTUALLY MATCHED
-#?? NO printed *** notifications----------------------
-#?? made print_to_screen write to log if DEBUG to log is enabled
-#?? configurable debug to write to screen/log/none
-#?? PR - flag file delete at start
-#?? PR - wrong comment (-l) reference
-#?? use generic routine of send_notification instead of send_sms
-#?? matching playlist means instant detection (and optional notify) rather than counting
-#?? don't show 'icon' if in the exception process
-#?? error checking for keys 'icon', 'url', 'refresh', 'notify', and 'override'
-#?? playlist exception should only apply if actually in a playlist versus building up the count
-#?? DEBUG: SONG CHANGE -> print song because it's hard to keep track in log
-#?? printing weird -> ICON_SONG_MISSING_FROM_PLAYLIST character spacing weird
-#?? if song in two playlists, attribute it the active one first
-#?? playlist url sometimes blank
-#?? fix case of double-counting song
-#?? emails/texts missing -> f"*** {notify_playlist['name']} Detected: {songstr}, Song Count: {notify_playlist['count_start']}" [notify was off for Liked Songs]
-#?? fixed COUNT START: 0 next song after an exception granted
-#?? Added playlist name to DEBUG: debug statements around finding playlist or not hitting exception limit
-#?? Add DEBUG: COUNT_END debug info when playlist not found
-#?? When handling exceptions to monitored playlists, need to reset it all back as if it was OK (ex: is_playlist = True)6
-#?? When restarting on detected playlist, missing playlist assignment, context: album, and icon appending
-#?? No *** detected on screen sometimes
-#?? errant 'override' always at user becoming active later (not at restart)
-#?? remove spaces before/after playlist and song names
-#?? what -> Prints the list of Spotify friends with the last listened track (-l flag)
-#?? JMK showing up at end of URLs?
-#?? periodic tracks stop if frequency is 0
-#?? playlist compare periodically checks entire playlist set and not just length (# of songs)
-#?? when printing "monitoring tracks" should I should subdetail (alert? icons?)
-#?? wrong playlist (white noise) in email and log
-#?? playlist URL blank - add a key?
-#?? configurable icon if song not found in playlist
-#?? added alert key for each monitored playlist (PLAYLIST_NOTIFICATION equivalent)
-#?? initial active jmk email and original emails missing count and playlist (it's hit or miss) - See 2:30pm 7/21
-#?? JMK_MODE only to override start count if playlist already in action
-#?? playlist detected notes not being shown on screen
-#++ does count ever go above 3?
-#++ initial active original email missing
-#++ initial active getting 3rd text with count info
-#++ restored original MONITOR_LIST_FILE functionality
-
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
@@ -265,19 +108,33 @@ VERSION = "2.9.2"
 # 2025/07/12: Added code to update google sheet directly (via Claude)
 # 2025/07/13: Removed configcat
 # 2025/07/13: Added printing of JMK added items in configuration items at startup`
+# 2025/07/15: '*** Start notification' message via NTFY is now before the 00 minute notification
 
-# bugs and to-dos:
+# Bugs & To-do
+# --------------------------------------
 # start/end texts include DZ count if > 0?
-# *** PR: identify playlists via song lists and auto-refresh
-# *** PR: NTFY (a free notification service would be better)
 # profile monitor: * Error, retrying in 5 minutes: fetch_server_time() head network request error: HTTPSConnectionPool(host='open.spotify.com', port=443): Read timed out. (read timeout=15)
-# *** alternate notification method (pushover, gotify, ntfy.sh )
-# *** give discovery zone a +1 song grace after DZ identified [but how to message this, etc] -> started the work, see DZexceptions
-# ***      detect smart shuffle songs, for JMK at least??
-# *** why not write straight to the gdrive spreadsheet instead of indirectly via email?
+# 
+# Future To-do
+# --------------------------------------
+# Any DZ song should always get a heart
+# alerts on bedroom playlists?
+# always add icon if theres a match?
+# generatic notifcation and print strings real time instead of storing strings?
+# do this centrally? sp_track = sp_track + found_playlist.get('icon', '')
+# improve comments and delete old code
+# add # of sessions - need check on profile_monitor if # of songs changes by 100+/- to filter that out
+# rearchitect my playlist monitoring PR tracking/counting/messaging? (it's convoluted) [BIG JOB and why bother?]
+# centralize processing?
+# - song strings for each song to screen
+# - detected to screen/email
+# - cleared to screen/email
 
-# command line examples
-# *** see .conf file
+# only show after first? or if at startup retry? * Error, retrying in 3 minutes: Failed to obtain a valid Spotify access token after 3 attempts: refresh_access_token_from_sp_dc(): Unsuccessful token request: 400 Client Error: Bad Request for url: https://open.spotify.com/api/token?reason=init&productType=web-player&totp=577757&totpServer=577757&totpVer=0&sTime=1753718266&cTime=1753718265688&buildDate=2025-07-28&buildVer=web-player_2025-07-28_1753718266000_016bf795
+# -* Error: sp_dc may be invalid/expired or Spotify has broken sth again!
+
+# design & try test cases - test transitioning from one playlist to another (given I zero everything out)
+# - compare old to new, screen view, emails, etc
 
 # ---------------------------
 # CONFIGURATION SECTION START
