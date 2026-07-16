@@ -1012,7 +1012,6 @@ def send_ntfy(message, image_url, track, artist, album, playlist, timediffstr, c
 # f"{sp_track.strip()} - {sp_artist.strip()} ({sp_album.strip()}) [{sp_playlist.strip()}]{iconstring()}"
 # send_notification(f"END: [{time_diff_str()}]: {songstring()}, Song Count: {listened_songs}", sp_album_image_url)
 # send_notification(dz_message, "", track, artist, album, playlist, "", notify_playlist['count_start'])
-    # icon = ""
 
     priority_kel      = 1
     priority_kel_lo   = 1
@@ -3648,21 +3647,11 @@ def monitored_playlist_detected(detected_playlist, songstr, timediff, print_msg,
     if print_msg:
         print_to_both(dz_msg_screen)
         dz_msg_screen = ""
-
-    # body_dz      = msg + "\n"
-    # body_dz_html = msg + "<br>"
-
     return msg + "\n", msg + "<br>", msg, dz_msg_screen
 
 
 def monitored_playlist_cleared(cleared_playlist, songstr, timediff, track="", artist="", album=""):
     dz_message, dz_msg_screen = notify_playlist_cleared(cleared_playlist, songstr, timediff, track, artist, album)
-    # if found_playlist['name'] == DZ_PLAYLIST_NAME:
-        # dz_message, dz_msg_screen = notify_playlist_cleared(cleared_playlist)
-    # else:
-        # dz_message    = f"*** {detected_playlist['name']} Cleared: {songstring()}, Song Count: {notify_playlist['count_start']}"
-        # dz_msg_screen = f"{timestring()}: {ERR_CODE}, [{timediff()}] {dz_message}"
-
     return dz_message, dz_msg_screen
 
 
