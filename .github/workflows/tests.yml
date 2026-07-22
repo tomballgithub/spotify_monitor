@@ -1,0 +1,101 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install project test dependencies
+        run: python -m pip install ".[test]"
+      - name: Run offline tests
+        run: python -m pytest
+
+  extras:
+    name: Install ${{ matrix.extra }} extra
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        extra: [legacy-oauth, browser]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Install optional extra
+        run: python -m pip install ".[${{ matrix.extra }}]"
+      - name: Verify installed dependencies
+        run: python -m pip check
+
+  windows-setup-smoke:
+    name: Windows setup and startup smoke checks
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Install project test dependencies
+        run: python -m pip install ".[test]"
+      - name: Run setup and startup tests
+        run: python -m pytest tests/test_setup_wizard.py tests/test_install_method_commands.py tests/test_startup_ui.py tests/test_config_and_inputs.py
+
+  container-smoke:
+    name: Main container smoke checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+      - name: Build local smoke image
+        run: docker build --tag spotify-monitor:ci .
+      - name: Confirm Python 3.9 runtime
+        run: docker run --rm --entrypoint /usr/local/bin/python spotify-monitor:ci --version | grep -E '^Python 3\.9\.'
+      - name: Run application version and help
+        run: |
+          docker run --rm spotify-monitor:ci --version
+          docker run --rm spotify-monitor:ci --help
+      - name: Confirm noninteractive setup guidance
+        run: |
+          mkdir -p local/container-smoke
+          if docker run --rm spotify-monitor:ci --setup >local/container-smoke/setup-output.txt 2>&1; then
+            echo "Noninteractive setup unexpectedly succeeded"
+            exit 1
+          fi
+          grep -E "interactive terminal" local/container-smoke/setup-output.txt
+      - name: Generate a config through the container
+        run: |
+          mkdir -p local/container-smoke
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/local/container-smoke:/data:z" spotify-monitor:ci --generate-config /data/spotify_monitor.conf
+          test -s local/container-smoke/spotify_monitor.conf
+          if grep -E 'LIVE-|secret-cookie|refresh-token' local/container-smoke/spotify_monitor.conf; then
+            echo "Generated config contains a test secret marker"
+            exit 1
+          fi
+      - name: Validate Docker Compose configuration
+        run: docker compose -f docker-compose.yml config
+      - name: Run the locally built image through Docker Compose
+        run: |
+          mkdir -p local/container-smoke
+          docker tag spotify-monitor:ci misiektoja/spotify-monitor:latest
+          SPOTIFY_MONITOR_UID="$(id -u)" SPOTIFY_MONITOR_GID="$(id -g)" docker compose -f docker-compose.yml run --rm --pull=never spotify_monitor --version
+          SPOTIFY_MONITOR_UID="$(id -u)" SPOTIFY_MONITOR_GID="$(id -g)" docker compose -f docker-compose.yml run --rm --pull=never spotify_monitor --generate-config /data/local/container-smoke/compose-spotify-monitor.conf
+          test -s local/container-smoke/compose-spotify-monitor.conf

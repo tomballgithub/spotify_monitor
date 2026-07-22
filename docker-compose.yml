@@ -1,0 +1,28 @@
+# Main Spotify Monitor application container
+#
+# Quick start:
+#   docker compose run --rm spotify_monitor --setup
+#   docker compose run --rm spotify_monitor --set-sp-dc --env-file /data/.env
+#   docker compose run --rm spotify_monitor --set-webhook-url --env-file /data/.env
+#   docker compose run --rm spotify_monitor --doctor
+#   docker compose up
+#
+# Advanced Linux Firefox import example with a read-only host profile mount:
+#   docker compose run --rm -v "$HOME/.mozilla/firefox:/home/spotify/.mozilla/firefox:ro" spotify_monitor --import-browser-cookie --browser firefox
+
+services:
+  spotify_monitor:
+    image: misiektoja/spotify-monitor:latest
+    # To build locally, comment out the image line and uncomment the next line.
+    # build: .
+    init: true
+    stdin_open: true
+    tty: true
+    # No override is needed on Docker Desktop. These optional values help Linux hosts whose bind mount rejects writes from UID 10001.
+    user: "${SPOTIFY_MONITOR_UID:-10001}:${SPOTIFY_MONITOR_GID:-10001}"
+    environment:
+      SPOTIFY_MONITOR_COMPOSE: "1"
+    volumes:
+      # The shared SELinux label is ignored on hosts that do not use SELinux.
+      - ./:/data:z
+    command: ["--config-file", "/data/spotify_monitor.conf"]

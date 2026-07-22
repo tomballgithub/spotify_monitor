@@ -83,6 +83,9 @@ instance/
 # Sphinx documentation
 docs/_build/
 
+# MkDocs documentation
+/site
+
 # PyBuilder
 .pybuilder/
 target/
@@ -136,6 +139,7 @@ celerybeat.pid
 # Environments
 .env
 .env*
+!.env.example
 .venv
 env/
 venv/

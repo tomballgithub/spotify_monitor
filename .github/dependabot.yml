@@ -1,0 +1,29 @@
+version: 2
+updates:
+  # GitHub Actions used in .github/workflows/*.yml (auto-discovered)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci"
+
+  # Base image in the Dockerfile at repo root
+  - package-ecosystem: "docker"
+    directory: "/"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    groups:
+      docker:
+        patterns: ["*"]
+    ignore:
+      # Keep the production base image on Python 3.9 until a deliberate upgrade
+      - dependency-name: "python"
+        versions: [">= 3.10"]
+    commit-message:
+      prefix: "build"
