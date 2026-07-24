@@ -25,7 +25,7 @@ Powerful real-time tracker for Spotify friend music activity: monitor listening 
 pip install spotify_monitor
 ```
 
-Run setup by itself:
+Run setup wizard:
 
 ```sh
 spotify_monitor --setup
@@ -41,28 +41,14 @@ Use a macOS shell or Windows PowerShell with a Docker-compatible runtime that pr
 docker run --rm --pull=always -it --init -v "${PWD}:/data:z" misiektoja/spotify-monitor:latest --setup
 ```
 
-After setup finishes, start monitoring with the files created by the wizard:
-
-```sh
-docker run --rm -it --init -v "${PWD}:/data:z" misiektoja/spotify-monitor:latest --config-file /data/spotify_monitor.conf
-```
-
-The setup command pulls the current image. Both commands keep configuration, private values and output in the current directory.
-
-In Windows Command Prompt replace `${PWD}` with `%cd%`. Windows hosts must use Linux containers.
+In Windows Command Prompt replace `${PWD}` with `%cd%` above.
 
 ##### Linux
 
-`--user "$(id -u):$(id -g)"` runs the container with your numeric user and group IDs. This lets the container write files that your host account can edit.
+Run the container with your numeric user and group IDs (`--user "$(id -u):$(id -g)"` below). This lets the container write files that your host account can edit.
 
 ```sh
 docker run --rm --pull=always -it --init --user "$(id -u):$(id -g)" -v "$PWD:/data:z" misiektoja/spotify-monitor:latest --setup
-```
-
-After setup finishes, start monitoring:
-
-```sh
-docker run --rm -it --init --user "$(id -u):$(id -g)" -v "$PWD:/data:z" misiektoja/spotify-monitor:latest --config-file /data/spotify_monitor.conf
 ```
 
 #### Docker Compose - shorter recurring commands
@@ -82,16 +68,10 @@ export SPOTIFY_MONITOR_GID="$(id -g)"
 
 Docker-compatible runtimes on macOS and Windows normally do not need these values.
 
-Run setup by itself:
+Run setup wizard:
 
 ```sh
 docker compose run --rm --pull=always spotify_monitor --setup
-```
-
-After setup finishes, start monitoring with the shorter recurring command:
-
-```sh
-docker compose up --no-log-prefix
 ```
 
 For the manual single-file method, optional extras and upgrade commands for every method, see [Installation](https://misiektoja.github.io/spotify_monitor/installation/).
@@ -147,12 +127,10 @@ Spotify only shows a person's listening activity when both of these conditions a
 
 The setup wizard checks whether the monitoring account follows the target. It can send the follow request after you confirm. To follow manually, open the target's profile in the Spotify desktop or mobile app. You can use **Share** > **Copy link to profile** and paste the complete link into the wizard. You do not need to extract the user ID. See [Following the Monitored User](https://misiektoja.github.io/spotify_monitor/configuration/#following-the-monitored-user).
 
-Firefox import is the recommended login path for local and container installs. See [Container Operation](https://misiektoja.github.io/spotify_monitor/usage/#import-firefox-into-container-authentication) for the host-specific import commands.
-
 <a id="common-commands"></a>
 ## Common Commands
 
-Use [Quick Install & Run](#-quick-install-run) above for first-time setup. The table uses PyPI commands. For manual script, direct Docker and Docker Compose equivalents, see [Run Individual Commands](https://misiektoja.github.io/spotify_monitor/quick-start/#run-individual-commands).
+Use [Quick Install & Run](#-quick-install-run) above for first-time setup. The table uses PyPI commands. For manual script, direct Docker and Docker Compose equivalents, see [Run Individual Commands](https://misiektoja.github.io/spotify_monitor/setup-and-first-run/#run-individual-commands).
 
 | I want to... | Run this |
 | --- | --- |
@@ -166,7 +144,7 @@ Use [Quick Install & Run](#-quick-install-run) above for first-time setup. The t
 
 Running the tool with no arguments offers the wizard if you have not saved a target. If a target is already saved, it starts monitoring that target.
 
-For authentication, saved targets, configuration backups and setup recovery, see the [full Quick Start guide](https://misiektoja.github.io/spotify_monitor/quick-start/).
+For authentication, saved targets, configuration backups and setup recovery, see the [full Setup & First Run guide](https://misiektoja.github.io/spotify_monitor/setup-and-first-run/).
 
 For browser profiles, manual cookie extraction, Docker authentication, email and webhook setup, see [Configuration](https://misiektoja.github.io/spotify_monitor/configuration/). For notification choices, playback controls and output files, see [Usage](https://misiektoja.github.io/spotify_monitor/usage/).
 
@@ -176,7 +154,7 @@ For browser profiles, manual cookie extraction, Docker authentication, email and
 Full documentation is available at **[misiektoja.github.io/spotify_monitor](https://misiektoja.github.io/spotify_monitor/)**:
 
 - [Installation](https://misiektoja.github.io/spotify_monitor/installation/) - PyPI, manual script, Docker installation and upgrades
-- [Quick Start](https://misiektoja.github.io/spotify_monitor/quick-start/) - setup wizard, authentication and first run
+- [Setup & First Run](https://misiektoja.github.io/spotify_monitor/setup-and-first-run/) - setup wizard, authentication and first run
 - [Configuration](https://misiektoja.github.io/spotify_monitor/configuration/) - Spotify login, targets, SMTP, webhooks and secrets
 - [Usage](https://misiektoja.github.io/spotify_monitor/usage/) - command formats, monitoring, container operation, notifications, playback and output
 - [Troubleshooting](https://misiektoja.github.io/spotify_monitor/troubleshooting/) - the `--doctor` self-check and logging levels

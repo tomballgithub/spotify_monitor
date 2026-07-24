@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v3.1
+v3.1.1
 
 Tool implementing real-time tracking of Spotify friends music activity:
 https://github.com/misiektoja/spotify_monitor/
@@ -19,7 +19,7 @@ spotipy (optional, used when legacy OAuth app credentials are configured)
 pycookiecheat (optional, used for Chrome, Brave and Chromium cookie import)
 """
 
-VERSION = "3.1"
+VERSION = "3.1.1"
 
 
 # API 401 error means sp_dc cookie has expired. Lasts one year. 03/15/2025
@@ -925,7 +925,7 @@ nl_ch = "\n"
 
 PROJECT_URL = "https://github.com/misiektoja/spotify_monitor"
 DOCUMENTATION_URL = "https://misiektoja.github.io/spotify_monitor"
-QUICK_START_GUIDE_URL = DOCUMENTATION_URL + "/quick-start/"
+QUICK_START_GUIDE_URL = DOCUMENTATION_URL + "/setup-and-first-run/"
 INSTALLATION_GUIDE_URL = DOCUMENTATION_URL + "/installation/#requirements"
 CONFIG_GUIDE_URL = DOCUMENTATION_URL + "/configuration/#configuration-file"
 COOKIE_GUIDE_URL = DOCUMENTATION_URL + "/configuration/#spotify-sp_dc-cookie"
