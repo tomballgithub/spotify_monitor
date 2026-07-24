@@ -4837,6 +4837,11 @@ def build_startup_summary(target: str, config_path, env_path, output_path) -> Li
         StartupSummaryRow("Terminal truncation", f"{TRUNCATE_CHARS} chars" if TRUNCATE_CHARS else "Disabled", concise=bool(TRUNCATE_CHARS)),
         StartupSummaryRow("Verbose mode", str(VERBOSE_MODE), concise=bool(VERBOSE_MODE)),
         StartupSummaryRow("Debug mode", str(DEBUG_MODE), concise=bool(DEBUG_MODE)),
+        StartupSummaryRow("Visual mode", str(f"Alternate" if JMK_MODE else "Standard") + (f" (with DEBUG_JMK level {DEBUG_JMK})" if JMK_MODE else ""), concise=True),
+        StartupSummaryRow("Original emails", str(ORIG_EMAILS), concise=True),
+        StartupSummaryRow("Discovery Zone alerts", str(DZ_ALERTS), concise=True),
+        StartupSummaryRow("Spreadsheet updates", str((f"{UPDATE_SPREADSHEET}") + (f" (tab: {ERR_CODE})" if UPDATE_SPREADSHEET else "")), concise=True),
+ 
     ]
     if spotify_has_oauth_app_credentials():
         oauth_cache = SP_APP_TOKENS_FILE or "None (memory only)"
