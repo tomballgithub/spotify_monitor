@@ -162,7 +162,7 @@ def test_no_argument_welcome_uses_spaced_quick_start_blocks():
 def test_version_output_is_machine_friendly():
     result = run_cli("--version")
     assert result.returncode == 0
-    assert result.stdout.splitlines() == ["spotify_monitor.py v3.0"]
+    assert result.stdout.splitlines() == ["spotify_monitor.py v3.1"]
     assert monitor.STARTUP_BANNER.splitlines()[1] not in result.stdout
 
 
@@ -280,13 +280,15 @@ def test_verbose_flag_does_not_enable_debug(monkeypatch):
     configure_summary(monkeypatch)
     observed = {}
     monkeypatch.setattr(monitor.sys, "argv", ["spotify_monitor.py", "--doctor", "--verbose", "--env-file", "none"])
-    monkeypatch.setattr(monitor, "clear_screen", Mock())
+    clear_mock = Mock()
+    monkeypatch.setattr(monitor, "clear_screen", clear_mock)
     monkeypatch.setattr(monitor, "find_config_file", lambda path=None: None)
     monkeypatch.setattr(monitor, "run_doctor", lambda *args, **kwargs: observed.update(verbose=monitor.VERBOSE_MODE, debug=monitor.DEBUG_MODE) or 0)
     with pytest.raises(SystemExit) as error:
         monitor.main()
     assert error.value.code == 0
     assert observed == {"verbose": True, "debug": False}
+    clear_mock.assert_called_once_with(False)
 
 
 # Verifies verbose mode emits rare operational events without per-poll timing noise

@@ -2,6 +2,41 @@
 
 This is a high-level summary of the most important changes.
 
+# Changes in 3.1 (23 Jul 2026)
+
+Version **3.1** makes **Docker onboarding portable across macOS, Linux and Windows**. Setup now centers on **host-aware Firefox authentication**, keeps configuration and secrets on the persistent **`/data` bind mount** and carries exact **Doctor and monitoring commands** through recovery.
+
+**Features and improvements**:
+
+- **IMPROVE:** Kept Firefox import as the **recommended Docker authentication path** while making its deferred workflow explicit. Setup now asks whether Docker runs on macOS, standard Linux, Linux with Snap, Linux with Flatpak, Windows PowerShell or Windows Command Prompt then prints the matching read-only profile mount
+- **NEW:** Added **Windows-host Firefox import** for direct Docker and Docker Compose through the normal `%APPDATA%\Mozilla\Firefox` profile root with shell-specific PowerShell and Command Prompt commands
+- **IMPROVE:** Deferred **Doctor until Firefox authentication has been imported**. Container setup now finishes with ordered commands to import the login, verify authentication and the target then start monitoring
+- **IMPROVE:** Preserved **setup guidance across one-time authentication commands** by keeping terminal history visible and repeating the exact Doctor and monitoring commands after a successful Firefox import
+- **IMPROVE:** Printed the **install-aware monitoring command** after a successful Doctor run while preserving explicit or saved targets and selected configuration files
+
+**Bug fixes**:
+
+- **BUGFIX:** Fixed generated Docker commands that used the container UID `10001:10001` and always assumed the Linux `~/.mozilla/firefox` profile path. **macOS commands omit Linux user mapping** while Linux commands resolve the host user and group IDs in the host shell
+- **BUGFIX:** Stopped standalone container recovery guidance from presenting one Linux-only Firefox command when the Docker host is unknown
+- **BUGFIX:** Anchored **default container setup files** to the bind-mounted **`/data` directory** so the generated configuration and dotenv files survive the temporary setup container
+- **BUGFIX:** Rejected **Docker setup destinations outside `/data`** instead of saving ephemeral files then printing commands for different paths
+- **BUGFIX:** Generated direct Docker commands with **`${PWD}` for macOS, Linux and Windows PowerShell** then switched to `%cd%` for Windows Command Prompt while retaining Linux user mapping
+- **BUGFIX:** Saved the **selected dotenv destination** in generated configuration so later config-only starts and secret reloads keep using it
+- **BUGFIX:** Printed an **explicit Compose monitoring command** when setup uses nondefault config or dotenv paths instead of falling back to hardcoded defaults
+- **BUGFIX:** Preserved the selected configuration path through the hidden **`--set-sp-dc` fallback** and its Doctor and monitoring guidance
+- **BUGFIX:** Prevented a **Windows traceback after Ctrl+C** when monitoring was started directly from setup. The setup parent now treats its duplicate console interrupt as the same clean termination already handled by the monitoring child
+
+# Changes in 3.0.1 (22 Jul 2026)
+
+**Features and improvements**:
+
+- **IMPROVE:** Made Firefox login import the recommended Docker and Docker Compose authentication path. A one-time read-only host profile mount imports `sp_dc` into the persistent `.env` file, later runs no longer need the browser mount and hidden manual cookie entry remains available as a fallback
+- **IMPROVE:** Updated `spotify_monitor_totp_test --fetch-secrets` to scan current web-player bundles for inline TOTP secret objects while retaining the original runtime hook for older bundle formats
+
+**Bug fixes**:
+
+- **BUGFIX:** Fixed Docker Compose startup after guided setup. The default service command now loads `/data/.env` explicitly, preventing `docker compose up` from reporting a missing `SP_DC_COOKIE` when setup and doctor already saved and validated it
+
 # Changes in 3.0 (22 Jul 2026)
 
 Version **3.0** focuses on making Spotify Monitor easier to set up, safer to configure and easier to recover when something goes wrong. It adds guided onboarding, simpler Spotify login, Docker Compose, clearer terminal output and Discord + ntfy webhook alerts while keeping advanced client mode available for experienced users.
@@ -117,8 +152,8 @@ Special thanks to [@tomballgithub](https://github.com/tomballgithub) for testing
 
 - **IMPROVE:** Added support for loading TOTP secrets from local files via file:// URLs
 - **IMPROVE:** Updated remote URL in SECRET_CIPHER_DICT_URL
-- **IMPROVE:** Updated  [spotify_monitor_secret_grabber](https://github.com/misiektoja/spotify_monitor/blob/dev/debug/spotify_monitor_secret_grabber.py) to dump secrets in different formats. Choose what you need with the `--secret`,` --secretbytes` and `--secretdict` CLI flags, or go all out with the `--all` mode to write all secret formats to files like `secrets.json`, `secretBytes.json` and `secretDict.json` (thanks [@tomballgithub](https://github.com/tomballgithub))
-- **IMPROVE:** Added multi-arch Docker image build and compose support for  [spotify_monitor_secret_grabber](https://github.com/misiektoja/spotify_monitor/blob/dev/debug/spotify_monitor_secret_grabber.py) - more info at [Secret Key Extraction via Docker](https://misiektoja.github.io/spotify_monitor/debugging/#-secret-key-extraction-via-docker-recommended-easiest-way)
+- **IMPROVE:** Updated  [spotify_monitor_secret_grabber](https://github.com/misiektoja/spotify_monitor/blob/main/debug/spotify_monitor_secret_grabber.py) to dump secrets in different formats. Choose what you need with the `--secret`,` --secretbytes` and `--secretdict` CLI flags, or go all out with the `--all` mode to write all secret formats to files like `secrets.json`, `secretBytes.json` and `secretDict.json` (thanks [@tomballgithub](https://github.com/tomballgithub))
+- **IMPROVE:** Added multi-arch Docker image build and compose support for  [spotify_monitor_secret_grabber](https://github.com/misiektoja/spotify_monitor/blob/main/debug/spotify_monitor_secret_grabber.py) - more info at [Secret Key Extraction via Docker](https://misiektoja.github.io/spotify_monitor/debugging/#secret-key-extraction-via-docker)
 - **IMPROVE:** Added deletion of flag_file at launch if specified via .conf file. Previously only done when flag_file was specified on command line
 - **IMPROVE:** Added info to console output when TOTP secrets are fetched from a remote URL or local file
 

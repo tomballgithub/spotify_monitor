@@ -19,43 +19,79 @@ Powerful real-time tracker for Spotify friend music activity: monitor listening 
 <a id="-quick-install-run"></a>
 ### 🚀 Quick Install & Run
 
-Python from PyPI
+#### Python from PyPI
 
 ```sh
 pip install spotify_monitor
+```
+
+Run setup by itself:
+
+```sh
 spotify_monitor --setup
 ```
 
-Docker Compose
+#### Docker image - fastest container setup
 
-On Linux, set the container user to your host user before the first setup command. This lets Spotify Monitor create its configuration and private `.env` file in the current directory. Docker Desktop users on macOS or Windows can skip the two `export` commands.
+##### macOS or Windows
+
+Use a macOS shell or Windows PowerShell with a Docker-compatible runtime that provides the `docker` CLI.
 
 ```sh
-curl -fsSLO https://raw.githubusercontent.com/misiektoja/spotify_monitor/refs/heads/main/docker-compose.yml
-export SPOTIFY_MONITOR_UID="$(id -u)"
-export SPOTIFY_MONITOR_GID="$(id -g)"
-docker compose run --rm spotify_monitor --setup
-docker compose up
+docker run --rm --pull=always -it --init -v "${PWD}:/data:z" misiektoja/spotify-monitor:latest --setup
 ```
 
-Docker run
-
-On macOS or Windows with Docker Desktop:
+After setup finishes, start monitoring with the files created by the wizard:
 
 ```sh
-docker pull misiektoja/spotify-monitor:latest
-docker run --rm -it --init -v "${PWD}:/data:z" misiektoja/spotify-monitor:latest --setup
 docker run --rm -it --init -v "${PWD}:/data:z" misiektoja/spotify-monitor:latest --config-file /data/spotify_monitor.conf
 ```
 
-The Docker Desktop commands use macOS shell or Windows PowerShell syntax. In Windows Command Prompt replace `${PWD}` with `%cd%`.
+The setup command pulls the current image. Both commands keep configuration, private values and output in the current directory.
 
-On Linux, pass your host user and group so the container can write to the current directory:
+In Windows Command Prompt replace `${PWD}` with `%cd%`. Windows hosts must use Linux containers.
+
+When setup asks how to import Firefox on Windows, choose PowerShell or Command Prompt. The wizard prints the matching direct Docker command with the current directory mounted at `/data` and the Firefox profile under `%APPDATA%\Mozilla\Firefox` mounted read-only. The same host choice also prints the matching Docker Compose import command.
+
+##### Linux
+
+`--user "$(id -u):$(id -g)"` runs the container with your numeric user and group IDs. This lets the container write files that your host account can edit.
 
 ```sh
-docker pull misiektoja/spotify-monitor:latest
-docker run --rm -it --init --user "$(id -u):$(id -g)" -v "$PWD:/data:z" misiektoja/spotify-monitor:latest --setup
+docker run --rm --pull=always -it --init --user "$(id -u):$(id -g)" -v "$PWD:/data:z" misiektoja/spotify-monitor:latest --setup
+```
+
+After setup finishes, start monitoring:
+
+```sh
 docker run --rm -it --init --user "$(id -u):$(id -g)" -v "$PWD:/data:z" misiektoja/spotify-monitor:latest --config-file /data/spotify_monitor.conf
+```
+
+#### Docker Compose - shorter recurring commands
+
+Download the Compose file:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/misiektoja/spotify_monitor/refs/heads/main/docker-compose.yml
+```
+
+On a native Linux container engine, export your numeric user ID and group ID so files created in the current directory belong to you instead of `root`. Docker-compatible runtimes on macOS and Windows normally do not need these values.
+
+```sh
+export SPOTIFY_MONITOR_UID="$(id -u)"
+export SPOTIFY_MONITOR_GID="$(id -g)"
+```
+
+Run setup by itself:
+
+```sh
+docker compose run --rm --pull=always spotify_monitor --setup
+```
+
+After setup finishes, start monitoring with the shorter recurring command:
+
+```sh
+docker compose up --no-log-prefix
 ```
 
 For the manual single-file method, optional extras and upgrade commands for every method, see [Installation](installation.md).
@@ -95,8 +131,8 @@ For the manual single-file method, optional extras and upgrade commands for ever
    <img src="https://raw.githubusercontent.com/misiektoja/spotify_monitor/refs/heads/main/assets/spotify_monitor_skipped.png" alt="spotify_monitor_skipped" width="90%"/>
 </p>
 
-🎵 For even better real-time tracking with pause/resume detection, track progress indicators, enhanced stats and offline mode support, check out [lastfm_monitor](https://github.com/misiektoja/lastfm_monitor) - it is much easier to set up, simply ask your friend to connect Last.fm to Spotify (Last.fm Settings → Applications → Connect Spotify Scrobbling) and you're ready to go!
+For even better real-time tracking with pause/resume detection, track progress indicators, enhanced stats and offline mode support, see [lastfm_monitor](https://github.com/misiektoja/lastfm_monitor).
 
-✨ If you're interested in tracking changes to Spotify users' profiles including their playlists, take a look at another tool I've developed: [spotify_profile_monitor](https://github.com/misiektoja/spotify_profile_monitor).
+For Spotify profile and playlist change tracking, see [spotify_profile_monitor](https://github.com/misiektoja/spotify_profile_monitor).
 
-🛠️ If you're looking for debug tools to get Spotify Web Player access tokens and extract secret keys: [click here](debugging.md#debugging-tools)
+For Spotify Web Player token and TOTP utilities, see [Debugging Tools](debugging.md#debugging-tools).

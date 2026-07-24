@@ -19,43 +19,79 @@ Powerful real-time tracker for Spotify friend music activity: monitor listening 
 <a id="-quick-install-run"></a>
 ### 🚀 Quick Install & Run
 
-Python from PyPI
+#### Python from PyPI
 
 ```sh
 pip install spotify_monitor
+```
+
+Run setup by itself:
+
+```sh
 spotify_monitor --setup
 ```
 
-Docker Compose
+#### Docker image - fastest container setup
 
-On Linux, set the container user to your host user before the first setup command. This lets Spotify Monitor create its configuration and private `.env` file in the current directory. Docker Desktop users on macOS or Windows can skip the two `export` commands.
+##### macOS or Windows
+
+Use a macOS shell or Windows PowerShell with a Docker-compatible runtime that provides the `docker` CLI.
 
 ```sh
-curl -fsSLO https://raw.githubusercontent.com/misiektoja/spotify_monitor/refs/heads/main/docker-compose.yml
-export SPOTIFY_MONITOR_UID="$(id -u)"
-export SPOTIFY_MONITOR_GID="$(id -g)"
-docker compose run --rm spotify_monitor --setup
-docker compose up
+docker run --rm --pull=always -it --init -v "${PWD}:/data:z" misiektoja/spotify-monitor:latest --setup
 ```
 
-Docker run
-
-On macOS or Windows with Docker Desktop:
+After setup finishes, start monitoring with the files created by the wizard:
 
 ```sh
-docker pull misiektoja/spotify-monitor:latest
-docker run --rm -it --init -v "${PWD}:/data:z" misiektoja/spotify-monitor:latest --setup
 docker run --rm -it --init -v "${PWD}:/data:z" misiektoja/spotify-monitor:latest --config-file /data/spotify_monitor.conf
 ```
 
-The Docker Desktop commands use macOS shell or Windows PowerShell syntax. In Windows Command Prompt replace `${PWD}` with `%cd%`.
+The setup command pulls the current image. Both commands keep configuration, private values and output in the current directory.
 
-On Linux, pass your host user and group so the container can write to the current directory:
+In Windows Command Prompt replace `${PWD}` with `%cd%`. Windows hosts must use Linux containers.
+
+##### Linux
+
+`--user "$(id -u):$(id -g)"` runs the container with your numeric user and group IDs. This lets the container write files that your host account can edit.
 
 ```sh
-docker pull misiektoja/spotify-monitor:latest
-docker run --rm -it --init --user "$(id -u):$(id -g)" -v "$PWD:/data:z" misiektoja/spotify-monitor:latest --setup
+docker run --rm --pull=always -it --init --user "$(id -u):$(id -g)" -v "$PWD:/data:z" misiektoja/spotify-monitor:latest --setup
+```
+
+After setup finishes, start monitoring:
+
+```sh
 docker run --rm -it --init --user "$(id -u):$(id -g)" -v "$PWD:/data:z" misiektoja/spotify-monitor:latest --config-file /data/spotify_monitor.conf
+```
+
+#### Docker Compose - shorter recurring commands
+
+Download the Compose file:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/misiektoja/spotify_monitor/refs/heads/main/docker-compose.yml
+```
+
+Linux container engine requires to export your numeric user ID and group ID so files created in the current directory belong to you instead of `root`.
+
+```sh
+export SPOTIFY_MONITOR_UID="$(id -u)"
+export SPOTIFY_MONITOR_GID="$(id -g)"
+```
+
+Docker-compatible runtimes on macOS and Windows normally do not need these values.
+
+Run setup by itself:
+
+```sh
+docker compose run --rm --pull=always spotify_monitor --setup
+```
+
+After setup finishes, start monitoring with the shorter recurring command:
+
+```sh
+docker compose up --no-log-prefix
 ```
 
 For the manual single-file method, optional extras and upgrade commands for every method, see [Installation](https://misiektoja.github.io/spotify_monitor/installation/).
@@ -101,6 +137,39 @@ For Spotify profile and playlist change tracking, see [spotify_profile_monitor](
 
 For Spotify Web Player token and TOTP utilities, see [Debugging Tools](https://misiektoja.github.io/spotify_monitor/debugging/#debugging-tools).
 
+<a id="before-monitoring"></a>
+## Before Monitoring
+
+Spotify only shows a person's listening activity when both of these conditions are met:
+
+1. The Spotify account used by Spotify Monitor follows the person you want to monitor.
+2. That person has enabled listening activity sharing in Spotify.
+
+The setup wizard checks whether the monitoring account follows the target. It can send the follow request after you confirm. To follow manually, open the target's profile in the Spotify desktop or mobile app. You can use **Share** > **Copy link to profile** and paste the complete link into the wizard. You do not need to extract the user ID. See [Following the Monitored User](https://misiektoja.github.io/spotify_monitor/configuration/#following-the-monitored-user).
+
+Firefox import is the recommended login path for local and container installs. See [Container Operation](https://misiektoja.github.io/spotify_monitor/usage/#import-firefox-into-container-authentication) for the host-specific import commands.
+
+<a id="common-commands"></a>
+## Common Commands
+
+Use [Quick Install & Run](#-quick-install-run) above for first-time setup. The table uses PyPI commands. For manual script, direct Docker and Docker Compose equivalents, see [Run Individual Commands](https://misiektoja.github.io/spotify_monitor/quick-start/#run-individual-commands).
+
+| I want to... | Run this |
+| --- | --- |
+| Start monitoring with existing authentication | `spotify_monitor TARGET`, where `TARGET` is a raw ID, `spotify:user:` URI or profile URL |
+| Start a target saved as `TARGET_USER_URI_ID` | `spotify_monitor --config-file spotify_monitor.conf` |
+| Check authentication, connectivity and one target | `spotify_monitor --doctor TARGET` |
+| List Spotify friends visible to the configured account | `spotify_monitor --list-friends` |
+| Import a Spotify login from Firefox | Open [Spotify Web Player](https://open.spotify.com/) in Firefox, sign in then run `spotify_monitor --import-browser-cookie --browser firefox` |
+| Safely set or replace `SP_DC_COOKIE` | Run `spotify_monitor --set-sp-dc` and enter `sp_dc` at the hidden prompt |
+| Configure and test webhook alerts | Use the setup wizard or follow [Webhook Settings](https://misiektoja.github.io/spotify_monitor/configuration/#webhook-settings) |
+
+Running the tool with no arguments offers the wizard if you have not saved a target. If a target is already saved, it starts monitoring that target.
+
+For authentication, saved targets, configuration backups and setup recovery, see the [full Quick Start guide](https://misiektoja.github.io/spotify_monitor/quick-start/).
+
+For browser profiles, manual cookie extraction, Docker authentication, email and webhook setup, see [Configuration](https://misiektoja.github.io/spotify_monitor/configuration/). For notification choices, playback controls and output files, see [Usage](https://misiektoja.github.io/spotify_monitor/usage/).
+
 <a id="documentation"></a>
 ## Documentation
 
@@ -112,102 +181,6 @@ Full documentation is available at **[misiektoja.github.io/spotify_monitor](http
 - [Usage](https://misiektoja.github.io/spotify_monitor/usage/) - command formats, monitoring, container operation, notifications, playback and output
 - [Troubleshooting](https://misiektoja.github.io/spotify_monitor/troubleshooting/) - the `--doctor` self-check and logging levels
 - [Debugging Tools](https://misiektoja.github.io/spotify_monitor/debugging/) - TOTP token testing and secret extraction
-
-<a id="quick-start"></a>
-## Quick Start
-
-<a id="new-here-run-the-setup-wizard"></a>
-### New here? Run the setup wizard
-
-The fastest way to get started is `--setup`. It asks who to monitor, how to connect to Spotify and which alerts you want then saves a ready-to-run configuration. Private values stay in `.env`.
-
-On Linux, set `SPOTIFY_MONITOR_UID="$(id -u)"` and `SPOTIFY_MONITOR_GID="$(id -g)"` before using Docker Compose.
-
-Use the command that matches how you run the tool:
-
-```sh
-# PyPI install
-spotify_monitor --setup
-
-# Manual Python script on macOS or Linux
-python3 spotify_monitor.py --setup
-
-# Manual Python script on Windows
-python spotify_monitor.py --setup
-
-# Docker Compose (skip curl if you cloned the repository)
-curl -fsSLO https://raw.githubusercontent.com/misiektoja/spotify_monitor/refs/heads/main/docker-compose.yml
-docker compose run --rm spotify_monitor --setup
-
-# Docker image on macOS or Windows
-docker run --rm -it --init -v "${PWD}:/data:z" misiektoja/spotify-monitor:latest --setup
-
-# Docker image on Linux
-docker run --rm -it --init --user "$(id -u):$(id -g)" -v "$PWD:/data:z" misiektoja/spotify-monitor:latest --setup
-```
-
-Running the tool with no arguments also offers the wizard when no target has been saved. It detects whether you use PyPI, the downloaded script, Docker or Docker Compose then shows matching commands.
-
-<a id="before-monitoring"></a>
-### Before monitoring
-
-Spotify only shows a person's listening activity when both of these conditions are met:
-
-1. The Spotify account used by Spotify Monitor follows the person you want to monitor.
-2. That person has enabled listening activity sharing in Spotify.
-
-The setup wizard (`spotify_monitor --setup`) checks whether the configured Spotify account follows the target. It offers to follow only when needed and changes the account only after explicit confirmation. If you want to do it manually, open the person's profile in the Spotify desktop or mobile app then use **Share** > **Copy link to profile**. You can paste the complete profile link into the setup wizard. You do not need to extract the user ID yourself. See [Following the Monitored User](https://misiektoja.github.io/spotify_monitor/configuration/#following-the-monitored-user).
-
-For local installs, Firefox import is the recommended login path. Docker users should use the wizard's hidden manual `sp_dc` entry. See the [full Quick Start guide](https://misiektoja.github.io/spotify_monitor/quick-start/) for details.
-
-<a id="not-sure-which-command-you-need"></a>
-### Not sure which command you need?
-
-| I want to... | Run this |
-| --- | --- |
-| Set up Spotify Monitor for the first time | Use the setup command for your installation above |
-| Start monitoring with existing authentication | `spotify_monitor TARGET`, where `TARGET` is a raw ID, `spotify:user:` URI or profile URL |
-| Start a target saved as `TARGET_USER_URI_ID` | `spotify_monitor --config-file spotify_monitor.conf` or `docker compose up` |
-| Check authentication, connectivity and one target | `spotify_monitor --doctor TARGET` |
-| List Spotify friends visible to the configured account | `spotify_monitor --list-friends` |
-| Import a Spotify login from Firefox | Open [Spotify Web Player](https://open.spotify.com/) in Firefox, sign in then run `spotify_monitor --import-browser-cookie --browser firefox` |
-| Safely set or replace `SP_DC_COOKIE` | Run `spotify_monitor --set-sp-dc` and enter `sp_dc` at the hidden prompt |
-| Configure and test webhook alerts | Use the setup wizard or follow [Webhook Settings](https://misiektoja.github.io/spotify_monitor/configuration/#webhook-settings) |
-
-<a id="manual-commands"></a>
-### Manual commands
-
-The examples below use a PyPI install. For a manual script install, replace `spotify_monitor` with `python3 spotify_monitor.py` on macOS or Linux and `python spotify_monitor.py` on Windows. Docker users can copy the complete command prefixes from the [Usage guide](https://misiektoja.github.io/spotify_monitor/usage/#command-format).
-
-Sign in to [Spotify Web Player](https://open.spotify.com/) with Firefox then import that login:
-
-```sh
-spotify_monitor --import-browser-cookie --browser firefox
-```
-
-If browser import is unavailable, enter `sp_dc` through a hidden prompt:
-
-```sh
-spotify_monitor --set-sp-dc
-```
-
-Start monitoring with a raw user ID, Spotify user URI or profile URL. A target saved by the wizard does not need to be repeated:
-
-```sh
-spotify_monitor <spotify_user_uri_id>
-spotify_monitor "https://open.spotify.com/user/spotify_user_uri_id"
-spotify_monitor --config-file spotify_monitor.conf
-```
-
-Run the self-check or view every command:
-
-```sh
-spotify_monitor --doctor <spotify_user_uri_id>
-spotify_monitor --list-friends
-spotify_monitor --help
-```
-
-For browser profiles, manual cookie extraction, Docker authentication, email and webhook setup, see [Configuration](https://misiektoja.github.io/spotify_monitor/configuration/). For notification choices, playback controls and output files, see [Usage](https://misiektoja.github.io/spotify_monitor/usage/).
 
 <a id="change-log"></a>
 ## Change Log

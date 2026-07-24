@@ -35,6 +35,14 @@ def test_set_sp_dc_cli_refuses_noninteractive_execution():
     assert "To fix:" in result.stdout
 
 
+# Verifies a config path is accepted as follow-up command context
+def test_set_sp_dc_cli_accepts_config_context():
+    result = run_cli("--set-sp-dc", "--config-file", "custom.conf")
+    assert result.returncode == 1
+    assert "requires an interactive terminal" in result.stdout
+    assert "cannot be combined" not in result.stderr
+
+
 # Verifies disabling dotenv persistence is rejected before any hidden prompt
 def test_set_sp_dc_rejects_env_file_none():
     with pytest.raises(monitor.BrowserCookieImportError, match="requires a dotenv destination"):
@@ -104,7 +112,7 @@ def test_set_sp_dc_never_exposes_entered_cookie(tmp_path, monkeypatch, capsys):
     assert secret not in str(error.value)
     assert secret not in captured.out
     assert secret not in captured.err
-    assert monitor.COOKIE_GUIDE_URL in captured.out
+    assert monitor.MANUAL_COOKIE_GUIDE_URL in captured.out
     assert not destination.exists()
 
 

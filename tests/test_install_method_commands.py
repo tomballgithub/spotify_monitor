@@ -39,16 +39,21 @@ def test_install_method_detects_docker_and_compose(monkeypatch):
     assert monitor._wizard_install_method() == "compose"
 
 
-# Verifies every installation method has the requested portable command prefix
+# Verifies container prefixes use host-side IDs only for selected Linux hosts
 def test_install_method_command_prefixes(monkeypatch):
     monkeypatch.setattr(monitor.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(monitor.sys, "executable", "/usr/bin/python3")
+    monkeypatch.setattr(monitor.sys, "executable", "/usr/bin/python")
     monkeypatch.setattr(monitor.sys, "argv", ["spotify_monitor.py"])
-    monkeypatch.setattr(monitor.os, "getuid", lambda: 1234, raising=False)
-    monkeypatch.setattr(monitor.os, "getgid", lambda: 5678, raising=False)
+    monkeypatch.setattr(monitor.os, "getuid", lambda: 10001, raising=False)
     assert monitor._wizard_cmd_prefix("manual") == "python3 spotify_monitor.py"
     assert monitor._wizard_cmd_prefix("pip") == "spotify_monitor"
-    assert monitor._wizard_cmd_prefix("docker") == 'docker run --rm -it --init --user 1234:5678 -v "$PWD:/data:z" misiektoja/spotify-monitor'
+    assert monitor._wizard_cmd_prefix("docker") == 'docker run --rm -it --init -v "${PWD}:/data:z" misiektoja/spotify-monitor'
+    monkeypatch.setattr(monitor.os, "getuid", lambda: 1000, raising=False)
+    assert monitor._wizard_cmd_prefix("docker") == 'docker run --rm -it --init --user "$(id -u):$(id -g)" -v "${PWD}:/data:z" misiektoja/spotify-monitor'
+    assert monitor._wizard_cmd_prefix("docker", host_os="macos") == 'docker run --rm -it --init -v "${PWD}:/data:z" misiektoja/spotify-monitor'
+    assert monitor._wizard_cmd_prefix("docker", host_os="linux") == 'docker run --rm -it --init --user "$(id -u):$(id -g)" -v "${PWD}:/data:z" misiektoja/spotify-monitor'
+    assert monitor._wizard_cmd_prefix("docker", host_os="windows-powershell") == 'docker run --rm -it --init -v "${PWD}:/data:z" misiektoja/spotify-monitor'
+    assert monitor._wizard_cmd_prefix("docker", host_os="windows-cmd") == 'docker run --rm -it --init -v "%cd%:/data:z" misiektoja/spotify-monitor'
     assert monitor._wizard_cmd_prefix("compose") == "docker compose run --rm spotify_monitor"
 
 
@@ -79,14 +84,48 @@ def test_container_action_commands_include_paths_and_target(tmp_path, monkeypatc
     assert command == "docker compose run --rm spotify_monitor --doctor target.user --config-file /data/spotify_monitor.conf --env-file /data/.env"
 
 
-# Verifies the Linux Firefox mount command places the volume before the container service or image
-def test_firefox_import_commands_mount_linux_profile(tmp_path, monkeypatch):
+# Verifies container setup defaults always target the bind-mounted data directory
+@pytest.mark.parametrize("method", ["docker", "compose"])
+def test_container_setup_destinations_use_data_mount(tmp_path, monkeypatch, method):
     monkeypatch.chdir(tmp_path)
-    compose = monitor._wizard_firefox_import_cmd("compose", tmp_path / ".env")
-    docker = monitor._wizard_firefox_import_cmd("docker", tmp_path / ".env")
-    assert compose == 'docker compose run --rm -v "$HOME/.mozilla/firefox:/home/spotify/.mozilla/firefox:ro" spotify_monitor --import-browser-cookie --browser firefox --env-file /data/.env'
-    assert '-v "$HOME/.mozilla/firefox:/home/spotify/.mozilla/firefox:ro" misiektoja/spotify-monitor' in docker
+    config_path, env_path = monitor._wizard_destinations(method=method)
+    assert config_path == Path("/data/spotify_monitor.conf")
+    assert env_path == Path("/data/.env")
+
+
+# Verifies temporary container paths outside the bind mount are rejected
+@pytest.mark.parametrize("method", ["docker", "compose"])
+def test_container_setup_rejects_destinations_outside_data(method):
+    with pytest.raises(ValueError, match="must be inside /data"):
+        monitor._wizard_destinations("/tmp/custom.conf", "/data/.env", method=method)
+    with pytest.raises(ValueError, match="must be inside /data"):
+        monitor._wizard_destinations("/data/custom.conf", "/tmp/custom.env", method=method)
+
+
+# Verifies paths already expressed inside the bind mount remain unchanged
+def test_container_paths_already_inside_data_are_preserved():
+    assert monitor._wizard_container_path("/data/nested/custom.conf") == "/data/nested/custom.conf"
+
+
+# Verifies Firefox import commands use the selected host profile layout
+@pytest.mark.parametrize("host_os,source", [("macos", '"${HOME}/Library/Application Support/Firefox:/home/spotify/.mozilla/firefox:ro"'), ("linux", '"$HOME/.mozilla/firefox:/home/spotify/.mozilla/firefox:ro"'), ("linux-snap", '"$HOME/snap/firefox/common/.mozilla/firefox:/home/spotify/.mozilla/firefox:ro"'), ("linux-flatpak", '"$HOME/.var/app/org.mozilla.firefox/.mozilla/firefox:/home/spotify/.mozilla/firefox:ro"'), ("windows-powershell", '"$env:APPDATA\\Mozilla\\Firefox:/home/spotify/.mozilla/firefox:ro"'), ("windows-cmd", '"%APPDATA%\\Mozilla\\Firefox:/home/spotify/.mozilla/firefox:ro"')])
+def test_firefox_import_commands_mount_selected_host_profile(tmp_path, monkeypatch, host_os, source):
+    monkeypatch.chdir(tmp_path)
+    compose = monitor._wizard_firefox_import_cmd("compose", tmp_path / ".env", host_os=host_os)
+    docker = monitor._wizard_firefox_import_cmd("docker", tmp_path / ".env", host_os=host_os)
+    assert compose == f"docker compose run --rm -v {source} spotify_monitor --import-browser-cookie --browser firefox --env-file /data/.env"
+    assert f"-v {source} misiektoja/spotify-monitor" in docker
+    assert ('--user "$(id -u):$(id -g)"' in docker) is host_os.startswith("linux")
+    assert ('-v "%cd%:/data:z"' in docker) is (host_os == "windows-cmd")
     assert docker.endswith("--import-browser-cookie --browser firefox --env-file /data/.env")
+
+
+# Verifies a setup-generated import carries the saved config and target into post-import guidance
+def test_firefox_import_command_carries_followup_context(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    command = monitor._wizard_firefox_import_cmd("docker", tmp_path / ".env", host_os="macos", config_path=tmp_path / "spotify_monitor.conf", target="target.user")
+    assert "--import-browser-cookie --browser firefox target.user" in command
+    assert "--config-file /data/spotify_monitor.conf --env-file /data/.env" in command
 
 
 # Verifies private entry commands use installation-aware dotenv paths
@@ -95,6 +134,7 @@ def test_set_sp_dc_commands_use_container_data_paths(tmp_path, monkeypatch):
     assert monitor._wizard_set_sp_dc_cmd("pip") == "spotify_monitor --set-sp-dc"
     assert monitor._wizard_set_sp_dc_cmd("docker", tmp_path / ".env").endswith("misiektoja/spotify-monitor --set-sp-dc --env-file /data/.env")
     assert monitor._wizard_set_sp_dc_cmd("compose", tmp_path / ".env") == "docker compose run --rm spotify_monitor --set-sp-dc --env-file /data/.env"
+    assert monitor._wizard_set_sp_dc_cmd("compose", tmp_path / ".env", config_path=tmp_path / "custom.conf") == "docker compose run --rm spotify_monitor --set-sp-dc --config-file /data/custom.conf --env-file /data/.env"
 
 
 # Verifies Chromium-family browser choices are removed on Windows and inside containers
@@ -199,10 +239,9 @@ def test_docker_help_epilog_uses_container_commands(monkeypatch):
     prefix = monitor._wizard_cmd_prefix("docker")
     assert f"{prefix} --setup" in epilog
     assert f"{prefix} --set-sp-dc --env-file /data/.env" in epilog
-    assert monitor._wizard_firefox_import_cmd("docker") in epilog
-    assert epilog.index("--set-sp-dc") < epilog.index("--import-browser-cookie")
-    assert "recommended for Docker" in epilog
-    assert "Advanced Linux host example" in epilog
+    assert monitor._wizard_firefox_import_cmd("docker", Path.cwd() / ".env") in epilog
+    assert epilog.index("--import-browser-cookie") < epilog.index("--set-sp-dc")
+    assert "Linux host example" in epilog
     assert "profile read-only" in epilog
     assert "Host Spotify auto-play is unavailable by default" in epilog
     assert f"{prefix} --doctor <spotify_user_id>" in epilog
@@ -216,10 +255,11 @@ def test_compose_help_epilog_uses_service_commands(monkeypatch):
     prefix = monitor._wizard_cmd_prefix("compose")
     assert f"{prefix} --setup" in epilog
     assert f"{prefix} --set-sp-dc --env-file /data/.env" in epilog
-    assert monitor._wizard_firefox_import_cmd("compose") in epilog
+    assert monitor._wizard_firefox_import_cmd("compose", Path.cwd() / ".env") in epilog
+    assert epilog.index("--import-browser-cookie") < epilog.index("--set-sp-dc")
     assert f"{prefix} --list-friends" in epilog
     assert "--login-request-body-file /data/login.protobuf" in epilog
-    assert "# Start from the target saved by setup\n  docker compose up" in epilog
+    assert "# Start from the target saved by setup\n  docker compose up --no-log-prefix" in epilog
 
 
 # Verifies every help epilog avoids command-line secret flags and values

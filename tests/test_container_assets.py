@@ -43,12 +43,13 @@ def test_compose_contract():
     assert "tty: true" in compose
     assert 'SPOTIFY_MONITOR_COMPOSE: "1"' in compose
     assert "- ./:/data:z" in compose
-    assert '["--config-file", "/data/spotify_monitor.conf"]' in compose
+    assert '["--config-file", "/data/spotify_monitor.conf", "--env-file", "/data/.env"]' in compose
     assert "env_file:" not in compose
     assert "ports:" not in compose
     assert "restart:" not in compose
     assert "SPOTIFY_MONITOR_UID" in compose
     assert "SPOTIFY_MONITOR_GID" in compose
+    assert "docker compose up --no-log-prefix" in compose
 
 
 # Verifies Docker publishing is test-gated and uses the expected Hub credentials and architectures
@@ -102,6 +103,46 @@ def test_usage_docs_describe_default_container_playback_limitation():
     assert "--track-in-spotify" in usage
 
 
+# Verifies setup and Compose docs explain persistent and custom file paths
+def test_docs_explain_setup_and_compose_file_paths():
+    quick_start = read_asset("docs/quick-start.md")
+    configuration = read_asset("docs/configuration.md")
+    usage = read_asset("docs/usage.md")
+    assert "Container setup destinations must stay inside `/data`" in quick_start
+    assert "Add `--config-file PATH`" in quick_start
+    assert "use the explicit `docker compose run` command printed by setup" in quick_start
+    assert "fresh configuration from defaults" in configuration
+    assert "If setup saved either file under another `/data` path" in usage
+
+
+# Verifies container Firefox documentation covers persistent auth and host-specific mounts
+def test_usage_docs_cover_container_firefox_import():
+    usage = read_asset("docs/usage.md")
+    compose = read_asset("docker-compose.yml")
+    assert '<a id="import-firefox-into-container-authentication"></a>' in usage
+    linux_sources = ("$HOME/.mozilla/firefox", "$HOME/snap/firefox/common/.mozilla/firefox", "$HOME/.var/app/org.mozilla.firefox/.mozilla/firefox")
+    for source in linux_sources:
+        assert f'docker run --rm -it --init --user "$(id -u):$(id -g)" -v "$PWD:/data:z" -v "{source}:/home/spotify/.mozilla/firefox:ro"' in usage
+        assert f'docker compose run --rm -v "{source}:/home/spotify/.mozilla/firefox:ro"' in usage
+        assert f'docker compose run --rm -v "{source}:/home/spotify/.mozilla/firefox:ro"' in compose
+    mac_mount = '${HOME}/Library/Application Support/Firefox:/home/spotify/.mozilla/firefox:ro'
+    assert f'docker run --rm -it --init -v "${{PWD}}:/data:z" -v "{mac_mount}"' in usage
+    assert f'docker compose run --rm -v "{mac_mount}"' in usage
+    assert f'docker compose run --rm -v "{mac_mount}"' in compose
+    windows_mounts = (("${PWD}", "$env:APPDATA\\Mozilla\\Firefox", "Windows PowerShell"), ("%cd%", "%APPDATA%\\Mozilla\\Firefox", "Windows Command Prompt"))
+    for current_directory, source, label in windows_mounts:
+        assert f'docker run --rm -it --init -v "{current_directory}:/data:z" -v "{source}:/home/spotify/.mozilla/firefox:ro"' in usage
+        assert f'docker compose run --rm -v "{source}:/home/spotify/.mozilla/firefox:ro"' in usage
+        assert f'docker compose run --rm -v "{source}:/home/spotify/.mozilla/firefox:ro"' in compose
+        assert f"#### {label}" in usage
+    for heading in ("#### Linux with a standard Firefox package", "#### Linux with Firefox from Snap", "#### Linux with Firefox from Flatpak", "#### macOS"):
+        assert heading in usage
+    assert "Guided setup asks which host environment runs Docker" in usage
+    assert "Doctor is deferred until the import succeeds" in usage
+    assert "Do not add `:z` or `:Z` to the whole Firefox profile mount" in usage
+    assert "You do not need to mount Firefox again" in usage
+
+
 # Verifies the usage and configuration guides cover portable mounts and safe dotenv copying
 def test_docs_describe_portable_mounts_and_safe_dotenv_copy():
     usage = read_asset("docs/usage.md")
@@ -120,9 +161,61 @@ def test_installation_docs_cover_all_delivery_and_upgrade_paths():
     assert "curl -fsSLO https://raw.githubusercontent.com/misiektoja/spotify_monitor/refs/heads/main/requirements.txt" in installation
     assert "pip install --upgrade -r requirements.txt" in installation
     assert "docker build --pull --tag spotify-monitor:local ." in installation
-    assert "Plain `docker run` reuses a cached image" in installation
+    assert "No separate image download is required" in installation
     assert "docker pull misiektoja/spotify-monitor:latest" in installation
     assert "docker compose pull" in installation
+
+
+# Verifies container onboarding prioritizes direct Docker and folds pulls into setup
+def test_container_onboarding_prioritizes_direct_docker_and_folds_pulls_into_setup():
+    installation = read_asset("docs/installation.md")
+    quick_start = read_asset("docs/quick-start.md")
+    compose = read_asset("docker-compose.yml")
+    assert installation.index("### Install from Docker Hub") < installation.index("### Install with Docker Compose")
+    direct_install = installation.split("### Install from Docker Hub", 1)[1].split("### Install with Docker Compose", 1)[0]
+    compose_install = installation.split("### Install with Docker Compose", 1)[1].split("### Build the Docker Image Locally", 1)[0]
+    assert "docker run --pull=always" in direct_install
+    assert "docker pull misiektoja/spotify-monitor:latest" not in direct_install
+    assert "\ndocker compose pull\n" not in compose_install
+    assert "curl -fsSLO https://raw.githubusercontent.com/misiektoja/spotify_monitor/refs/heads/main/docker-compose.yml" in compose_install
+    assert "curl -fsSLO" not in quick_start
+    assert "If you opened this page first" in quick_start
+    assert '=== "Manual Python script on macOS or Linux"' in quick_start
+    assert '=== "Manual Python script on Windows"' in quick_start
+    assert quick_start.index('=== "Docker image on macOS or Windows"') < quick_start.index('=== "Docker Compose"')
+    assert 'docker run --rm --pull=always -it --init -v "${PWD}:/data:z" misiektoja/spotify-monitor:latest --setup' in quick_start
+    assert 'docker run --rm --pull=always -it --init --user "$(id -u):$(id -g)" -v "$PWD:/data:z" misiektoja/spotify-monitor:latest --setup' in quick_start
+    compose_quick_start = quick_start.split('=== "Docker Compose"', 1)[1].split("Run interactive setup commands", 1)[0]
+    assert "run these shell commands in the same terminal immediately before setup" in compose_quick_start
+    assert 'export SPOTIFY_MONITOR_UID="$(id -u)"' in compose_quick_start
+    assert 'export SPOTIFY_MONITOR_GID="$(id -g)"' in compose_quick_start
+    assert "docker compose run --rm --pull=always spotify_monitor --setup" in compose_quick_start
+    assert "#   docker compose run --rm --pull=always spotify_monitor --setup" in compose
+    for relative_path in ("README.md", "docs/index.md"):
+        landing_page = read_asset(relative_path)
+        quick_install = landing_page.split("Quick Install & Run", 1)[1].split("<a id=\"features\"></a>", 1)[0]
+        assert quick_install.index("#### Docker image - fastest container setup") < quick_install.index("#### Docker Compose - shorter recurring commands")
+        assert "#### Python from PyPI" in quick_install
+        assert "##### macOS or Windows" in quick_install
+        assert "##### Linux" in quick_install
+        assert "\ndocker pull misiektoja/spotify-monitor:latest" not in quick_install
+        assert "\ndocker compose pull" not in quick_install
+        assert "docker run --rm --pull=always" in quick_install
+        assert "docker compose run --rm --pull=always spotify_monitor --setup" in quick_install
+        assert "pip install spotify_monitor\n```\n\nRun setup by itself:\n\n```sh\nspotify_monitor --setup" in quick_install
+        assert 'misiektoja/spotify-monitor:latest --setup\n```\n\nAfter setup finishes, start monitoring with the files created by the wizard:\n\n```sh\ndocker run --rm -it --init -v "${PWD}:/data:z"' in quick_install
+        assert 'misiektoja/spotify-monitor:latest --setup\n```\n\nAfter setup finishes, start monitoring:\n\n```sh\ndocker run --rm -it --init --user "$(id -u):$(id -g)"' in quick_install
+    readme = read_asset("README.md")
+    assert "\n## Quick Start\n" not in readme
+    assert '<a id="common-commands"></a>' in readme
+    assert readme.index('<a id="features"></a>') < readme.index('<a id="before-monitoring"></a>') < readme.index('<a id="common-commands"></a>') < readme.index('<a id="documentation"></a>')
+    assert "| Set up Spotify Monitor for the first time |" not in readme
+    assert "https://misiektoja.github.io/spotify_monitor/quick-start/#run-individual-commands" in readme
+    assert "https://misiektoja.github.io/spotify_monitor/quick-start/" in readme
+    common_section = readme.split("## Common Commands", 1)[1].split('<a id="documentation"></a>', 1)[0]
+    common_table = common_section.split("| I want to... | Run this |", 1)[1].split("\n\n", 1)[0]
+    assert "The table uses PyPI commands." in common_section
+    assert "docker compose" not in common_table
 
 
 # Verifies manual upgrade guidance repeats linked files and direct download commands

@@ -1,14 +1,19 @@
 # Main Spotify Monitor application container
 #
 # Quick start:
-#   docker compose run --rm spotify_monitor --setup
+#   docker compose run --rm --pull=always spotify_monitor --setup
+# Firefox import after setup:
+#   macOS: docker compose run --rm -v "${HOME}/Library/Application Support/Firefox:/home/spotify/.mozilla/firefox:ro" spotify_monitor --import-browser-cookie --browser firefox --env-file /data/.env
+#   Linux standard: docker compose run --rm -v "$HOME/.mozilla/firefox:/home/spotify/.mozilla/firefox:ro" spotify_monitor --import-browser-cookie --browser firefox --env-file /data/.env
+#   Linux Snap: docker compose run --rm -v "$HOME/snap/firefox/common/.mozilla/firefox:/home/spotify/.mozilla/firefox:ro" spotify_monitor --import-browser-cookie --browser firefox --env-file /data/.env
+#   Linux Flatpak: docker compose run --rm -v "$HOME/.var/app/org.mozilla.firefox/.mozilla/firefox:/home/spotify/.mozilla/firefox:ro" spotify_monitor --import-browser-cookie --browser firefox --env-file /data/.env
+#   Windows PowerShell: docker compose run --rm -v "$env:APPDATA\Mozilla\Firefox:/home/spotify/.mozilla/firefox:ro" spotify_monitor --import-browser-cookie --browser firefox --env-file /data/.env
+#   Windows Command Prompt: docker compose run --rm -v "%APPDATA%\Mozilla\Firefox:/home/spotify/.mozilla/firefox:ro" spotify_monitor --import-browser-cookie --browser firefox --env-file /data/.env
+# Manual authentication fallback:
 #   docker compose run --rm spotify_monitor --set-sp-dc --env-file /data/.env
 #   docker compose run --rm spotify_monitor --set-webhook-url --env-file /data/.env
-#   docker compose run --rm spotify_monitor --doctor
-#   docker compose up
-#
-# Advanced Linux Firefox import example with a read-only host profile mount:
-#   docker compose run --rm -v "$HOME/.mozilla/firefox:/home/spotify/.mozilla/firefox:ro" spotify_monitor --import-browser-cookie --browser firefox
+#   docker compose run --rm spotify_monitor --doctor --config-file /data/spotify_monitor.conf --env-file /data/.env
+#   docker compose up --no-log-prefix
 
 services:
   spotify_monitor:
@@ -18,11 +23,11 @@ services:
     init: true
     stdin_open: true
     tty: true
-    # No override is needed on Docker Desktop. These optional values help Linux hosts whose bind mount rejects writes from UID 10001.
+    # Docker-compatible runtimes on macOS and Windows normally need no override. These optional values help native Linux hosts whose bind mount rejects writes from UID 10001.
     user: "${SPOTIFY_MONITOR_UID:-10001}:${SPOTIFY_MONITOR_GID:-10001}"
     environment:
       SPOTIFY_MONITOR_COMPOSE: "1"
     volumes:
       # The shared SELinux label is ignored on hosts that do not use SELinux.
       - ./:/data:z
-    command: ["--config-file", "/data/spotify_monitor.conf"]
+    command: ["--config-file", "/data/spotify_monitor.conf", "--env-file", "/data/.env"]
