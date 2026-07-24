@@ -2463,34 +2463,32 @@ def send_notification(message, image_url="", track="", artist="", album="", play
     
 
 def spotify_get_playlist_items(access_token, playlist_uri, fields, limit, offset, oauth_app=False):
-    print_debug(f"spotify_get_playlist_items")
-    print_debug(f"access_token: {access_token}")
-    # print_debug(f"oauth_app: {oauth_app}")
+    print_debug(f"entered spotify_get_playlist_items")
+
+    if TOKEN_SOURCE in {"cookie", "client"} and not oauth_app:
+        access_token = spotify_get_access_token_from_oauth_app(SP_APP_CLIENT_ID, SP_APP_CLIENT_SECRET)
+        print_debug(f"updated access_token: {access_token}")
+        oauth_app = True
+    if not access_token:
+        raise Exception("_spotify_get_playlist_owner_and_image_api(): OAuth app token is empty")
+    print_debug(f"oauth_app: {oauth_app}")
+
     playlist_id = playlist_uri.split(':', 2)[2]
     url = f"https://api.spotify.com/v1/playlists/{playlist_id}/tracks?fields={fields}&limit={limit}&offset={offset}"
-
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "User-Agent": USER_AGENT
-    }
-
+    headers = {"Authorization": f"Bearer {access_token}", "User-Agent": USER_AGENT}
     if TOKEN_SOURCE == "cookie" and not oauth_app:
-        headers.update({
-            "Client-Id": SP_CACHED_CLIENT_ID
-        })
+        headers["Client-Id"] = SP_CACHED_CLIENT_ID
 
-    # add si parameter so link opens in native Spotify app after clicking
-    si = "?si=1"
-
-    try:
-        response = SESSION.get(url, headers=headers, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
-        print_debug(f"spotify_get_playlist_items")
-        print_debug(f"{response}")
-        print_debug(f"{response.json()}")
-        response.raise_for_status()
-        return response.json()
-    except Exception:
-        raise
+    print_debug(f"headers: {headers}")
+    print_debug(f"url: {url}")
+    debug_print(f"HTTP GET {url} [legacy playlist owner] headers={sanitize_debug_headers(headers)}")
+    response = SESSION.get(url, headers=headers, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
+    debug_print(f"HTTP GET {url} [legacy playlist owner] -> {response.status_code}")
+    print_debug(f"exiting spotify_get_playlist_items")
+    # print_debug(f"{response}")
+    # print_debug(f"{response.json()}")
+    response.raise_for_status()
+    return response.json()
 
 
 def search_playlist(access_token, search_playlist_name, search_playlist_uri, search_song_id, search_track_name, search_artist_name, show_size):
