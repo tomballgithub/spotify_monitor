@@ -2212,16 +2212,23 @@ class Logger(object):
         self.terminal = sys.stdout
         if not DISABLE_LOGGING:
             self.logfile = open(filename, "a", buffering=1, encoding="utf-8")
-        self.mode = mode  # Controls where to print
+        self.mode = mode
+        self._suppress_next_newline = False
 
     def write(self, message):
-        """Write message based on the selected mode."""
         if not DISABLE_LOGGING:
             if self.mode in ["both", "log"]:
                 self.logfile.write(message.expandtabs(8))
                 self.logfile.flush()
         if self.mode in ["both", "screen"]:
-            if (TRUNCATE_CHARS):
+            if ALT_VIEW and message.startswith("[DEBUG"):
+                self._suppress_next_newline = True
+                return
+            if ALT_VIEW and message == "\n" and self._suppress_next_newline:
+                self._suppress_next_newline = False
+                return
+            self._suppress_next_newline = False
+            if TRUNCATE_CHARS:
                 message = truncate_string_per_line(message, TRUNCATE_CHARS)
             self.terminal.write(message.expandtabs(8))
             self.terminal.flush()
@@ -7708,7 +7715,9 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
             # Change print's beyond this point to only go to log
             # Then, print_to_screen will only go to screen (both a possibility for debugging)
             if ALT_VIEW:
+                debug_print("switching to log_file only log")
                 sys.stdout = Logger(FINAL_LOG_PATH, mode="log")
+                debug_print("switched to log_file only log")
 
             # Print after timestamp
             if ALT_VIEW and jmk_send:
