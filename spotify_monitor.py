@@ -2454,7 +2454,7 @@ def search_playlist(access_token, search_playlist_name, search_playlist_uri, sea
         print_debug(f"-- playlist_offset: {playlist_offset}, playlist_size: {playlist_size}")
 
         while playlist_offset < playlist_size and not found_track:
-            context_json = spotify_get_playlist_items(access_token, search_playlist_uri, "total,items(track(id,name,artists))", playlist_limit, playlist_offset, oauth_app=True)
+            context_json = spotify_get_playlist_items(access_token, search_playlist_uri, "total,items(track(id,name,artists))", playlist_limit, playlist_offset)
             playlist_size = context_json.get("total", playlist_size)
 
             # print_debug(f"-- context_json: {context_json}")
