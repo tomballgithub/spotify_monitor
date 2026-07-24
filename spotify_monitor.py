@@ -2696,6 +2696,8 @@ def clear_screen(enabled=True):
 
 # Debug print helper - only prints when DEBUG_MODE is enabled
 def debug_print(message):
+    if message.startswith("HTTP "):
+        return
     if DEBUG_MODE:
         timestamp = datetime.now().strftime("%H:%M:%S")
         print(f"[DEBUG {timestamp}] {sanitize_error_text(message)}")
@@ -2929,6 +2931,7 @@ def update_spreadsheet_row(col_b_text, want_footer):
     if not UPDATE_SPREADSHEET:
         return "", ""
 
+    debug_print("Updating Google Sheet")
     # Date-only, matching the legacy Apps Script column (which stored msg.getDate() but the sheet
     # displays date-only) - the clock time already lives at the front of col_b_text, so putting a
     # full timestamp here too would be redundant and renders differently (date+time) than the
