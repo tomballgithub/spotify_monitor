@@ -7371,15 +7371,9 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                 sp_playlist_url = spotify_convert_uri_to_url(sp_playlist_uri)
                 playlist_m_body = f"\nPlaylist: {sp_playlist}{playlist_suffix}"
                 playlist_m_body_html = f"<br>Playlist: <a href=\"{sp_playlist_url}\">{escape(sp_playlist)}{playlist_suffix}</a>"
-                sp_playlist_owner = spotify_get_playlist_owner(sp_accessToken_oauth_app, sp_playlist_uri, oauth_app=True)
-                sp_playlist_image_url = spotify_get_playlist_image_url(sp_accessToken_oauth_app, sp_playlist_uri, oauth_app=True)
-                playlist_suffix = SPOTIFY_SUFFIX if sp_playlist_owner == "Spotify" else ""
-                playlist_suffix += (ICON_SONG_MISSING_FROM_PLAYLIST if icon_add else "")
-                # sp_playlist_image_url = sp_playlist_data.get("sp_playlist_image_url", "")
-                # sp_playlist_owner = sp_playlist_data.get("sp_playlist_owner")
 
                 if JMK_MODE:
-                    hasTrack = (sp_playlist_owner == "Spotify") or (search_playlist(sp_accessToken_oauth_app, sp_playlist, sp_playlist_uri, sp_track_uri_id, sp_track, sp_artist, False))
+                    hasTrack = (sp_playlist_owner == "Spotify") or (search_playlist(sp_accessToken, sp_playlist, sp_playlist_uri, sp_track_uri_id, sp_track, sp_artist, False))
                     print_debug(f"hasTrack (A1): {hasTrack}, sp_playlist_owner: {sp_playlist_owner}, sp_playlist: {sp_playlist}")
                     if hasTrack:
                         for playlist_data in monitored_playlists_data.values():
@@ -7618,16 +7612,14 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                     m_subject = f"Spotify user {sp_username} is active: '{sp_artist} - {sp_track}'"
                     m_body = f"Last played: {sp_artist} - {sp_track}\nDuration: {display_time(sp_track_duration)}{playlist_m_body}\nAlbum: {sp_album}{context_m_body}{music_section_text}{lyrics_section_text}Songs played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})\n\nLast activity: {get_date_from_ts(sp_ts)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
                     m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{sp_artist_url}\">{escape(sp_artist)}</a> - <a href=\"{sp_track_url}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{playlist_m_body_html}<br>Album: <a href=\"{sp_album_url}\">{escape(sp_album)}</a>{context_m_body_html}{music_section_html}{lyrics_section_html}Songs played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})<br><br>Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
-                    send_notification_channels("active", m_subject, m_body, m_body_html, ACTIVE_NOTIFICATION, image_url=sp_playlist_image_url or sp_album_image_url)
                     if JMK_MODE:
                         update_spreadsheet_row(SPREADSHEET_DIVIDER_TEXT, False)
                         send_email(f"{GMAIL_TAG}---------------------------------", "  ", "  ", SMTP_SSL)
                         song_footer_txt, song_footer_html = update_spreadsheet_row(f"{datetime.now().strftime('%H:%M:%S')} {songstring()}", True)
-                        m_body += song_footer_txt
-                        m_body_html = m_body_html.replace("</body></html>", song_footer_html + "</body></html>")
+                        # m_body += song_footer_txt
+                        # m_body_html = m_body_html.replace("</body></html>", song_footer_html + "</body></html>")
                         send_email(f"{GMAIL_TAG}[{time_diff_str()}] {timestring()} {songstring()}", m_body, m_body_html, SMTP_SSL)
                     send_notification_channels("active", m_subject, m_body, m_body_html, ACTIVE_NOTIFICATION and (not JMK_MODE or ORIG_EMAILS), image_url=sp_playlist_image_url or sp_album_image_url)
-                        send_email(m_subject, m_body, m_body_html, SMTP_SSL)
 
                 if TRACK_SONGS and sp_track_uri_id:
                     if platform.system() == 'Darwin':       # macOS
@@ -7932,13 +7924,8 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                             spotify_linux_play_song(sp_track_uri_id)
 
                     if is_playlist:
-                        # sp_playlist_owner = sp_playlist_data.get("sp_playlist_owner")
-                        sp_playlist_owner = spotify_get_playlist_owner(sp_accessToken_oauth_app, sp_playlist_uri, oauth_app=True)
-                        playlist_suffix = SPOTIFY_SUFFIX if sp_playlist_owner == "Spotify" else ""
-                        playlist_suffix += (ICON_SONG_MISSING_FROM_PLAYLIST if icon_add else "")
-
                         if JMK_MODE:
-                            hasTrack = (sp_playlist_owner == "Spotify") or (search_playlist(sp_accessToken_oauth_app, sp_playlist, sp_playlist_uri, sp_track_uri_id, sp_track, sp_artist, False))
+                            hasTrack = (sp_playlist_owner == "Spotify") or (search_playlist(sp_accessToken, sp_playlist, sp_playlist_uri, sp_track_uri_id, sp_track, sp_artist, False))
                             print_debug(f"hasTrack (B1): {hasTrack}, sp_playlist_owner: {sp_playlist_owner}, sp_playlist: {sp_playlist}")
                             if hasTrack:
                                 for playlist_data in monitored_playlists_data.values():
@@ -7963,14 +7950,11 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
                     if is_playlist:
                         sp_playlist_url = spotify_convert_uri_to_url(sp_playlist_uri)
-                        sp_playlist_image_url = spotify_get_playlist_image_url(sp_accessToken_oauth_app, sp_playlist_uri, oauth_app=True)
-                        # sp_playlist_image_url = sp_playlist_data.get("sp_playlist_image_url", "")
                         playlist_m_body = f"\nPlaylist: {sp_playlist}{playlist_suffix}"
                         playlist_m_body_html = f"<br>Playlist: <a href=\"{sp_playlist_url}\">{escape(sp_playlist)}{playlist_suffix}</a>"
                     else:
                         playlist_m_body = ""
                         playlist_m_body_html = ""
-                        sp_playlist_image_url = ""
 
                     if sp_artist == sp_artist_old and sp_track == sp_track_old:
                         song_on_loop += 1
@@ -8442,19 +8426,16 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
                         active_ever = True
                         if ACTIVE_NOTIFICATION or webhook_event_enabled("active"):
-                            email_attempted, webhook_attempted = send_notification_channels("active", m_subject, m_body, m_body_html, ACTIVE_NOTIFICATION, image_url=sp_playlist_image_url or sp_album_image_url)
-                            email_sent = email_sent or email_attempted
-                            webhook_sent = webhook_sent or webhook_attempted
                             if JMK_MODE:
                                 song_footer_txt, song_footer_html = update_spreadsheet_row(f"{datetime.now().strftime('%H:%M:%S')} {songstring()}", True)
-                                m_body += song_footer_txt
-                                m_body_html = m_body_html.replace("</body></html>", song_footer_html + "</body></html>")
-                            if not JMK_MODE or ORIG_EMAILS:
-                                send_email(m_subject, m_body, m_body_html, SMTP_SSL)
-                            if JMK_MODE:
+                                # m_body += song_footer_txt
+                                # m_body_html = m_body_html.replace("</body></html>", song_footer_html + "</body></html>")
                                 update_spreadsheet_row(SPREADSHEET_DIVIDER_TEXT, False)
                                 send_email(f"{GMAIL_TAG}---------------------------------", "  ", "  ", SMTP_SSL)
                                 send_email(f"{GMAIL_TAG}[{time_diff_str()}] {timestring()} {songstring()}", m_body, m_body_html, SMTP_SSL)
+                            email_attempted, webhook_attempted = send_notification_channels("active", m_subject, m_body, m_body_html, ACTIVE_NOTIFICATION and (not JMK_MODE or ORIG_EMAILS), image_url=sp_playlist_image_url or sp_album_image_url)
+                            email_sent = email_sent or email_attempted
+                            webhook_sent = webhook_sent or webhook_attempted
 
                     on_the_list = False
                     if sp_track.upper() in tracks_upper or sp_playlist.upper() in tracks_upper or sp_album.upper() in tracks_upper:
@@ -8518,16 +8499,14 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                         m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{sp_artist_url}\">{escape(sp_artist)}</a> - <a href=\"{sp_track_url}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{played_for_m_body_html}{playlist_m_body_html}<br>Album: <a href=\"{sp_album_url}\">{escape(sp_album)}</a>{context_m_body_html}{music_section_html}{lyrics_section_html}Songs played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})<br><br>Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
                         m_body_short = f"{sp_track}\n{sp_artist}\n{sp_album}" + "\n[{playlist}]" if is_playlist else ""
                         notification_type = "track" if on_the_list and ((TRACK_NOTIFICATION and email_song_enabled) or webhook_event_enabled("track")) else "song"
-                        email_attempted, webhook_attempted = send_notification_channels(notification_type, m_subject, m_body, m_body_html, email_song_enabled, webhook_song_enabled, image_url=sp_album_image_url)
-                        email_sent = email_sent or email_attempted
-                        webhook_sent = webhook_sent or webhook_attempted
                         if JMK_MODE:
                             song_footer_txt, song_footer_html = update_spreadsheet_row(f"{datetime.now().strftime('%H:%M:%S')} {songstring()}", True)
-                            m_body += song_footer_txt
-                            m_body_html = m_body_html.replace("</body></html>", song_footer_html + "</body></html>")
+                            # m_body += song_footer_txt
+                            # m_body_html = m_body_html.replace("</body></html>", song_footer_html + "</body></html>")
                             send_email(f"{GMAIL_TAG}[{time_diff_str()}] {timestring()} {songstring()}", m_body, m_body_html, SMTP_SSL)
-                        if not JMK_MODE or ORIG_EMAILS:
-                            send_email(m_subject, m_body, m_body_html, SMTP_SSL)
+                        email_attempted, webhook_attempted = send_notification_channels(notification_type, m_subject, m_body, m_body_html, email_song_enabled and (not JMK_MODE or ORIG_EMAILS), webhook_song_enabled, image_url=sp_album_image_url, body_short=m_body_short)
+                        email_sent = email_sent or email_attempted
+                        webhook_sent = webhook_sent or webhook_attempted
 
                     try:
                         if csv_file_name:
@@ -8656,7 +8635,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                             m_subject = f"Spotify user {sp_username} is inactive: '{sp_artist} - {sp_track}' (after {calculate_timespan(int(sp_active_ts_stop), int(sp_active_ts_start), show_seconds=False)}: {get_range_of_dates_from_tss(sp_active_ts_start, sp_active_ts_stop, short=True)})"
                             m_body = f"Last played: {sp_artist} - {sp_track}\nDuration: {display_time(sp_track_duration)}{played_for_m_body}{playlist_m_body}\nAlbum: {sp_album}{context_m_body}{music_section_text}{lyrics_section_text}Friend got inactive after listening to music for {calculate_timespan(int(sp_active_ts_stop), int(sp_active_ts_start))}\nFriend played music from {get_range_of_dates_from_tss(sp_active_ts_start, sp_active_ts_stop, short=True, between_sep=' to ')}{listened_songs_mbody}{recent_songs_mbody}\n\nLast activity: {get_date_from_ts(sp_active_ts_stop)}\nInactivity timer: {display_time(SPOTIFY_INACTIVITY_CHECK)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
                             m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{sp_artist_url}\">{escape(sp_artist)}</a> - <a href=\"{sp_track_url}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{played_for_m_body_html}{playlist_m_body_html}<br>Album: <a href=\"{sp_album_url}\">{escape(sp_album)}</a>{context_m_body_html}{music_section_html}{lyrics_section_html}Friend got inactive after listening to music for <b>{calculate_timespan(int(sp_active_ts_stop), int(sp_active_ts_start))}</b><br>Friend played music from <b>{get_range_of_dates_from_tss(sp_active_ts_start, sp_active_ts_stop, short=True, between_sep='</b> to <b>')}</b>{listened_songs_mbody_html}{recent_songs_mbody_html}<br><br>Last activity: <b>{get_date_from_ts(sp_active_ts_stop)}</b><br>Inactivity timer: {display_time(SPOTIFY_INACTIVITY_CHECK)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
-                            email_attempted, webhook_attempted = send_notification_channels("inactive", m_subject, m_body, m_body_html, INACTIVE_NOTIFICATION, image_url=sp_playlist_image_url or sp_album_image_url)
+                            email_attempted, webhook_attempted = send_notification_channels("inactive", m_subject, m_body, m_body_html, INACTIVE_NOTIFICATION and (not JMK_MODE or ORIG_EMAILS), image_url=sp_playlist_image_url or sp_album_image_url)
                             email_sent = email_sent or email_attempted
                             webhook_sent = webhook_sent or webhook_attempted
                         sp_active_ts_start_old = sp_active_ts_start
