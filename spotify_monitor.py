@@ -4863,9 +4863,9 @@ def build_startup_summary(target: str, config_path, env_path, output_path) -> Li
         StartupSummaryRow("Debug mode", str(DEBUG_MODE), concise=bool(DEBUG_MODE)),
         StartupSummaryRow("Visual mode", str(f"Alternate" if JMK_MODE else "Standard") + (f" (with DEBUG_JMK level {DEBUG_JMK})" if JMK_MODE else ""), concise=True),
         StartupSummaryRow("Original emails", str(ORIG_EMAILS), concise=True),
-        StartupSummaryRow("Discovery Zone alerts", str(DZ_ALERTS), concise=True),
+        StartupSummaryRow("Discovery Zone alerts", str(f"{DZ_ALERTS}"), concise=True),
         StartupSummaryRow("Spreadsheet updates", str((f"{UPDATE_SPREADSHEET}") + (f" (tab: {ERR_CODE})" if UPDATE_SPREADSHEET else "")), concise=True),
- 
+        StartupSummaryRow("Monitoring Playlists", ", ".join(f"'{p['name']}'" for p in ADD_PLAYLISTS_TO_MONITOR) or "None", concise=True),
     ]
     if spotify_has_oauth_app_credentials():
         oauth_cache = SP_APP_TOKENS_FILE or "None (memory only)"
@@ -8775,7 +8775,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                             m_body = f"Last played: {sp_artist} - {sp_track}\nDuration: {display_time(sp_track_duration)}{played_for_m_body}{playlist_m_body}\nAlbum: {sp_album}{context_m_body}{music_section_text}{lyrics_section_text}Friend got inactive after listening to music for {calculate_timespan(int(sp_active_ts_stop), int(sp_active_ts_start))}\nFriend played music from {get_range_of_dates_from_tss(sp_active_ts_start, sp_active_ts_stop, short=True, between_sep=' to ')}{listened_songs_mbody}{recent_songs_mbody}\n\nLast activity: {get_date_from_ts(sp_active_ts_stop)}\nInactivity timer: {display_time(SPOTIFY_INACTIVITY_CHECK)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
                             m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{sp_artist_url}\">{escape(sp_artist)}</a> - <a href=\"{sp_track_url}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{played_for_m_body_html}{playlist_m_body_html}<br>Album: <a href=\"{sp_album_url}\">{escape(sp_album)}</a>{context_m_body_html}{music_section_html}{lyrics_section_html}Friend got inactive after listening to music for <b>{calculate_timespan(int(sp_active_ts_stop), int(sp_active_ts_start))}</b><br>Friend played music from <b>{get_range_of_dates_from_tss(sp_active_ts_start, sp_active_ts_stop, short=True, between_sep='</b> to <b>')}</b>{listened_songs_mbody_html}{recent_songs_mbody_html}<br><br>Last activity: <b>{get_date_from_ts(sp_active_ts_stop)}</b><br>Inactivity timer: {display_time(SPOTIFY_INACTIVITY_CHECK)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
                             m_body_short = f"{sp_track}\n{sp_artist}\n{sp_album}" + f"\n[{sp_playlist}]" if is_playlist else ""
-                            email_attempted, webhook_attempted = send_notification_channels("inactive", m_subject, m_body, m_body_html, INACTIVE_NOTIFICATION and (not JMK_MODE or ORIG_EMAILS), image_url=sp_playlist_image_url or sp_album_image_url, subject_short=m_subject_short, body_short=m_body_short, short=True)
+                            email_attempted, webhook_attempted = send_notification_channels("inactive", m_subject, m_body, m_body_html, INACTIVE_NOTIFICATION and (not JMK_MODE or ORIG_EMAILS), image_url=sp_playlist_image_url or sp_album_image_url, subject_short=m_subject_short, body_short=m_body_short)
                             email_sent = email_sent or email_attempted
                             webhook_sent = webhook_sent or webhook_attempted
                         sp_active_ts_start_old = sp_active_ts_start
@@ -9662,6 +9662,8 @@ def main():
         ADD_PLAYLISTS_TO_MONITOR = ADD_PLAYLISTS_TO_MONITOR2
         DEBUG_JMK    = DEBUG_JMK2
         UPDATE_SPREADSHEET = UPDATE_SPREADSHEET2
+        FLAG_FILE    = FLAG_FILE2
+        CSV_FILE     = CSV_FILE2
 
     if args.jmk:
         JMK_MODE = True
