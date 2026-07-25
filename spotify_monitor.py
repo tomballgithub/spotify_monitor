@@ -3220,17 +3220,17 @@ def send_webhook(title: str, description: str, notification_type: str = "song", 
     last_error: Any = None
     for attempt in range(WEBHOOK_MAX_ATTEMPTS):
         try:
+            ntfy_params = {"title": ntfy_title}
+            if ntfy_priority and isinstance(ntfy_priority, int):
+                ntfy_params["priority"] = ntfy_priority
+            if ntfy_tags and isinstance(ntfy_tags, str):
+                ntfy_params["tags"] = ntfy_tags
             if provider == "ntfy":
                 if use_ntfy_image:
-                    ntfy_params = {"title": ntfy_title}
-                    ntfy_params["message"] = ntfy_message
-                    if ntfy_priority and isinstance(ntfy_priority, int):
-                        ntfy_params["priority"] = ntfy_priority
-                    if ntfy_tags and isinstance(ntfy_tags, str):
-                        ntfy_params["tags"] = ntfy_tags
+                    ntfy_params["message"] = ntfy_message.encode("utf-8")
                     response = WEBHOOK_SESSION.post(str(WEBHOOK_URL).strip(), data=ntfy_image, params=ntfy_params, headers={**request_headers, "Content-Type": "image/jpeg", "X-Filename": NTFY_IMAGE_FILENAME}, timeout=WEBHOOK_TIMEOUT_SECONDS)
                 else:
-                    response = WEBHOOK_SESSION.post(str(WEBHOOK_URL).strip(), data=ntfy_message.encode("utf-8"), params={"title": ntfy_title}, headers=request_headers, timeout=WEBHOOK_TIMEOUT_SECONDS)
+                    response = WEBHOOK_SESSION.post(str(WEBHOOK_URL).strip(), data=ntfy_message.encode("utf-8"), params=ntfy_params, headers=request_headers, timeout=WEBHOOK_TIMEOUT_SECONDS)
             else:
                 response = WEBHOOK_SESSION.post(str(WEBHOOK_URL).strip(), json=discord_payload, headers=request_headers, timeout=WEBHOOK_TIMEOUT_SECONDS)
             if 200 <= response.status_code <= 299:
@@ -3265,7 +3265,6 @@ def send_webhook(title: str, description: str, notification_type: str = "song", 
             sleep_func(WEBHOOK_FALLBACK_RETRY_SECONDS)
     print_recovery_error(last_error, "webhook")
     return 1
-
 
 # Sends one alert through the enabled email and webhook channels
 def send_notification_channels(notification_type: str, subject: str, body: str, body_html: str = "", email_enabled: bool = False, webhook_enabled: Optional[bool] = None, image_url: str = "", subject_short: str = "", body_short: str = "", ntfy_priority: int = 0, ntfy_tags: str = "") -> tuple[bool, bool]:
