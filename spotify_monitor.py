@@ -9664,7 +9664,7 @@ def main():
         FLAG_FILE    = FLAG_FILE2
         CSV_FILE     = CSV_FILE2
 
-    if args.jmk:
+    if args.jmk or JMK_MODE:
         JMK_MODE = True
         ALT_VIEW = True
 
