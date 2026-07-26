@@ -4860,11 +4860,6 @@ def build_startup_summary(target: str, config_path, env_path, output_path) -> Li
         StartupSummaryRow("Terminal truncation", f"{TRUNCATE_CHARS} chars" if TRUNCATE_CHARS else "Disabled", concise=bool(TRUNCATE_CHARS)),
         StartupSummaryRow("Verbose mode", str(VERBOSE_MODE), concise=bool(VERBOSE_MODE)),
         StartupSummaryRow("Debug mode", str(DEBUG_MODE), concise=bool(DEBUG_MODE)),
-        StartupSummaryRow("Visual mode", str(f"Alternate" if JMK_MODE else "Standard") + (f" (with DEBUG_JMK level {DEBUG_JMK})" if JMK_MODE else ""), concise=True),
-        StartupSummaryRow("Original emails", str(ORIG_EMAILS), concise=True),
-        StartupSummaryRow("Discovery Zone alerts", str(f"{DZ_ALERTS}"), concise=True),
-        StartupSummaryRow("Spreadsheet updates", str((f"{UPDATE_SPREADSHEET}") + (f" (tab: {ERR_CODE})" if UPDATE_SPREADSHEET else "")), concise=True),
-        StartupSummaryRow("Monitoring Playlists", ", ".join(f"'{p['name']}'" for p in ADD_PLAYLISTS_TO_MONITOR) or "None", concise=True),
     ]
     if spotify_has_oauth_app_credentials():
         oauth_cache = SP_APP_TOKENS_FILE or "None (memory only)"
@@ -4872,12 +4867,26 @@ def build_startup_summary(target: str, config_path, env_path, output_path) -> Li
     else:
         rows.append(StartupSummaryRow("Legacy OAuth cache", "Not used", concise=False))
     rows.append(StartupSummaryRow("More details", "use --verbose or --debug", concise=True, full=False, log=False))
+
+    rows += [
+        StartupSummaryRow("----------------------------", "----------------------------", True),
+        StartupSummaryRow("Visual mode", str(f"Alternate" if ALT_VIEW else "Standard") + (f" (with DEBUG_JMK level {DEBUG_JMK})" if DEBUG_JMK else ""), concise=True),
+        StartupSummaryRow("Operational mode", str(f"Jeoff Special" if JMK_MODE else "Standard"), concise=True),
+        StartupSummaryRow("Original emails", str(ORIG_EMAILS), concise=True),
+        StartupSummaryRow("Discovery Zone alerts", str(DZ_ALERTS), concise=True),
+        StartupSummaryRow("Spreadsheet updates", str((f"{UPDATE_SPREADSHEET}") + (f" (tab: {ERR_CODE})" if UPDATE_SPREADSHEET else "")), concise=True),
+        StartupSummaryRow("Monitoring Playlists", ", ".join(f"'{p['name']}'" for p in ADD_PLAYLISTS_TO_MONITOR) or "None", concise=True),
+        StartupSummaryRow("----------------------------", "----------------------------", True),
+    ]
     return rows
 
 
 # Formats one startup summary row with aligned plain ASCII columns
 def _format_startup_summary_row(row: StartupSummaryRow) -> str:
-    return f"* {(row.label + ':'):<27}{row.value}\n"
+    if row.label.startswith("---"):
+        return f"* {(row.label)}{row.value}\n"
+    else:
+        return f"* {(row.label + ':'):<27}{row.value}\n"
 
 
 # Routes concise or complete startup rows independently to terminal and log destinations
