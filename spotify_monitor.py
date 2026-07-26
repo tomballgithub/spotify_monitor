@@ -9879,24 +9879,23 @@ def main():
             FILE_SUFFIX = str(target_user_id)
 
     if args.truncate:
-        if args.truncate != 999:
-            TRUNCATE_CHARS = args.truncate
-        else:
-            try:
-                terminal_size = shutil.get_terminal_size()
-                if ALT_VIEW:
-                    print_to_screen(f"The detected terminal screen width is: {terminal_size.columns} characters\n")
-                    print_to_screen(f"")
-                else:
-                    print(f"The detected terminal screen width is: {terminal_size.columns} characters\n")
-                TRUNCATE_CHARS = terminal_size.columns
-            except Exception as e:
-                if ALT_VIEW:
-                    print_to_screen(f"Error: Cannot determine terminal screen width: {e}")
-                    print_to_screen(f"")
-                else:
-                    print(f"Error: Cannot determine terminal screen width: {e}")
-                sys.exit(1)
+        TRUNCATE_CHARS = args.truncate
+
+    if TRUNCATE_CHARS == 999:
+        try:
+            debug_print("Detecting terminal screen size")
+            terminal_size = shutil.get_terminal_size()
+            if ALT_VIEW:
+                print_to_screen(f"The detected terminal screen width is: {terminal_size.columns} characters\n")
+            else:
+                print(f"The detected terminal screen width is: {terminal_size.columns} characters\n")
+            TRUNCATE_CHARS = terminal_size.columns
+        except Exception as e:
+            if ALT_VIEW:
+                print_to_screen(f"Error: Cannot determine terminal screen width: {e}")
+            else:
+                print(f"Error: Cannot determine terminal screen width: {e}")
+            sys.exit(1)
 
     if args.disable_logging is True:
         DISABLE_LOGGING = True
