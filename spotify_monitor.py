@@ -1000,7 +1000,6 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 import secrets
 from typing import Any, Callable, List, Optional, Sequence, cast
 from email.utils import parseaddr, parsedate_to_datetime
-from jmktools.ntfy import send_ntfy as jmk_send_ntfy, NTFY_STATUS_HIDE, NTFY_STATUS, NTFY_ALERTS, NTFY_STATUS_HIDE, NTFY_STATUS, NTFY_ALERTS #jmk ntfy
 import sheets_helper #jmk
 
 import urllib3
