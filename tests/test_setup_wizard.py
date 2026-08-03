@@ -99,6 +99,30 @@ def test_positive_integer_helper_reprompts(monkeypatch, capsys):
     assert capsys.readouterr().out.count("positive whole number") == 2
 
 
+@pytest.mark.parametrize(("value", "expected"), [("120", 120), ("120s", 120), ("2m", 120), ("2 mins", 120), ("1h", 3600), ("1 day", 86400)])
+# Verifies duration input accepts bare seconds and common unit forms
+def test_duration_helper_accepts_supported_units(monkeypatch, value, expected):
+    monkeypatch.setattr(monitor, "_wizard_input", Mock(return_value=value))
+    assert monitor._wizard_ask_duration("Comparison interval", 120) == expected
+
+
+# Verifies duration prompts show readable defaults and explain invalid input
+def test_duration_helper_shows_readable_default_and_reprompts(monkeypatch, capsys):
+    input_mock = Mock(side_effect=["bad", "2m"])
+    monkeypatch.setattr(monitor, "_wizard_input", input_mock)
+    assert monitor._wizard_ask_duration("Comparison interval", 120) == 120
+    assert [item.args for item in input_mock.call_args_list] == [("Comparison interval [120s - 2m]: ",), ("Comparison interval [120s - 2m]: ",)]
+    assert "120, 120s, 2m, 1h or 1d" in capsys.readouterr().out
+
+
+# Verifies an empty duration answer accepts the readable default
+def test_duration_helper_accepts_default(monkeypatch):
+    input_mock = Mock(return_value="")
+    monkeypatch.setattr(monitor, "_wizard_input", input_mock)
+    assert monitor._wizard_ask_duration("Dead period before an alert", 1200) == 1200
+    input_mock.assert_called_once_with("Dead period before an alert [1200s - 20m]: ")
+
+
 # Verifies Ctrl+C and Ctrl+D cancel cleanly without a traceback
 @pytest.mark.parametrize("error_type", [KeyboardInterrupt, EOFError])
 def test_input_cancellation_is_clean(monkeypatch, capsys, error_type):
@@ -285,6 +309,8 @@ def test_manual_cookie_setup_persists_secret_only_to_dotenv(monkeypatch, capsys)
         assert "cookie-private-value" not in output
         assert "authentication has not been validated" in output
         assert "Setup Wizard\n\nThis asks a few questions" in output
+        assert "Press Enter to accept the shown default. Ctrl+C cancels." in output
+        assert f"Detected install method: manual\nConfiguration:          {config_path}\nDotenv:                 {env_path}\n" in output
         assert "The monitoring account must follow the target. Setup checks this after authentication is saved." in output
         assert "If needed, the tool offers to follow the target. The target must also share listening activity." in output
         assert "Uses exported Protobuf request bodies.\n\nHow should cookie authentication be configured?" in output

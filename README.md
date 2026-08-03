@@ -10,7 +10,7 @@
   <img src="https://img.shields.io/badge/maintenance-active-brightgreen?style=flat-square" alt="Maintenance" />
 </p>
 
-Powerful real-time tracker for Spotify friend music activity: monitor listening habits, auto-sync playback to your local client, detect skipped tracks and receive instant notifications for every beat your friends play.
+Powerful real-time tracker for Spotify friend music activity: monitor listening habits, auto-sync playback to your local Spotify client, detect skipped tracks and receive instant notifications for every beat your friends play.
 
 <p align="center">
    <img src="https://raw.githubusercontent.com/misiektoja/spotify_monitor/refs/heads/main/assets/spotify_monitor.png" alt="spotify_monitor_screenshot" width="90%"/>
@@ -19,19 +19,33 @@ Powerful real-time tracker for Spotify friend music activity: monitor listening 
 <a id="-quick-install-run"></a>
 ### 🚀 Quick Install & Run
 
+Spotify Monitor has two independent modes:
+
+- **Friend Activity** monitors a Spotify friend's completed plays, activity status and listening sessions.
+- **Last.fm Scrobble Health** checks whether plays from your Spotify account reach your Last.fm profile and alerts you when scrobbles stop showing up.
+
 #### Python from PyPI
+
+New to Python or unsure what is installed? Follow the [Python install walkthrough](https://misiektoja.github.io/spotify_monitor/installation/#new-to-python-install-everything) first.
 
 ```sh
 pip install spotify_monitor
 ```
 
-Run setup wizard:
+Run setup for friend activity mode:
 
 ```sh
 spotify_monitor --setup
 ```
 
+Or for Last.fm Scrobble Health:
+```sh
+spotify_monitor --setup-scrobble-health
+```
+
 #### Docker image - fastest container setup
+
+The Docker commands below run Friend Activity setup. For Last.fm Scrobble Health, replace the final `--setup` with `--setup-scrobble-health`.
 
 ##### macOS or Windows
 
@@ -80,7 +94,8 @@ For the manual single-file method, optional extras and upgrade commands for ever
 ## Features
 
 ### 🔍 Real-time Tracking
-- **Friend Activity**: Monitor songs listened by Spotify users in real-time.
+- **Friend Activity**: Monitor songs listened to by Spotify users in real time.
+- **Scrobble Health**: Detect and alert when Spotify scrobbles stop showing up on Last.fm.
 - **Presence Detection**: Detect when friends get **online** or **offline**.
 - **Session Stats**: Display **duration, track counts** and **songs on loop**.
 
@@ -135,12 +150,14 @@ Use [Quick Install & Run](#-quick-install-run) above for first-time setup. The t
 | I want to... | Run this |
 | --- | --- |
 | Start monitoring with existing authentication | `spotify_monitor TARGET`, where `TARGET` is a raw ID, `spotify:user:` URI or profile URL |
-| Start a target saved as `TARGET_USER_URI_ID` | `spotify_monitor --config-file spotify_monitor.conf` |
 | Check authentication, connectivity and one target | `spotify_monitor --doctor TARGET` |
 | List Spotify friends visible to the configured account | `spotify_monitor --list-friends` |
 | Import a Spotify login from Firefox | Open [Spotify Web Player](https://open.spotify.com/) in Firefox, sign in then run `spotify_monitor --import-browser-cookie --browser firefox` |
-| Safely set or replace `SP_DC_COOKIE` | Run `spotify_monitor --set-sp-dc` and enter `sp_dc` at the hidden prompt |
+| Enter or replace securely a manually extracted `SP_DC_COOKIE` | Run `spotify_monitor --set-sp-dc` and enter `sp_dc` at the hidden prompt |
+| Enter or replace securely `LASTFM_API_KEY` | Run `spotify_monitor --set-lastfm-credentials` and enter the key at the hidden prompt |
 | Configure and test webhook alerts | Use the setup wizard or follow [Webhook Settings](https://misiektoja.github.io/spotify_monitor/configuration/#webhook-settings) |
+| Start scrobble health monitoring from saved settings | Run `spotify_monitor --monitor-mode scrobble_health` |
+| Select the monitoring mode for one run | Run `spotify_monitor --monitor-mode friend_activity TARGET` or `spotify_monitor --monitor-mode scrobble_health` |
 
 Running the tool with no arguments offers the wizard if you have not saved a target. If a target is already saved, it starts monitoring that target.
 

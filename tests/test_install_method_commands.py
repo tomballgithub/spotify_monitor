@@ -84,6 +84,15 @@ def test_container_action_commands_include_paths_and_target(tmp_path, monkeypatc
     assert command == "docker compose run --rm spotify_monitor --doctor target.user --config-file /data/spotify_monitor.conf --env-file /data/.env"
 
 
+@pytest.mark.parametrize(("method", "prefix"), [("docker", 'docker run --rm -it --init -v "${PWD}:/data:z" misiektoja/spotify-monitor'), ("compose", "docker compose run --rm spotify_monitor")])
+# Verifies scrobble Doctor prints a complete command for both container installation types
+def test_scrobble_health_doctor_monitoring_command_matches_container_install(monkeypatch, capsys, method, prefix):
+    monkeypatch.setattr(monitor, "_wizard_install_method", lambda: method)
+    monkeypatch.setattr(monitor.os, "getuid", lambda: 10001, raising=False)
+    monitor._wizard_print_scrobble_health_monitor_after_doctor("/data/spotify_monitor_scrobble_health.conf", "/data/.env.scrobble_health")
+    assert f'{prefix} --monitor-mode scrobble_health --config-file /data/spotify_monitor_scrobble_health.conf --env-file /data/.env.scrobble_health' in capsys.readouterr().out
+
+
 # Verifies container setup defaults always target the bind-mounted data directory
 @pytest.mark.parametrize("method", ["docker", "compose"])
 def test_container_setup_destinations_use_data_mount(tmp_path, monkeypatch, method):
@@ -91,6 +100,15 @@ def test_container_setup_destinations_use_data_mount(tmp_path, monkeypatch, meth
     config_path, env_path = monitor._wizard_destinations(method=method)
     assert config_path == Path("/data/spotify_monitor.conf")
     assert env_path == Path("/data/.env")
+
+
+# Verifies scrobble health setup uses isolated defaults inside the data mount
+@pytest.mark.parametrize("method", ["docker", "compose"])
+def test_scrobble_health_setup_destinations_use_isolated_data_files(tmp_path, monkeypatch, method):
+    monkeypatch.chdir(tmp_path)
+    config_path, env_path = monitor._wizard_destinations(method=method, default_config_filename=monitor.SCROBBLE_HEALTH_CONFIG_FILENAME, default_env_filename=monitor.SCROBBLE_HEALTH_DOTENV_FILENAME)
+    assert config_path == Path("/data/spotify_monitor_scrobble_health.conf")
+    assert env_path == Path("/data/.env.scrobble_health")
 
 
 # Verifies temporary container paths outside the bind mount are rejected
@@ -189,11 +207,29 @@ def test_manual_help_epilog_exact_raw_text(monkeypatch):
   # Guided setup, recommended for the first run
   python3 spotify_monitor.py --setup
 
+  # Guided setup for Spotify-to-Last.fm scrobble health monitoring
+  python3 spotify_monitor.py --setup-scrobble-health
+
+  # Reauthorize the user-owned Spotify app for scrobble health
+  python3 spotify_monitor.py --authorize-scrobble-health
+
+  # Start the separate Spotify-to-Last.fm scrobble health mode
+  python3 spotify_monitor.py --monitor-mode scrobble_health
+
+  # Start scrobble health with a Last.fm profile selected for this run
+  python3 spotify_monitor.py --monitor-mode scrobble_health --lastfm-username <lastfm_username>
+
+  # Diagnose scrobble health and list recent Spotify and Last.fm history
+  python3 spotify_monitor.py --monitor-mode scrobble_health --doctor --verbose
+
+  # Select Friend Activity for this run
+  python3 spotify_monitor.py --monitor-mode friend_activity <spotify_user_id>
+
   # Open https://open.spotify.com/ in Firefox and sign in first
   # Then import Spotify login from Firefox (recommended for local installs)
   python3 spotify_monitor.py --import-browser-cookie --browser firefox
 
-  # Or enter the Spotify cookie through a hidden prompt
+  # Or use the most secure manual method to enter the Spotify cookie
   python3 spotify_monitor.py --set-sp-dc
 
   # Save a Discord or ntfy webhook URL through a hidden prompt

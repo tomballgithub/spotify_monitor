@@ -7,7 +7,7 @@ Examples on this page use the PyPI command `spotify_monitor`. Manual script, Doc
 
 You can pass most settings as command-line options or save them in a configuration file for later runs.
 
-The easiest way to create this file is `spotify_monitor --setup`. The wizard checks the settings before saving. If you approve replacement of an existing file, it saves a timestamped backup first. Replacement builds a fresh configuration from defaults, so settings that are not shown by the wizard are reset unless you restore them from the backup.
+The easiest way to create this file is `spotify_monitor --setup`. The wizard checks the settings before saving. If you approve replacement of an existing file, it saves a timestamped backup first. Replacement builds a fresh configuration from defaults, so settings that are not shown by the wizard are reset unless you restore them from the backup. Friend Activity setup defaults to `spotify_monitor.conf` plus `.env`. The focused scrobble health wizard defaults to `spotify_monitor_scrobble_health.conf` plus `.env.scrobble_health` so both modes can be configured independently in the same directory.
 
 To edit every available setting yourself, generate a default configuration file:
 
@@ -33,7 +33,7 @@ If the same setting appears in more than one place, the item later in this list 
 4. Values from the selected `.env` file
 5. Command-line options
 
-The `.env` layer applies only to supported private keys such as `SP_DC_COOKIE`, `SMTP_PASSWORD` and `WEBHOOK_URL`. A target written directly after the command overrides `TARGET_USER_URI_ID`. Use `--config-file PATH` and `--env-file PATH` if you do not want automatic file discovery. See [Storing Secrets](#storing-secrets) for the search rules and supported keys.
+The `.env` layer applies to supported private keys such as `SP_DC_COOKIE`, `LASTFM_API_KEY`, `SPOTIFY_SCROBBLE_REFRESH_TOKEN`, `SMTP_PASSWORD` and `WEBHOOK_URL`. It also accepts the non-secret `SPOTIFY_SCROBBLE_CLIENT_ID` and `SPOTIFY_SCROBBLE_REDIRECT_URI` settings for externally managed runs. A target written directly after the command overrides `TARGET_USER_URI_ID`. Use `--config-file PATH` and `--env-file PATH` to select files explicitly. Use `--config-file none` and `--env-file none` to disable both automatic searches. See [Storing Secrets](#storing-secrets) for the search rules and supported keys.
 
 You may set `TARGET_USER_URI_ID` to a raw user ID, Spotify user URI or profile URL. A positional command-line target takes precedence over this configured value. With a configured target you can start monitoring with:
 
@@ -42,6 +42,103 @@ spotify_monitor --config-file spotify_monitor.conf
 ```
 
 A Spotify developer app is not required. Cookie or client mode authenticates Friend Activity. The anonymous web-player backend supplies track and public playlist details. Existing working OAuth app credentials remain available as an optional legacy metadata path.
+
+<a id="monitoring-mode"></a>
+## Monitoring Mode
+
+Spotify Monitor has two independent monitoring modes:
+
+| Mode | Saved `MONITOR_MODE` value | What it monitors | Easiest setup |
+| --- | --- | --- | --- |
+| Friend Activity | `"friend_activity"` | A followed Spotify user's completed tracks, presence and listening sessions | `spotify_monitor --setup` |
+| Scrobble health | `"scrobble_health"` | Whether this Spotify account's completed plays reach one Last.fm profile | `spotify_monitor --setup-scrobble-health` |
+
+Only one mode runs at a time. A command-line selection takes precedence over the mode saved as `MONITOR_MODE`. Friend Activity is used when neither source selects a mode. Use `--monitor-mode friend_activity` or `--monitor-mode scrobble_health` for one run. Selecting scrobble health on the command line also selects its mode-specific default config and dotenv filenames. Save the Last.fm username as `LASTFM_USERNAME` or pass `--lastfm-username` for one run.
+
+For example, this runs Friend Activity even when the selected config saves scrobble health as `MONITOR_MODE`:
+
+```sh
+spotify_monitor --config-file spotify_monitor_scrobble_health.conf --monitor-mode friend_activity SPOTIFY_USER_ID
+```
+
+<a id="lastfm-scrobble-health"></a>
+## Last.fm Scrobble Health
+
+Spotify's six-month reauthorization requirement can disconnect Spotify Scrobbling. Last.fm currently warns about that disconnection only through a banner on its website and does not send an email alert. People who rarely visit the website can therefore continue listening without knowing that new scrobbles are not being saved. This mode provides independent console, email or webhook alerts once the configured evidence threshold confirms a likely gap.
+
+Scrobble health checks whether completed plays from one Spotify account appear on one Last.fm profile. It uses Spotify's official recently-played endpoint rather than Friend Activity or `SP_DC_COOKIE`. It does not need a second Spotify account. It needs:
+
+1. A Last.fm profile from `LASTFM_USERNAME` or `--lastfm-username`
+2. A read-only Last.fm API key from `LASTFM_API_KEY` or `--lastfm-api-key`
+3. A user-owned Spotify Developer app Client ID from `SPOTIFY_SCROBBLE_CLIENT_ID` or `--scrobble-client-id`
+4. A PKCE refresh token from `SPOTIFY_SCROBBLE_REFRESH_TOKEN` or `--scrobble-refresh-token`
+
+The easiest setup is the focused wizard. It selects scrobble health as the saved mode and collects these values through hidden prompts where appropriate:
+
+```sh
+spotify_monitor --setup-scrobble-health
+```
+
+Before hidden API-key entry, the wizard shows the [Last.fm API accounts page](https://www.last.fm/api/accounts) where you can create or view a key. Its comparison interval and dead-period prompts show both seconds and a compact duration. Enter seconds directly or add `s` for seconds, `m` for minutes, `h` for hours or `d` for days. Examples include `120`, `120s`, `2m`, `1h` and `1d`.
+
+For Friend Activity monitoring use the regular `spotify_monitor --setup` wizard instead.
+
+<a id="spotify-recent-play-authorization"></a>
+### Spotify Recent-play Authorization
+
+Scrobble health uses a Spotify app owned by you. This avoids placing every Spotify Monitor user behind one shared Development Mode quota. Spotify reports quota exhaustion as `QUOTA_EXCEEDED`, which the monitor treats as an operational failure rather than evidence of missing scrobbles.
+
+The focused setup wizard guides these steps:
+
+1. Sign in to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) with an account that has Spotify Premium.
+2. Create an app or open an existing app.
+3. Add the exact `http://127.0.0.1:8888/callback` redirect URI shown by setup. The wizard uses this recommended loopback value automatically instead of asking you to choose one. Spotify allows HTTP for an explicit loopback IP address but not `localhost`.
+4. Select Web API in the API/SDKs section then save the app.
+5. Copy the Client ID into setup. Do not enter the Client Secret because PKCE does not use it.
+6. If another Spotify account will be authorized, add it under the app's User Management.
+7. Approve the read-only `user-read-recently-played` scope. After Spotify redirects, copy the complete URL from the browser address bar and paste it into setup. The browser page itself does not need to load.
+
+Spotify documents the Dashboard flow in [Creating an App](https://developer.spotify.com/documentation/web-api/concepts/apps) and the authorization exchange in [Authorization Code with PKCE Flow](https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow).
+
+The Client ID and redirect URI are non-secret settings saved in `spotify_monitor_scrobble_health.conf`. Advanced setups can change `SPOTIFY_SCROBBLE_REDIRECT_URI` in that file then run authorization again. Use HTTPS for a non-loopback redirect. The refresh token is private and setup saves it as `SPOTIFY_SCROBBLE_REFRESH_TOKEN` in `.env.scrobble_health`. A Client Secret is never requested or stored.
+
+To grant access again after the authorization expires or is revoked, run:
+
+```sh
+spotify_monitor --authorize-scrobble-health
+```
+
+The command reuses the saved app settings, opens or prints a new state-protected authorization URL then replaces only the saved refresh token. Spotify refresh tokens expire after six months. A running process can load a replaced token after `SIGHUP` or you can restart it. This authorization is separate from reconnecting Spotify Scrobbling at [Last.fm connected applications](https://www.last.fm/settings/applications).
+
+To enter or replace only the API key safely, run:
+
+```sh
+spotify_monitor --set-lastfm-credentials
+```
+
+The command hides the key while you type or paste it. It confirms before replacing an existing value then updates only `LASTFM_API_KEY` in the selected dotenv file. Without `--env-file`, it uses `.env.scrobble_health`. Spotify Monitor does not request the Last.fm shared secret because scrobble health uses only the read-only `user.getRecentTracks` API method.
+
+Config and dotenv files are optional. With `LASTFM_API_KEY`, `SPOTIFY_SCROBBLE_CLIENT_ID` and `SPOTIFY_SCROBBLE_REFRESH_TOKEN` already available as environment variables, only the profile needs a runtime option:
+
+```sh
+spotify_monitor --monitor-mode scrobble_health --lastfm-username LASTFM_USERNAME
+```
+
+You can pass the credentials with `--lastfm-api-key`, `--scrobble-client-id` and `--scrobble-refresh-token` instead. Use `--scrobble-redirect-uri` if the app does not register the default redirect. Private values passed as arguments may remain visible in shell history or process listings.
+
+The default alert requires five consecutive unmatched completed plays. The oldest of those plays must be at least 20 minutes old. This deliberately tolerates short Last.fm delays and occasional missing scrobbles. The relevant settings are:
+
+| Setting | One-run option | Default | Purpose |
+| --- | --- | ---: | --- |
+| `SCROBBLE_HEALTH_CHECK_INTERVAL` | `--scrobble-check-interval` | 120 seconds | Time between comparisons |
+| `SCROBBLE_HEALTH_DEAD_PERIOD` | `--scrobble-dead-period` | 1200 seconds | Required age of the oldest unmatched play |
+| `SCROBBLE_HEALTH_MIN_UNMATCHED` | `--scrobble-min-unmatched` | 5 plays | Required consecutive unmatched completed plays |
+| `SCROBBLE_HEALTH_MATCH_WINDOW` | `--scrobble-match-window` | 300 seconds | Allowed timestamp difference for the same artist and track |
+| `SCROBBLE_HEALTH_LOOKBACK` | `--scrobble-lookback` | 21600 seconds | Recent history included in each comparison |
+| `SCROBBLE_HEALTH_REPEAT_INTERVAL` | `--scrobble-repeat-interval` | 86400 seconds | Reminder interval while an outage remains unresolved |
+| `SCROBBLE_HEALTH_STATE_FILE` | `--scrobble-state-file` | `.spotify-monitor-scrobble-health.json` | Restart-safe alert state |
+
+An operational Spotify or Last.fm request error does not count as a scrobbling outage. Scrobble health makes one bounded immediate retry for transient server errors then waits for `SPOTIFY_ERROR_INTERVAL`, which is three minutes by default, before its next comparison. It does not immediately retry a Spotify 429 response or block for a very long `Retry-After` value. A `QUOTA_EXCEEDED` response explains that the user-owned app quota is exhausted and links to Spotify's [quota modes guide](https://developer.spotify.com/documentation/web-api/concepts/quota-modes). The monitor sends an operational email or webhook only after three consecutive comparison failures. A successful comparison resets that failure count. The existing health state is preserved until both histories can be compared again. Recovery requires a confirmed match newer than the Spotify evidence that triggered the outage. Outage alerts link directly to the Last.fm connected-applications page for reauthorization.
 
 <a id="spotify-access-token-source"></a>
 ## Spotify Access Token Source
@@ -140,12 +237,12 @@ Follow these steps:
 
 As an alternative, [Cookie-Editor by cgagnier](https://cookie-editor.com/) can display the `sp_dc` value. Only use a browser extension that you trust because browser extensions can access sensitive login cookies.
 
-The recommended `--set-sp-dc` command validates the cookie with Spotify before changing `.env`. Existing cookie replacement requires confirmation. See the [copy-paste commands](setup-and-first-run.md#run-individual-commands) for PyPI, downloaded-script, Docker Compose and Docker installations.
+The recommended `--set-sp-dc` command is the most secure way to enter a manually extracted cookie. It reads the value through a hidden prompt, validates it with Spotify before changing `.env` and updates only `SP_DC_COOKIE`. Existing cookie replacement requires confirmation. See the [copy-paste commands](setup-and-first-run.md#run-individual-commands) for PyPI, downloaded-script, Docker Compose and Docker installations.
 
-You can also provide `SP_DC_COOKIE` in these ways:
+Direct `.env` editing and the other existing methods remain supported:
 
-* Set it as an [environment variable](#storing-secrets), for example `export SP_DC_COOKIE="your_sp_dc_cookie_value"`.
 * Add `SP_DC_COOKIE="your_sp_dc_cookie_value"` to an [`.env` file](#storing-secrets) to keep it for later runs.
+* Set it as an [environment variable](#storing-secrets), for example `export SP_DC_COOKIE="your_sp_dc_cookie_value"`.
 * Pass it for one run with `-u` or `--spotify-dc-cookie`. This is not recommended because the value may appear in shell history or process listings.
 * Store it in the configuration file or source code as a last resort. This is not recommended because it is easier to expose or commit accidentally.
 
@@ -163,23 +260,23 @@ Client mode reuses login data from a real Spotify desktop session. It is an adva
 - Run an intercepting proxy of your choice (like [Proxyman](https://proxyman.com) - the trial version is sufficient)
 
 - Enable SSL traffic decryption for `spotify.com` domain
-   - in Proxyman: click **Tools → SSL Proxying List → + button → Add Domain → paste `*.spotify.com` → Add**
+    - in Proxyman: click **Tools → SSL Proxying List → + button → Add Domain → paste `*.spotify.com` → Add**
 
 - Launch the Spotify desktop client, then switch to your intercepting proxy (like Proxyman) and look for POST requests to `https://login5.spotify.com/v3/login`
 
 - If you don't see this request, try following steps (stop once it works):
-   - restart the Spotify desktop client
-   - log out from the Spotify desktop client and log back in
-   - point Spotify at the intercepting proxy directly in its settings, i.e. in **Spotify → Settings → Proxy Settings**, set:
-      - **proxy type**: `HTTP`
-      - **host**: `127.0.0.1` (IP/FQDN of your proxy, for Proxyman use the IP you see at the top bar)
-      - **port**: `9090` (port of your proxy, for Proxyman use the port you see at the top bar)
-      - restart the app. This makes Spotify use a TCP connection that the proxy can inspect instead of QUIC over UDP
-   - block Spotify's UDP port 443 with an operating system firewall. This also forces a TCP connection that the proxy can inspect
-   - try an older version of the Spotify desktop client
+    - restart the Spotify desktop client
+    - log out from the Spotify desktop client and log back in
+    - point Spotify at the intercepting proxy directly in its settings, i.e. in **Spotify → Settings → Proxy Settings**, set:
+        - **proxy type**: `HTTP`
+        - **host**: `127.0.0.1` (IP/FQDN of your proxy, for Proxyman use the IP you see at the top bar)
+        - **port**: `9090` (port of your proxy, for Proxyman use the port you see at the top bar)
+        - restart the app. This makes Spotify use a TCP connection that the proxy can inspect instead of QUIC over UDP
+    - block Spotify's UDP port 443 with an operating system firewall. This also forces a TCP connection that the proxy can inspect
+    - try an older version of the Spotify desktop client
 
 - Export the login request body (a binary Protobuf payload) to a file (e.g. ***login-request-body-file***)
-   - In Proxyman: **right click the request → Export → Request Body → Save File**.
+    - In Proxyman: **right click the request → Export → Request Body → Save File**.
 
 <p align="center">
    <img src="https://raw.githubusercontent.com/misiektoja/spotify_monitor/refs/heads/main/assets/proxyman_export_protobuf.png" alt="proxyman_export_protobuf" width="80%"/>
@@ -221,10 +318,10 @@ If you already have a working app or want to create a new one:
 - Copy the **Client ID** and **Client Secret**
 
 - Provide the `SP_APP_CLIENT_ID` and `SP_APP_CLIENT_SECRET` secrets using one of the following methods:
-   - Pass it at runtime with `-r` / `--oauth-app-creds` (use `SP_APP_CLIENT_ID:SP_APP_CLIENT_SECRET` format - note the colon separator)
-   - Set it as an [environment variable](#storing-secrets) (e.g. `export SP_APP_CLIENT_ID=...; export SP_APP_CLIENT_SECRET=...`)
-   - Add it to [.env file](#storing-secrets) (`SP_APP_CLIENT_ID=...` and `SP_APP_CLIENT_SECRET=...`) for persistent use
-   - Fallback: hard-code it in the code or config file
+    - Pass it at runtime with `-r` / `--oauth-app-creds` (use `SP_APP_CLIENT_ID:SP_APP_CLIENT_SECRET` format - note the colon separator)
+    - Set it as an [environment variable](#storing-secrets) (e.g. `export SP_APP_CLIENT_ID=...; export SP_APP_CLIENT_SECRET=...`)
+    - Add it to [.env file](#storing-secrets) (`SP_APP_CLIENT_ID=...` and `SP_APP_CLIENT_SECRET=...`) for persistent use
+    - Fallback: hard-code it in the code or config file
 
 Example:
 
@@ -282,7 +379,7 @@ spotify_monitor --send-test-email
 
 Spotify Monitor can send activity alerts through Discord or the native [ntfy publish API](https://docs.ntfy.sh/publish/). Webhook alerts work with or without email. Run `spotify_monitor --setup`, choose webhook alerts and select Discord or ntfy.
 
-`WEBHOOK_PROVIDER` selects the request format. It defaults to `"discord"` so existing configurations keep working.
+`WEBHOOK_PROVIDER` selects the request format. It defaults to `"discord"` so existing configurations keep working. Standard Discord and public `ntfy.sh` URLs automatically select the matching format if this configured value is stale. Self-hosted ntfy and compatible endpoints still use the configured provider. For an explicit one-run override, use `--webhook-provider discord` or `--webhook-provider ntfy`.
 
 <a id="discord"></a>
 ### Discord
@@ -298,7 +395,9 @@ If you are new to Discord, follow these steps to get your private webhook URL:
 spotify_monitor --set-webhook-url
 ```
 
-Paste the copied link at the hidden prompt. Spotify Monitor saves it in `.env` so it does not appear in your command history. Treat this link like a password because anyone who has it can post through it.
+Paste the copied link at the hidden prompt. Spotify Monitor saves only `WEBHOOK_URL` in `.env` so it does not appear in your command history. Treat this link like a password because anyone who has it can post through it.
+
+For a one-run override, `--webhook-url URL` uses a complete HTTPS destination without changing `.env`. The URL may remain visible in shell history or process listings, so prefer `--set-webhook-url` for normal setup.
 
 Keep the default provider in `spotify_monitor.conf`:
 
@@ -313,7 +412,7 @@ For ntfy.sh or a self-hosted ntfy server:
 
 1. Choose a hard-to-guess topic such as `spotify-monitor-long-random-value`.
 2. In the setup wizard, paste either the bare ntfy.sh topic name or its complete topic URL such as `https://ntfy.sh/spotify-monitor-long-random-value`. A bare topic name is expanded to an ntfy.sh URL. For a self-hosted server, use the complete HTTPS topic URL.
-3. Set the provider in `spotify_monitor.conf`:
+3. Public `ntfy.sh` URLs are recognized automatically. Set the provider in `spotify_monitor.conf` for a self-hosted ntfy server:
 
 ```ini
 WEBHOOK_PROVIDER = "ntfy"
@@ -335,6 +434,14 @@ NTFY_IMAGES = False
 
 Active and inactive alerts use playlist artwork when available then fall back to album artwork. Tracked-song, every-song and loop alerts use album artwork. Error alerts and `--send-test-webhook` remain text-only. Spotify Monitor accepts only Spotify HTTPS CDN image URLs, limits downloads to 5 MiB and rejects oversized decoded images before preparing each attachment in memory. PyPI, requirements-file and Docker installs include Pillow. Manual single-file users who install dependencies individually must include Pillow. If image preparation fails, the alert is sent as text. If the attachment upload fails, the alert is retried once as text so artwork cannot suppress the notification. Self-hosted ntfy servers must allow attachments.
 
+For compact activity notifications on phones and smartwatches, enable the short ntfy format in `spotify_monitor.conf`:
+
+```ini
+NTFY_SHORT = True
+```
+
+The default is `False`. Compact playback alerts keep the event summary in the title and show the track, artist and album on separate lines. Playlist playback adds the playlist name in brackets and preserves the configured Spotify-owned playlist suffix such as `(by Spotify)`. Compact session titles separate elapsed time from the song count with `&`. This setting affects only ntfy. Discord and email content remain unchanged. Error notifications use their complete text when no compact alternative is available.
+
 For a protected topic, the setup wizard can collect an ntfy access token through a hidden prompt. It saves the token in `.env` without displaying it. For manual setup, add the token to `.env`:
 
 ```ini
@@ -343,15 +450,50 @@ NTFY_ACCESS_TOKEN="tk_your_ntfy_access_token"
 
 Spotify Monitor sends this value as `Authorization: Bearer <token>`. `NTFY_ACCESS_TOKEN` takes precedence over an `Authorization` entry in `WEBHOOK_HEADERS`.
 
-For compatibility with other advanced webhook integrations, static custom headers are also supported in `spotify_monitor.conf`:
+For compatibility with advanced webhook integrations, custom headers are also supported in `spotify_monitor.conf`:
 
 ```ini
 WEBHOOK_HEADERS = {
-    "Authorization": "Bearer tk_your_ntfy_access_token",
+    "X-Webhook-Title": "{title}",
 }
 ```
 
-The dictionary applies to Discord and ntfy requests. For ntfy, Spotify Monitor sets `text/plain` for text alerts and `image/jpeg` for artwork attachments. Prefer `NTFY_ACCESS_TOKEN` in `.env` for Bearer authentication because a token inside `WEBHOOK_HEADERS` is easier to expose or commit accidentally. Basic authentication remains available through a custom `Authorization` header. Header names and values are validated before any request is sent.
+Header values support the same placeholders as `WEBHOOK_TEMPLATE`. The dictionary applies to Discord and ntfy requests. Spotify Monitor validates headers before and after placeholder expansion so formatted values cannot introduce invalid names, non-string values or line breaks. For ntfy, Spotify Monitor sets `text/plain` for text alerts and `image/jpeg` for artwork attachments. Long ntfy text messages are visibly truncated below ntfy's 4 KB boundary so they remain notifications instead of temporary attachments. Prefer `NTFY_ACCESS_TOKEN` in `.env` for Bearer authentication because a token inside `WEBHOOK_HEADERS` is easier to expose or commit accidentally. Basic authentication remains available through a custom `Authorization` header.
+
+### Advanced Discord-format customization
+
+`WEBHOOK_USERNAME` and `WEBHOOK_AVATAR_URL` change the sender name and HTTPS avatar for Discord-format payloads:
+
+```ini
+WEBHOOK_USERNAME = "Spotify Monitor"
+WEBHOOK_AVATAR_URL = "https://example.com/path/avatar.png"
+```
+
+`WEBHOOK_TEMPLATE` controls the Discord-format request body. The generated configuration contains the safe default template. It supports these placeholders:
+
+- `{title}`
+- `{description}`
+- `{version}`
+- `{image_url}`
+- `{fields}` and `{fields_str}`
+- `{color}`
+- `{timestamp}`
+- `{username}`
+- `{avatar_url}`
+
+A dictionary or list is sent as JSON. A string template is sent as the raw request body for compatible advanced integrations. When the rendered payload is a dictionary, Spotify Monitor always replaces `allowed_mentions` with `{"parse": []}` so notification text cannot trigger Discord mentions.
+
+`WEBHOOK_TRANSFORMS` applies string methods to shared placeholder values before the template and headers are rendered:
+
+```ini
+WEBHOOK_TRANSFORMS = [
+    ("title", "upper"),
+    ("description", "replace", "**", ""),
+    ("description", "strip"),
+]
+```
+
+The tuple format is `(field_to_target, method_name, *optional_arguments)`. Invalid templates, avatar URLs, transforms or formatted headers fail before a webhook request is attempted. These custom payload settings apply to the Discord request format. ntfy continues to use its native publish API while transformations and header placeholders use the same shared title and description values.
 
 Topics on the public ntfy.sh service are public unless protected through an account reservation. Treat an unprotected topic name like a password and do not reuse the example topic above.
 
@@ -373,6 +515,12 @@ Send one test webhook without starting monitoring:
 spotify_monitor --send-test-webhook
 ```
 
+You can combine one-run provider and URL overrides with the test:
+
+```sh
+spotify_monitor --webhook-provider ntfy --webhook-url "https://ntfy.sh/your-private-topic" --send-test-webhook
+```
+
 Email and webhooks work separately. If one fails, Spotify Monitor can still send the other. Discord messages cannot trigger `@everyone` or `@here` mentions.
 
 If the webhook service temporarily refuses a message, Spotify Monitor tries once more and waits at most five seconds. Spotify monitoring continues normally and its retry behavior is unchanged.
@@ -380,12 +528,16 @@ If the webhook service temporarily refuses a message, Spotify Monitor tries once
 <a id="storing-secrets"></a>
 ## Storing Secrets
 
-A `.env` file is a plain text file that holds private values separately from regular configuration. Store `SP_DC_COOKIE`, `REFRESH_TOKEN`, `SP_APP_CLIENT_ID`, `SP_APP_CLIENT_SECRET`, `SMTP_PASSWORD`, `WEBHOOK_URL` and `NTFY_ACCESS_TOKEN` there. Do not commit this file or share it.
+A dotenv file is a plain text file that holds private values separately from regular configuration. Friend Activity uses `.env` by default. Scrobble health uses `.env.scrobble_health` by default. Store `SP_DC_COOKIE`, `LASTFM_API_KEY`, `SPOTIFY_SCROBBLE_REFRESH_TOKEN`, `REFRESH_TOKEN`, `SP_APP_CLIENT_ID`, `SP_APP_CLIENT_SECRET`, `SMTP_PASSWORD`, `WEBHOOK_URL` and `NTFY_ACCESS_TOKEN` in the file selected for that mode. Do not commit either file or share it.
 
 You can use operating system environment variables instead of a file. Set them with `export` on Linux, Unix, macOS or WSL:
 
 ```sh
 export SP_DC_COOKIE="your_sp_dc_cookie_value"
+export LASTFM_API_KEY="your_lastfm_api_key"
+export SPOTIFY_SCROBBLE_CLIENT_ID="your_spotify_recent_play_client_id"
+export SPOTIFY_SCROBBLE_REDIRECT_URI="http://127.0.0.1:8888/callback"
+export SPOTIFY_SCROBBLE_REFRESH_TOKEN="your_spotify_recent_play_refresh_token"
 export REFRESH_TOKEN="your_spotify_app_refresh_token"
 export SP_APP_CLIENT_ID="your_spotify_app_client_id"
 export SP_APP_CLIENT_SECRET="your_spotify_app_client_secret"
@@ -398,7 +550,7 @@ On **Windows Command Prompt** use `set` instead of `export` and on **Windows Pow
 
 To keep the values between terminal sessions, store them in `.env`.
 
-Browser import, `--set-sp-dc` and the setup wizard can create or update `.env` for you.
+Browser import, `--set-sp-dc` and the setup wizard can create or update `.env` for you. For a manually extracted `sp_dc` value, prefer `--set-sp-dc` over editing `.env` directly because the hidden prompt is the most secure entry method.
 
 If you cloned the repository, you can copy the included example then fill in only the secrets you use:
 
@@ -406,10 +558,14 @@ If you cloned the repository, you can copy the included example then fill in onl
 test -e .env || cp .env.example .env
 ```
 
-If you installed from PyPI or downloaded only `spotify_monitor.py`, `.env.example` will not be in your current directory. Create a plain text file named `.env` in the directory where you run Spotify Monitor then add only the values you use. `REFRESH_TOKEN` is for advanced client mode. Spotify app credentials are optional legacy metadata credentials.
+If you installed from PyPI or downloaded only `spotify_monitor.py`, `.env.example` will not be in your current directory. Create a plain text file named `.env` in the directory where you run Spotify Monitor then add only the values you use. `REFRESH_TOKEN` is for advanced client mode. `SP_APP_CLIENT_ID` and `SP_APP_CLIENT_SECRET` are optional legacy metadata credentials. `SPOTIFY_SCROBBLE_CLIENT_ID` is the separate non-secret app identifier used by scrobble health.
 
 ```ini
 SP_DC_COOKIE="your_sp_dc_cookie_value"
+LASTFM_API_KEY="your_lastfm_api_key"
+SPOTIFY_SCROBBLE_CLIENT_ID="your_spotify_recent_play_client_id"
+SPOTIFY_SCROBBLE_REDIRECT_URI="http://127.0.0.1:8888/callback"
+SPOTIFY_SCROBBLE_REFRESH_TOKEN="your_spotify_recent_play_refresh_token"
 REFRESH_TOKEN="your_spotify_app_refresh_token"
 SP_APP_CLIENT_ID="your_spotify_app_client_id"
 SP_APP_CLIENT_SECRET="your_spotify_app_client_secret"
@@ -418,7 +574,7 @@ WEBHOOK_URL="https://discord.com/api/webhooks/your_id/your_token"
 NTFY_ACCESS_TOKEN="tk_your_ntfy_access_token"
 ```
 
-By default, Spotify Monitor looks for `.env` in the current directory. If it is not there, the search continues in each parent directory.
+By default, Friend Activity looks for `.env` while an explicit scrobble health run looks for `.env.scrobble_health`. The search starts in the current directory then continues in each parent directory.
 
 Browser import does not use the parent-directory search when choosing where to write. Without `--env-file`, it writes to `.env` in the current directory.
 

@@ -5,7 +5,9 @@
 
 This page assumes Spotify Monitor is already installed (see [Installation](installation.md)). It walks through the interactive setup wizard then your first monitoring run. If you opened this page first, choose [PyPI](installation.md#install-from-pypi), the [manual Python script](installation.md#manual-installation), the [Docker image](installation.md#docker-image) or [Docker Compose](installation.md#docker-compose), finish that method's steps then return here.
 
-Then use the interactive setup wizard. It asks who to monitor, how to connect to Spotify and which alerts to enable. You can review and change your answers before saving. Regular settings go in `spotify_monitor.conf`. Private values such as login cookies and webhook URLs go in `.env`.
+Then use the regular interactive setup wizard for Friend Activity monitoring. It asks who to monitor, how to connect to Spotify and which alerts to enable. You can review and change your answers before saving. Regular settings go in `spotify_monitor.conf`. Private values such as login cookies and webhook URLs go in `.env`.
+
+Both setup wizards explain at the beginning that Enter accepts the shown default and Ctrl+C cancels setup.
 
 For a local install, the wizard can check the setup and start monitoring immediately.
 
@@ -60,13 +62,43 @@ Use the tab that matches how you installed the tool. Copy and run only the comma
 
 Run interactive setup commands by themselves instead of including them in a multi-command paste.
 
+### Set up Last.fm scrobble health instead
+
+Spotify's six-month reauthorization requirement can disconnect Spotify Scrobbling. Last.fm currently shows only a website banner and sends no email warning, so the problem can remain unnoticed when someone rarely opens the website. Use the focused wizard to configure independent console, email or webhook alerts:
+
+```sh
+spotify_monitor --setup-scrobble-health
+```
+
+The focused wizard selects scrobble health as the saved mode. It asks for the Last.fm username and API key, links to [Last.fm API account management](https://www.last.fm/api/accounts) and guides you through a user-owned app in the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard). The app owner needs Spotify Premium in Development Mode. Create or open an app, add the recommended `http://127.0.0.1:8888/callback` redirect URI, select Web API in the API/SDKs section and save the app before copying its Client ID. The wizard uses this redirect automatically instead of asking you to choose one. A Client Secret is not needed. Spotify Monitor requests only `user-read-recently-played` through PKCE, opens or prints the authorization URL then asks you to paste the complete redirected URL from the browser address bar. The redirect page may fail to load because Spotify Monitor does not need to run a callback web server.
+
+Authorize the Spotify account whose completed plays should be checked. A separate Spotify account is not required. If that account is different from the app owner, add it under the app's User Management first. See Spotify's [app creation guide](https://developer.spotify.com/documentation/web-api/concepts/apps) and [PKCE guide](https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow) for the corresponding Dashboard screens.
+
+The wizard offers email or webhook alerts only for outages, recovery and operational errors. It defaults to five consecutive missing completed plays plus a 20 minute dead period. Duration prompts show seconds plus a readable equivalent such as `120s - 2m`. Enter seconds directly or add `s` for seconds, `m` for minutes, `h` for hours or `d` for days. Examples include `120`, `120s`, `2m`, `1h` and `1d`. Use the regular `--setup` wizard instead for Friend Activity monitoring.
+
+Like regular setup, the focused wizard lets you review or change each section before saving. It defaults to `spotify_monitor_scrobble_health.conf` plus `.env.scrobble_health` so its settings and private values do not replace the Friend Activity files. Pass `--config-file` or `--env-file` to choose another destination. With complete local authentication it can run the focused Doctor checks then start monitoring immediately. If authentication remains incomplete, it prints the exact authentication command before the Doctor and monitoring commands. Once monitoring starts, the console prints the first check and its result with the same timestamp separator used by Friend Activity. Later routine results appear with `--verbose` while outages, recoveries and errors remain visible normally.
+
+To enter or replace only `LASTFM_API_KEY` through a hidden prompt, run `spotify_monitor --set-lastfm-credentials`. It saves only the API key in `.env.scrobble_health` by default because scrobble health does not need the Last.fm shared secret.
+
+To grant access again after the Spotify authorization expires or is revoked, run:
+
+```sh
+spotify_monitor --authorize-scrobble-health
+```
+
+The command reuses the saved Client ID and redirect URI then replaces only `SPOTIFY_SCROBBLE_REFRESH_TOKEN` in `.env.scrobble_health`. It also prints the matching Doctor and monitoring commands. Spotify refresh tokens expire after six months, so this reauthorization is separate from reconnecting Spotify Scrobbling on Last.fm when the monitor detects an outage.
+
+Saved files are optional. For a one-off or externally managed run, select `--monitor-mode scrobble_health` then provide `--lastfm-username`, `--lastfm-api-key`, `--scrobble-client-id` and `--scrobble-refresh-token`. The redirect URI defaults to `http://127.0.0.1:8888/callback` and can be overridden with `--scrobble-redirect-uri`. The same private values can come from environment variables. Private command-line values may remain in shell history or process listings, so process environment variables are safer when persistence is not needed.
+
+For Docker Compose use `docker compose run --rm spotify_monitor --setup-scrobble-health`. For a direct Docker image replace `--setup` in the matching command above with `--setup-scrobble-health`.
+
 The macOS shell and Windows PowerShell examples use `${PWD}`. In Windows Command Prompt replace `${PWD}` with `%cd%`. Windows hosts must use Linux containers. The `:z` suffix is for hosts that use SELinux. If your Docker-compatible runtime reports that it is invalid, remove only `:z`.
 
 In this documentation, a **target** is the Spotify user whose activity you want to monitor. The **monitoring account** is the Spotify account represented by your saved login cookie or client credentials. The monitoring account must follow the target. They are normally different accounts.
 
 The wizard recommends importing the monitoring account's saved Firefox login. On macOS and Linux it can also import from Chrome, Brave or Chromium. Those three browsers require the optional `pycookiecheat` package. If it is missing, the wizard can install it in a local Python installation.
 
-The wizard detects PyPI, a downloaded script, Docker or Docker Compose and prints matching commands. It also formats file paths for the current operating system.
+Both wizards display the detected installation method plus the selected configuration and dotenv destinations before the first prompt. They detect PyPI, a downloaded script, Docker or Docker Compose then print matching commands with paths formatted for the current operating system.
 
 Container setup destinations must stay inside `/data`. That directory is the current host directory mounted into the temporary setup container, so files written there survive `--rm`. The wizard rejects paths such as `/tmp/spotify_monitor.conf` instead of printing a command for a different file.
 
@@ -99,7 +131,7 @@ The setup wizard checks whether the monitoring account follows the target. It ca
 | Check authentication, connectivity and one target | `spotify_monitor --doctor TARGET` |
 | List Spotify friends visible to the configured account | `spotify_monitor --list-friends` |
 | Import a Spotify login from Firefox | Open [Spotify Web Player](https://open.spotify.com/) in Firefox, sign in then run `spotify_monitor --import-browser-cookie --browser firefox` |
-| Safely set or replace `SP_DC_COOKIE` | Run `spotify_monitor --set-sp-dc` and enter `sp_dc` at the hidden prompt |
+| Most securely enter or replace a manually extracted `SP_DC_COOKIE` | Run `spotify_monitor --set-sp-dc` and enter `sp_dc` at the hidden prompt |
 | Set up webhook alerts | Run the setup wizard and choose webhook alerts |
 | Save a new webhook URL | Run `spotify_monitor --set-webhook-url` |
 | Send a test webhook | Run `spotify_monitor --send-test-webhook` |
@@ -117,7 +149,7 @@ spotify_monitor --import-browser-cookie --browser firefox
 
 If browser import is not available, use the [manual cookie extraction](configuration.md#manual-cookie-extraction) fallback.
 
-The standalone replacement command reads `sp_dc` through a hidden prompt, so the value does not appear on screen. It validates the cookie with Spotify before updating only `SP_DC_COOKIE`. If validation fails, it does not change the `.env` file. Replacing an existing cookie requires confirmation.
+For a manually extracted cookie, `--set-sp-dc` is the recommended and most secure entry method. The command reads `sp_dc` through a hidden prompt, so the value does not appear on screen or in the command line. It validates the cookie with Spotify before updating only `SP_DC_COOKIE`. If validation fails, it does not change the `.env` file. Replacing an existing cookie requires confirmation. Directly adding `SP_DC_COOKIE` to `.env` remains supported.
 
 ```sh
 # PyPI install
