@@ -2653,8 +2653,6 @@ def resolve_truncate_chars(cli_value, configured_value, logging_disabled):
         debug_print("Detecting terminal screen size")
         terminal_size = shutil.get_terminal_size()
         print(f"The detected terminal screen width is: {terminal_size.columns} characters\n")
-        if ALT_VIEW:
-            print_to_screen(f"The detected terminal screen width is: {terminal_size.columns} characters\n")
         return terminal_size.columns
     return truncate_chars
 
@@ -6039,10 +6037,18 @@ def build_startup_summary(target: str, config_path, env_path, output_path) -> Li
 
 # Formats one startup summary row with aligned plain ASCII columns
 def _format_startup_summary_row(row: StartupSummaryRow) -> str:
+    if row.label.startswith("---"):
+        return f"* {(row.label)}{row.value}\n"
     prefix = f"* {(row.label + ':'):<30}"
     if row.label in ("Notifications (email)", "Notifications (webhook)"):
         return textwrap.fill(row.value, width=100, initial_indent=prefix, subsequent_indent=" " * len(prefix), break_long_words=False, break_on_hyphens=False) + "\n"
     return f"{prefix}{row.value}\n"
+
+def _format_startup_summary_row(row: StartupSummaryRow) -> str:
+    if row.label.startswith("---"):
+        return f"* {(row.label)}{row.value}\n"
+    else:
+        return f"* {(row.label + ':'):<27}{row.value}\n"
 
 
 # Routes concise or complete startup rows independently to terminal and log destinations
