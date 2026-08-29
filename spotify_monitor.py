@@ -3453,6 +3453,34 @@ SPREADSHEET_DIVIDER_TEXT = "-" * 21
 # drains again - not on every retry in between.
 # When want_footer is True, returns the "spreadsheet updated"/"spreadsheet error" text to append
 # to a song-change email body (blank strings otherwise, or when UPDATE_SPREADSHEET is disabled).
+# Sends the "queue caught up" email/ntfy alert for the active ERR_CODE tab. Shared by
+# update_spreadsheet_row() (mid-run recovery, after a write finally succeeds) and
+# drain_spreadsheet_queue_at_startup() (startup recovery, before the first write is even
+# attempted) so the two call sites can't drift out of sync with each other.
+def send_spreadsheet_recovery_alert():
+    print(f"* Google Sheet (tab '{ERR_CODE}') queue caught up")
+    if ERROR_NOTIFICATION:
+        rec_subject = f"spotify_monitor: Google Sheet (tab '{ERR_CODE}') caught up"
+        rec_body = f"The spreadsheet queue has been fully drained and the sheet (tab '{ERR_CODE}') is now up to date.{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+        rec_body_html = f"<html><head></head><body>The spreadsheet queue has been fully drained and the sheet (tab '{escape(ERR_CODE)}') is now up to date.{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
+        send_email(rec_subject, rec_body, rec_body_html, SMTP_SSL)
+        send_notification("sheet", f"spotify_monitor: Google Sheet (tab '{ERR_CODE}') caught up")
+
+
+# Drains any rows left queued by a previous run's write failures, before the main loop starts,
+# instead of waiting for the next real song/event to trigger a retry. Called once at startup.
+def drain_spreadsheet_queue_at_startup():
+    if not UPDATE_SPREADSHEET or not sheets_helper.queue_has_pending(ERR_CODE):
+        return
+
+    print(f"* Retrying queued Google Sheet rows for tab '{ERR_CODE}'...")
+    drained, drain_error = sheets_helper.drain_queue_at_startup(SPREADSHEET_ID, ERR_CODE, ERR_CODE, GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE)
+    if drained:
+        send_spreadsheet_recovery_alert()
+    else:
+        print(f"* Google Sheet (tab '{ERR_CODE}') queue still has rows pending - will keep retrying ({drain_error})")
+
+
 def update_spreadsheet_row(col_b_text, want_footer):
     if not UPDATE_SPREADSHEET:
         return "", ""
@@ -3463,24 +3491,18 @@ def update_spreadsheet_row(col_b_text, want_footer):
     # full timestamp here too would be redundant and renders differently (date+time) than the
     # existing rows above it.
     row_ts = datetime.now().strftime("%Y-%m-%d")
-    success, entered_error, recovered = sheets_helper.update_spreadsheet(ERR_CODE, SPREADSHEET_ID, ERR_CODE, [row_ts, col_b_text], GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE)
+    success, entered_error, recovered, error_message = sheets_helper.update_spreadsheet(ERR_CODE, SPREADSHEET_ID, ERR_CODE, [row_ts, col_b_text], GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE)
 
     if entered_error:
-        print(f"* Error: failed to update Google Sheet (tab '{ERR_CODE}') - row queued for retry")
+        print(f"* Error: failed to update Google Sheet (tab '{ERR_CODE}') - row queued for retry ({error_message})")
         if ERROR_NOTIFICATION:
             err_subject = f"spotify_monitor: failed to update Google Sheet (tab '{ERR_CODE}') - row queued for retry"
-            err_body = f"Could not write to the spreadsheet (tab '{ERR_CODE}'). The row has been queued locally and will be retried automatically on the next check.\n\nRow: {row_ts} | {col_b_text}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-            err_body_html = f"<html><head></head><body>Could not write to the spreadsheet (tab '{escape(ERR_CODE)}'). The row has been queued locally and will be retried automatically on the next check.<br><br>Row: {escape(row_ts)} | {escape(col_b_text)}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
+            err_body = f"Could not write to the spreadsheet (tab '{ERR_CODE}'). The row has been queued locally and will be retried automatically on the next check.\n\nError: {error_message}\n\nRow: {row_ts} | {col_b_text}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+            err_body_html = f"<html><head></head><body>Could not write to the spreadsheet (tab '{escape(ERR_CODE)}'). The row has been queued locally and will be retried automatically on the next check.<br><br>Error: {escape(str(error_message))}<br><br>Row: {escape(row_ts)} | {escape(col_b_text)}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
             send_email(err_subject, err_body, err_body_html, SMTP_SSL)
-            send_notification("sheet", f"spotify_monitor: Google Sheet update failed (tab '{ERR_CODE}') - row queued for retry")
+            send_notification("sheet", f"spotify_monitor: Google Sheet update failed (tab '{ERR_CODE}') - row queued for retry ({error_message})")
     elif recovered:
-        print(f"* Google Sheet (tab '{ERR_CODE}') queue caught up")
-        if ERROR_NOTIFICATION:
-            rec_subject = f"spotify_monitor: Google Sheet (tab '{ERR_CODE}') caught up"
-            rec_body = f"The spreadsheet queue has been fully drained and the sheet (tab '{ERR_CODE}') is now up to date.{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-            rec_body_html = f"<html><head></head><body>The spreadsheet queue has been fully drained and the sheet (tab '{escape(ERR_CODE)}') is now up to date.{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
-            send_email(rec_subject, rec_body, rec_body_html, SMTP_SSL)
-            send_notification("sheet", f"spotify_monitor: Google Sheet (tab '{ERR_CODE}') caught up")
+        send_spreadsheet_recovery_alert()
 
     if not want_footer:
         return "", ""
@@ -6101,6 +6123,12 @@ def build_startup_summary(target: str, config_path, env_path, output_path) -> Li
         rows.append(StartupSummaryRow("Legacy OAuth cache", oauth_cache, concise=True))
     else:
         rows.append(StartupSummaryRow("Legacy OAuth cache", "Not used", concise=False))
+
+    if UPDATE_SPREADSHEET and GOOGLE_OAUTH_CLIENT_FILE:
+        rows.append(StartupSummaryRow("Google Sheets OAuth Client", GOOGLE_OAUTH_CLIENT_FILE, concise=True))
+    if UPDATE_SPREADSHEET and GOOGLE_OAUTH_TOKEN_FILE:
+        rows.append(StartupSummaryRow("Google Sheets OAuth Token", GOOGLE_OAUTH_TOKEN_FILE, concise=True))
+    
     rows.append(StartupSummaryRow("More details", "use --verbose or --debug", concise=True, full=False, log=False))
 
     rows += [
@@ -11750,9 +11778,9 @@ def main():
         USER_ID      = USER_ID2
         ADD_PLAYLISTS_TO_MONITOR = ADD_PLAYLISTS_TO_MONITOR2
         DEBUG_JMK    = DEBUG_JMK2
-        UPDATE_SPREADSHEET = UPDATE_SPREADSHEET2
         FLAG_FILE    = FLAG_FILE2
         CSV_FILE     = CSV_FILE2
+        UPDATE_SPREADSHEET = UPDATE_SPREADSHEET2
 
     if args.jmk or JMK_MODE:
         JMK_MODE = True
@@ -12050,6 +12078,24 @@ def main():
 
     startup_rows = build_startup_summary(target_user_id, cfg_path, env_path, FINAL_LOG_PATH)
     emit_startup_summary(startup_rows, show_full=bool(VERBOSE_MODE or DEBUG_MODE))
+
+    # Proactively check the Google Sheets token at startup rather than letting the first mid-run
+    # write discover a dead/expired/revoked token and block unattended waiting on browser consent.
+    # If reauth is needed, alert now (in case this run is unattended) and then do the interactive
+    # consent flow right here, at a predictable moment tied to launching the script.
+    if UPDATE_SPREADSHEET and sheets_helper.credentials_need_reauth(GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE):
+        print(f"* Google Sheets authorization needed for tab '{ERR_CODE}' - opening browser for consent...")
+        if ERROR_NOTIFICATION:
+            reauth_subject = f"spotify_monitor: Google Sheets re-authorization needed (tab '{ERR_CODE}')"
+            reauth_body = f"The cached Google Sheets token for tab '{ERR_CODE}' is no longer valid and needs to be re-authorized. spotify_monitor is opening a browser consent window now on the machine it's running on and will wait there until it's completed.{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+            reauth_body_html = f"<html><head></head><body>The cached Google Sheets token for tab '{escape(ERR_CODE)}' is no longer valid and needs to be re-authorized. spotify_monitor is opening a browser consent window now on the machine it's running on and will wait there until it's completed.{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
+            send_email(reauth_subject, reauth_body, reauth_body_html, SMTP_SSL)
+            send_notification("sheet", f"spotify_monitor: Google Sheets re-authorization needed (tab '{ERR_CODE}') - complete the browser consent on the host machine")
+        sheets_helper.interactive_reauth(GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE)
+        print(f"* Google Sheets authorization complete")
+
+    drain_spreadsheet_queue_at_startup()
+
     playback_warning = container_playback_warning()
     if playback_warning is not None:
         print(f"* Warning: {playback_warning}\n")
