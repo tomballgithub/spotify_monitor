@@ -1045,7 +1045,7 @@ SCROBBLE_HEALTH_DOTENV_FILENAME = ".env.scrobble_health"
 
 # List of secret keys to load from env/config
 SECRET_KEYS = ("REFRESH_TOKEN", "SP_DC_COOKIE", "SMTP_PASSWORD", "SP_APP_CLIENT_ID", "SP_APP_CLIENT_SECRET", "WEBHOOK_URL", "NTFY_ACCESS_TOKEN", "LASTFM_API_KEY", "SPOTIFY_SCROBBLE_REFRESH_TOKEN")
-SECRET_KEYS+= ("SP_DC_COOKIE2", ) # comma needed to make this a tuple, otherwise error
+SECRET_KEYS+= ("SP_DC_COOKIE2", "WEBHOOK_URL2",) # comma needed to make this a tuple, otherwise error
 
 # Non-secret Spotify recent-play app settings also supported through environment variables
 ENVIRONMENT_SETTING_KEYS = ("SPOTIFY_SCROBBLE_CLIENT_ID", "SPOTIFY_SCROBBLE_REDIRECT_URI")
@@ -6104,6 +6104,7 @@ def build_startup_summary(target: str, config_path, env_path, output_path) -> Li
         StartupSummaryRow("Notifications (email)", notification_state_email, concise=True),
         StartupSummaryRow("Notifications (webhook)", notification_state_webhook, concise=True),
         StartupSummaryRow("Webhook provider", normalized_webhook_provider() or "Invalid", concise=False),
+        StartupSummaryRow("Webhook URL", WEBHOOK_URL or "Invalid", concise=False),
         StartupSummaryRow("Output", output_state, concise=True, full=False, log=False),
         StartupSummaryRow("Output logging", str(output_path) if output_path else "Disabled", concise=False),
         StartupSummaryRow("Config", str(config_path) if config_path else "None", concise=True),
@@ -11780,6 +11781,7 @@ def main():
         DEBUG_JMK    = DEBUG_JMK2
         FLAG_FILE    = FLAG_FILE2
         CSV_FILE     = CSV_FILE2
+        WEBHOOK_URL  = WEBHOOK_URL2
         UPDATE_SPREADSHEET = UPDATE_SPREADSHEET2
 
     if args.jmk or JMK_MODE:
