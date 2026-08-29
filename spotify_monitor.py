@@ -1898,6 +1898,10 @@ def _format_config_value(value, prefer_double_quotes: bool) -> str:
     raise TypeError(f"Unsupported config value type: {type(value).__name__}")
 
 
+# Advanced settings documented for config files but deliberately kept out of the generated template
+EXTRA_CONFIG_KEYS = frozenset(("JMK_MODE", "GMAIL_TAG", "ERR_CODE", "SEND_NOTIFY", "DZ_ALERTS", "ORIG_EMAILS", "USER_ID", "DEBUG_JMK", "GMAIL_TAG2", "ERR_CODE2", "SEND_NOTIFY2", "DZ_ALERTS2", "ORIG_EMAILS2", "USER_ID2", "DEBUG_JMK2", "CSV_FILE2", "FLAG_FILE2", "UPDATE_SPREADSHEET", "UPDATE_SPREADSHEET2", "SPREADSHEET_ID", "GOOGLE_OAUTH_CLIENT_FILE", "GOOGLE_OAUTH_TOKEN_FILE", "ICON_SONG_MISSING_FROM_PLAYLIST", "MAX_PLAYLIST_DIFFERENTIAL", "LOAD_TRACKS_FREQUENCY", "OVERRIDE_PLAYLIST_AT_START", "NOTIFY_PLAYLIST_DETECTED", "ADD_PLAYLISTS_TO_MONITOR", "ADD_PLAYLISTS_TO_MONITOR2"))
+
+
 # Settings that earlier versions wrote into generated configuration files and that later releases
 # removed. Ignoring them with a warning keeps an untouched older configuration working on upgrade,
 # while any other unknown name is still rejected so a typo cannot silently do nothing.
@@ -1919,8 +1923,9 @@ def describe_retired_settings(names: Sequence[str], path: Any = "") -> str:
 # Returns the setting names declared by the trusted built-in config template
 def _config_allowed_names() -> frozenset[str]:
     template_tree = ast.parse(CONFIG_BLOCK, "<built-in-config>", "exec")
-    return frozenset(statement.targets[0].id for statement in template_tree.body if isinstance(statement, ast.Assign) and len(statement.targets) == 1 and isinstance(statement.targets[0], ast.Name))
-
+    declared = {statement.targets[0].id for statement in template_tree.body if isinstance(statement, ast.Assign) and len(statement.targets) == 1 and isinstance(statement.targets[0], ast.Name)}
+    return frozenset(declared | EXTRA_CONFIG_KEYS)
+    
 
 # Parses allowlisted literal config assignments without executing file content
 def parse_config_content(content: str, filename: str = "<config>", retired_out: Optional[List[str]] = None) -> dict[str, Any]:
@@ -1938,7 +1943,11 @@ def parse_config_content(content: str, filename: str = "<config>", retired_out: 
         if name not in allowed_names:
             raise ValueError(f"Line {statement.lineno}: unsupported configuration setting {name!r}")
         try:
-            parsed_values[name] = ast.literal_eval(statement.value)
+            if isinstance(statement.value, ast.Name):
+                # it's a bare reference to another variable (allow assigning a name to another in .conf file #jmk)
+                parsed_values[name] = parsed_values.get(statement.value.id, statement.value.id)
+            else:
+                parsed_values[name] = ast.literal_eval(statement.value)
         except (ValueError, TypeError) as exc:
             raise ValueError(f"Line {statement.lineno}: {name} must use a literal value") from exc
     return parsed_values
