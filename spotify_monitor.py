@@ -256,6 +256,20 @@ ERROR_NOTIFICATION = True
 SCROBBLE_HEALTH_NOTIFICATION = True
 
 # ----------------------------
+# Privacy
+# ----------------------------
+
+# Optional substitutions applied to console messages, logs, webhooks, emails and dashboards
+# Use these to replace a username with a friendly label or mask private text
+#
+# Provide a list of (search, replacement) tuples
+#
+# Example:
+# PRIVACY_SUBSTITUTIONS = [("a.username", "XXX"), ("sdfsdf747475475", "Bobby")]
+#
+PRIVACY_SUBSTITUTIONS = []
+
+# ----------------------------
 # Webhook Notifications
 # ----------------------------
 
@@ -1005,6 +1019,8 @@ monitored_playlists_data = {}
 DEBUG_JMK = False
 count_overridden = False
 NTFY_IMAGES = True
+PRIVACY_SUBSTITUTIONS = []
+PRIVACY_SUBSTITUTIONS_INVALID_WARNED = False
 
 # NTFY configuration
 NTFY_TOPIC_KEL = "jeoff_spotify_stream"
@@ -1210,7 +1226,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import secrets
 import unicodedata
-from typing import Any, Callable, List, Optional, Sequence, Union, cast
+from typing import Any, Callable, List, Optional, Sequence, Union, cast, TypeVar
 from email.utils import parseaddr, parsedate_to_datetime
 import sheets_helper #jmk
 
@@ -2670,6 +2686,7 @@ class Logger(object):
         self._suppress_next_newline = False
 
     def write(self, message):
+        message = apply_privacy_substitutions(message)
         if not DISABLE_LOGGING:
             if self.mode in ["both", "log"]:
                 self.logfile.write(message.expandtabs(8))
@@ -2694,6 +2711,7 @@ class Logger(object):
 def print_to_log(message):
     """Prints only to the log file."""
 ##jmkfix
+    message = apply_privacy_substitutions(message)
     if not ALT_VIEW:
         sys.__stdout__.write(str(message).expandtabs(8) + "\n")  # Force writing to actual console
         sys.__stdout__.flush()
@@ -2703,6 +2721,7 @@ def print_to_log(message):
 
 def print_to_both(message):
     """Prints to both the log file and screen, bypassing sys.stdout redirection."""
+    message = apply_privacy_substitutions(message)
     if not DISABLE_LOGGING:
         log_logger.write(str(message).expandtabs(8) + "\n")
     if (TRUNCATE_CHARS):
@@ -2712,6 +2731,7 @@ def print_to_both(message):
 
 # DEBUG_JMK: 0 = disabled, 1 = log only, 2 = screen & log, 3 = screen only
 def print_to_screen(message):
+    message = apply_privacy_substitutions(message)
     """Prints only to the screen, bypassing sys.stdout redirection, unless debugging."""
     if DEBUG_JMK in (1, 2):
         if log_logger:
@@ -2723,6 +2743,7 @@ def print_to_screen(message):
 
 # DEBUG_JMK: 0 = disabled, 1 = log only, 2 = screen & log, 3 = screen only
 def print_debug(message):
+    message = apply_privacy_substitutions(message)
     """Prints to the log file and/or screen, depending on configuration."""
     if DEBUG_JMK:
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -2739,6 +2760,49 @@ def print_debug(message):
 def timestring():
     now = datetime.now()
     return now.strftime("%m/%d, %H:%M:%S")
+
+
+TPrivacyContent = TypeVar("TPrivacyContent")
+
+
+# Apply PRIVACY_SUBSTITUTIONS to any content type
+def apply_privacy_substitutions(content: TPrivacyContent) -> TPrivacyContent:
+    """
+    - Recurses into dict values and list items
+    - For strings, performs search/replace using PRIVACY_SUBSTITUTIONS
+    - Preserves dict keys so JSON and object keys stay stable for API
+      consumers. Callers that display a key (e.g. terminal target tables)
+      must substitute it explicitly at the point of display
+    - Ignores invalid substitution entries to avoid runtime crashes
+    - Non-string primitives are returned unchanged
+    """
+    global PRIVACY_SUBSTITUTIONS_INVALID_WARNED
+    if not PRIVACY_SUBSTITUTIONS:
+        return content
+    if isinstance(content, str):
+        content_str = content
+        for item in PRIVACY_SUBSTITUTIONS:
+            if not isinstance(item, (list, tuple)) or len(item) != 2:
+                if not PRIVACY_SUBSTITUTIONS_INVALID_WARNED:
+                    if sys.__stderr__ is not None:
+                        sys.__stderr__.write("* Warning: Ignoring invalid PRIVACY_SUBSTITUTIONS entry, expected (search, replace) with both values as strings\n")
+                    PRIVACY_SUBSTITUTIONS_INVALID_WARNED = True
+                continue
+            search, replace = item
+            if not isinstance(search, str) or not isinstance(replace, str) or not search:
+                if not PRIVACY_SUBSTITUTIONS_INVALID_WARNED:
+                    if sys.__stderr__ is not None:
+                        sys.__stderr__.write("* Warning: Ignoring invalid PRIVACY_SUBSTITUTIONS entry, expected non-empty string search and string replace values\n")
+                    PRIVACY_SUBSTITUTIONS_INVALID_WARNED = True
+                continue
+            content_str = content_str.replace(search, replace)
+        return cast(TPrivacyContent, content_str)
+    if isinstance(content, dict):
+        return cast(TPrivacyContent, {k: apply_privacy_substitutions(v) for k, v in content.items()})
+    if isinstance(content, list):
+        return cast(TPrivacyContent, [apply_privacy_substitutions(item) for item in content])
+    return content
+
 
 def deliver_jmk_ntfy(notification_type, message, image_url, track, artist, album, playlist, timediffstr, count):
 # KEL, 08/11, 20:25:28: START: September - Earth, Wind & Fire (The Best Of Earth, Wind & Fire Vol. 1) [YACHT ROCK | TOP 100 SONGS]
@@ -3328,6 +3392,10 @@ def smtp_connect_and_login(use_ssl, smtp_timeout=15):
 
 # Sends email notification through the shared SMTP validation and login path
 def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
+    subject = apply_privacy_substitutions(subject)
+    body = apply_privacy_substitutions(body)
+    body_html = apply_privacy_substitutions(body_html)
+
     validation_error = validate_smtp_configuration()
     if validation_error is not None:
         print(render_recovery_error(RecoveryError(validation_error)))
@@ -3760,6 +3828,9 @@ def build_ntfy_image(image_url: str = "") -> Optional[bytes]:
 
 # Sends one webhook through an isolated bounded retry path that never uses Spotify retries
 def send_webhook(title: str, description: str, notification_type: str = "song", force: bool = False, sleeper: Optional[Callable[[float], None]] = None, image_url: str = "", ntfy_priority: int = 0, ntfy_tags: str = "") -> int:
+    title = apply_privacy_substitutions(title)
+    description = apply_privacy_substitutions(description)
+
     if not force and not webhook_event_enabled(notification_type):
         return 1
     if not validate_webhook_url():
