@@ -9404,7 +9404,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                     # body_dz_html = ""
                     # dz_message = ""
 
-            print(f"Username:\t\t\t{sp_username}")
+            print(f"\nUsername:\t\t\t{sp_username}")
             print(f"User URI ID:\t\t\t{sp_data['sp_uri']}")
             print(f"\nLast played:\t\t\t{sp_artist} - {sp_track}")
             print(f"Duration:\t\t\t{display_time(sp_track_duration)}\n")
@@ -11766,6 +11766,10 @@ def main():
 
     if not check_internet():
         sys.exit(1)
+
+    if (("jeoff-us" in sys.argv) or (TARGET_USER_URI_ID == "jeoff-us")) and not ("--alt-cookie" in sys.argv):
+        print("Automatically forcing --alt-cookie for jeoff-us")
+        ALT_COOKIE = True
 
     if args.alt_cookie or ALT_COOKIE:
         ALT_COOKIE   = True
