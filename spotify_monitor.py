@@ -3484,9 +3484,7 @@ def deliver_jmk_ntfy(notification_type, message, image_url, track, artist, album
 
     elif (message[0:5] == "START"):
         # if start occurs when script launched, there is no elapsed time to display
-        print_debug(f'timediffstr: {timediffstr}')
         title = f'{ERR_CODE} started ' + (f'(after {timediffstr})' if timediffstr else "streaming")
-        print_debug(f'title: {title}')
         if playlist == "unknown playlist":
             body = f"{track}\n{artist}\n{album}"
         else:
@@ -3495,9 +3493,7 @@ def deliver_jmk_ntfy(notification_type, message, image_url, track, artist, album
         priority = priority_start # change priority from default
 
     elif (message[0:3] == "END"):
-        print_debug(f'timediffstr: {timediffstr}')
         title = f'{ERR_CODE} stopped (after {timediffstr} & {count} songs)'
-        print_debug(f'title: {title}')
         if playlist == "unknown playlist":
             body = f"{track}\n{artist}\n{album}"
         else:
@@ -13154,9 +13150,6 @@ def main():
     # Create persistent Logger instances
     if not DISABLE_LOGGING:
         log_logger = Logger(FINAL_LOG_PATH, mode="log")
-        #screen_logger = Logger(FINAL_LOG_PATH, mode="screen")
-        #both_logger = Logger(FINAL_LOG_PATH, mode="both")
-
     
     if args.notify_active is True:
         ACTIVE_NOTIFICATION = True
