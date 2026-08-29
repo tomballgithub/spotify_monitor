@@ -1,14 +1,24 @@
 import tempfile
 from io import BytesIO
 from pathlib import Path
-from unittest.mock import Mock, patch
+from typing import Any
+from unittest.mock import Mock
 
 import pytest
 from dotenv import dotenv_values
-from PIL import Image
+
+# Pillow ships as the optional notification-images extra, so only the artwork tests below depend on it
+Image: Any = None
+try:
+    from PIL import Image as PillowImageModule
+    Image = PillowImageModule
+except ImportError:
+    pass
 
 import spotify_monitor as monitor
 
+
+requires_pillow = pytest.mark.skipif(Image is None, reason="Pillow is the optional notification-images extra")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ARTIFACT_ROOT = PROJECT_ROOT / "local" / "webhook_test_artifacts"
@@ -90,29 +100,42 @@ def test_webhook_provider_detection(url, expected):
     assert monitor.detect_webhook_provider(url) == expected
 
 
+@pytest.mark.parametrize("provider,expected", [("discord", "Discord"), ("DISCORD", "Discord"), (" Discord ", "Discord"), ("ntfy", "ntfy"), ("NTFY", "ntfy"), ("slack", ""), ("", "")])
+# Verifies user-facing text spells each provider the way its service brands it
+def test_webhook_provider_display_name(provider, expected):
+    assert monitor.webhook_provider_display_name(provider) == expected
+
+
 # Verifies SIGHUP adopts rotated client credentials, clears auth caches and redetects ntfy
 def test_sighup_reload_clears_auth_caches_and_updates_webhook_provider(monkeypatch):
     if not hasattr(monitor.signal, "SIGHUP"):
         pytest.skip("SIGHUP is unavailable on Windows")
-    replacements = {"REFRESH_TOKEN": "new-refresh-token", "WEBHOOK_URL": "https://ntfy.sh/new-private-topic"}
-    monkeypatch.setattr(monitor, "DOTENV_FILE", "test.env")
-    monkeypatch.setattr(monitor, "TOKEN_SOURCE", "client")
-    monkeypatch.setattr(monitor, "LOGIN_REQUEST_BODY_FILE", "")
-    monkeypatch.setattr(monitor, "CLIENTTOKEN_REQUEST_BODY_FILE", "")
-    monkeypatch.setattr(monitor, "REFRESH_TOKEN", "old-refresh-token")
-    monkeypatch.setattr(monitor, "WEBHOOK_URL", "https://discord.com/api/webhooks/123/old-token")
-    monkeypatch.setattr(monitor, "WEBHOOK_PROVIDER", "discord")
-    monkeypatch.setattr(monitor, "SP_CACHED_ACCESS_TOKEN", "cached-access")
-    monkeypatch.setattr(monitor, "SP_CACHED_REFRESH_TOKEN", "cached-refresh")
-    monkeypatch.setattr(monitor, "SP_ACCESS_TOKEN_EXPIRES_AT", 999)
-    monkeypatch.setattr(monitor, "SP_CACHED_CLIENT_ID", "cached-client-id")
-    monkeypatch.setattr(monitor, "SP_CACHED_OAUTH_APP_TOKEN", "cached-oauth")
-    monkeypatch.setattr(monitor, "SP_CACHED_CLIENT_TOKEN", "cached-client-token")
-    monkeypatch.setattr(monitor, "SP_CLIENT_TOKEN_EXPIRES_AT", 999)
-    monkeypatch.setattr(monitor, "SP_CACHED_SCROBBLE_ACCESS_TOKEN", "cached-scrobble-token")
-    monkeypatch.setattr(monitor, "SP_SCROBBLE_ACCESS_TOKEN_EXPIRES_AT", 999)
-    monkeypatch.setattr(monitor, "SP_CACHED_SCROBBLE_AUTH_FINGERPRINT", "cached-scrobble-auth")
-    with patch("dotenv.load_dotenv"), patch.object(monitor.os, "getenv", side_effect=replacements.get):
+    with make_test_directory() as directory_name:
+        env_path = Path(directory_name) / ".env"
+        env_path.write_text('REFRESH_TOKEN="old-refresh-token"\nWEBHOOK_URL="https://discord.com/api/webhooks/123/old-token"\n', encoding="utf-8")
+        monkeypatch.setattr(monitor, "REFRESH_TOKEN", "")
+        monkeypatch.setattr(monitor, "WEBHOOK_URL", "")
+        monkeypatch.setattr(monitor, "DOTENV_MANAGED_KEYS", set())
+        monkeypatch.setattr(monitor, "DOTENV_BASE_VALUES", {})
+        monkeypatch.setenv("REFRESH_TOKEN", "")
+        monkeypatch.setenv("WEBHOOK_URL", "")
+        monitor.apply_dotenv_mapping(monitor.read_dotenv_mapping(env_path), initialize_base=True)
+        env_path.write_text('REFRESH_TOKEN="new-refresh-token"\nWEBHOOK_URL="https://ntfy.sh/new-private-topic"\n', encoding="utf-8")
+        monkeypatch.setattr(monitor, "DOTENV_FILE", str(env_path))
+        monkeypatch.setattr(monitor, "TOKEN_SOURCE", "client")
+        monkeypatch.setattr(monitor, "LOGIN_REQUEST_BODY_FILE", "")
+        monkeypatch.setattr(monitor, "CLIENTTOKEN_REQUEST_BODY_FILE", "")
+        monkeypatch.setattr(monitor, "WEBHOOK_PROVIDER", "discord")
+        monkeypatch.setattr(monitor, "SP_CACHED_ACCESS_TOKEN", "cached-access")
+        monkeypatch.setattr(monitor, "SP_CACHED_REFRESH_TOKEN", "cached-refresh")
+        monkeypatch.setattr(monitor, "SP_ACCESS_TOKEN_EXPIRES_AT", 999)
+        monkeypatch.setattr(monitor, "SP_CACHED_CLIENT_ID", "cached-client-id")
+        monkeypatch.setattr(monitor, "SP_CACHED_OAUTH_APP_TOKEN", "cached-oauth")
+        monkeypatch.setattr(monitor, "SP_CACHED_CLIENT_TOKEN", "cached-client-token")
+        monkeypatch.setattr(monitor, "SP_CLIENT_TOKEN_EXPIRES_AT", 999)
+        monkeypatch.setattr(monitor, "SP_CACHED_SCROBBLE_ACCESS_TOKEN", "cached-scrobble-token")
+        monkeypatch.setattr(monitor, "SP_SCROBBLE_ACCESS_TOKEN_EXPIRES_AT", 999)
+        monkeypatch.setattr(monitor, "SP_CACHED_SCROBBLE_AUTH_FINGERPRINT", "cached-scrobble-auth")
         monitor.reload_secrets_signal_handler(monitor.signal.SIGHUP, None)
     assert monitor.REFRESH_TOKEN == "new-refresh-token"
     assert monitor.WEBHOOK_PROVIDER == "ntfy"
@@ -126,6 +149,28 @@ def test_sighup_reload_clears_auth_caches_and_updates_webhook_provider(monkeypat
     assert monitor.SP_CACHED_SCROBBLE_ACCESS_TOKEN is None
     assert monitor.SP_SCROBBLE_ACCESS_TOKEN_EXPIRES_AT == 0
     assert monitor.SP_CACHED_SCROBBLE_AUTH_FINGERPRINT == ""
+
+
+# Verifies SIGHUP clears a secret removed from the selected dotenv file
+def test_sighup_reload_clears_removed_dotenv_secret(monkeypatch):
+    if not hasattr(monitor.signal, "SIGHUP"):
+        pytest.skip("SIGHUP is unavailable on Windows")
+    with make_test_directory() as directory_name:
+        env_path = Path(directory_name) / ".env"
+        env_path.write_text('REFRESH_TOKEN="obsolete-refresh-token"\n', encoding="utf-8")
+        monkeypatch.setattr(monitor, "REFRESH_TOKEN", "")
+        monkeypatch.setattr(monitor, "DOTENV_MANAGED_KEYS", set())
+        monkeypatch.setattr(monitor, "DOTENV_BASE_VALUES", {})
+        monkeypatch.setenv("REFRESH_TOKEN", "")
+        monitor.apply_dotenv_mapping(monitor.read_dotenv_mapping(env_path), initialize_base=True)
+        env_path.write_text("# secret removed\n", encoding="utf-8")
+        monkeypatch.setattr(monitor, "DOTENV_FILE", str(env_path))
+        monkeypatch.setattr(monitor, "TOKEN_SOURCE", "cookie")
+        monkeypatch.setattr(monitor, "SP_CACHED_ACCESS_TOKEN", "cached-access")
+        monitor.reload_secrets_signal_handler(monitor.signal.SIGHUP, None)
+    assert monitor.REFRESH_TOKEN == ""
+    assert monitor.os.environ.get("REFRESH_TOKEN") == ""
+    assert monitor.SP_CACHED_ACCESS_TOKEN is None
 
 
 # Verifies ntfy input normalization preserves HTTPS URLs and expands only valid bare topics
@@ -305,6 +350,7 @@ def test_successful_ntfy_webhook_uses_native_topic_api(monkeypatch):
 
 
 # Verifies ntfy cover art is downloaded with bounds and converted entirely in memory
+@requires_pillow
 def test_ntfy_image_is_bounded_and_built_in_memory(monkeypatch):
     source = BytesIO()
     Image.new("RGB", (320, 640), (12, 34, 56)).save(source, format="PNG")
@@ -337,7 +383,7 @@ def test_ntfy_image_rejects_oversized_download(monkeypatch):
 def test_ntfy_image_respects_pillow_availability_flag(monkeypatch):
     image_get = Mock(side_effect=AssertionError("image download was attempted without Pillow"))
     monkeypatch.setattr(monitor, "NTFY_IMAGES", True)
-    monkeypatch.setattr(monitor, "NTFY_IMAGES_AVAILABLE", False)
+    monkeypatch.setattr(monitor, "NOTIFICATION_IMAGES_AVAILABLE", False)
     monkeypatch.setattr(monitor.WEBHOOK_SESSION, "get", image_get)
     assert monitor.build_ntfy_image("https://i.scdn.co/image/cover.jpg") is None
     image_get.assert_not_called()
@@ -546,6 +592,30 @@ def test_notification_channels_are_independent(monkeypatch):
     webhook.assert_called_once_with("Title", "Body", "song", force=True, image_url="", ntfy_priority=0, ntfy_tags="")
 
 
+# Verifies channel results report delivery success instead of attempted sends
+def test_notification_channels_report_transport_failures(monkeypatch):
+    monkeypatch.setattr(monitor, "send_email", Mock(return_value=1))
+    monkeypatch.setattr(monitor, "send_webhook", Mock(return_value=1))
+    assert monitor.send_notification_channels("song", "Title", "Body", email_enabled=True, webhook_enabled=True) == (False, False)
+
+
+# Verifies failed activity transitions remain queued until their channels succeed
+def test_failed_activity_notification_is_retried(monkeypatch):
+    email = Mock(side_effect=[1, 0])
+    webhook = Mock(side_effect=[1, 0])
+    monkeypatch.setattr(monitor, "PENDING_ACTIVITY_NOTIFICATIONS", [])
+    monkeypatch.setattr(monitor, "send_email", email)
+    monkeypatch.setattr(monitor, "send_webhook", webhook)
+
+    assert monitor.send_notification_channels("active", "Title", "Body", email_enabled=True, webhook_enabled=True) == (False, False)
+    assert len(monitor.PENDING_ACTIVITY_NOTIFICATIONS) == 1
+    monitor.retry_pending_activity_notifications()
+
+    assert monitor.PENDING_ACTIVITY_NOTIFICATIONS == []
+    assert email.call_count == 2
+    assert webhook.call_count == 2
+
+
 # Verifies compact content is ntfy-only and missing compact fields fall back to normal content
 @pytest.mark.parametrize("provider,notification_type,subject_short,body_short,expected_subject,expected_body", [("ntfy", "song", "Short title", "Short body", "Short title", "Short body"), ("ntfy", "error", "", "", "Normal title", "Normal body"), ("discord", "song", "Short title", "Short body", "Normal title", "Normal body")])
 def test_short_notification_content_is_ntfy_only_with_fallbacks(monkeypatch, provider, notification_type, subject_short, body_short, expected_subject, expected_body):
@@ -585,7 +655,7 @@ def test_webhook_wizard_preset_is_hidden_and_offline(monkeypatch):
 def test_webhook_wizard_supports_ntfy(monkeypatch, entered_value, saved_url):
     with make_test_directory() as directory_name:
         destination = Path(directory_name) / ".env"
-        answers = iter([True, False])
+        answers = iter([True, False, False])
         choices = iter([1, 0])
         post = Mock(side_effect=AssertionError("webhook request attempted"))
         monkeypatch.setattr(monitor, "_wizard_ask_yes_no", lambda *args, **kwargs: next(answers))
@@ -599,6 +669,7 @@ def test_webhook_wizard_supports_ntfy(monkeypatch, entered_value, saved_url):
         assert secret_updates == {"WEBHOOK_URL": saved_url}
         assert config_values["WEBHOOK_ENABLED"] is True
         assert config_values["WEBHOOK_PROVIDER"] == "ntfy"
+        assert config_values["NTFY_IMAGES"] is False
         post.assert_not_called()
 
 
@@ -606,13 +677,15 @@ def test_webhook_wizard_supports_ntfy(monkeypatch, entered_value, saved_url):
 def test_webhook_wizard_collects_ntfy_access_token(monkeypatch):
     with make_test_directory() as directory_name:
         destination = Path(directory_name) / ".env"
-        answers = iter([True, True])
+        answers = iter([True, True, True])
         choices = iter([1, 0])
         secrets = iter(["https://ntfy.example.test/private-topic", "tk_private_access_token"])
         post = Mock(side_effect=AssertionError("webhook request attempted"))
         monkeypatch.setattr(monitor, "_wizard_ask_yes_no", lambda *args, **kwargs: next(answers))
         monkeypatch.setattr(monitor, "_wizard_ask_secret", lambda *args, **kwargs: next(secrets))
         monkeypatch.setattr(monitor, "_wizard_ask_choice", lambda *args, **kwargs: next(choices))
+        # Pinned so the prompt sequence does not change with whether the optional extra happens to be installed
+        monkeypatch.setattr(monitor, "_wizard_notification_images_dependency_available", lambda: True)
         monkeypatch.setattr(monitor.WEBHOOK_SESSION, "post", post)
         config_values = {}
         secret_updates = {}
@@ -620,6 +693,7 @@ def test_webhook_wizard_collects_ntfy_access_token(monkeypatch):
         assert enabled == ["active", "inactive", "errors"]
         assert secret_updates == {"WEBHOOK_URL": "https://ntfy.example.test/private-topic", "NTFY_ACCESS_TOKEN": "tk_private_access_token"}
         assert "tk_private_access_token" not in str(config_values)
+        assert config_values["NTFY_IMAGES"] is True
         post.assert_not_called()
 
 
@@ -637,6 +711,7 @@ def test_setup_wizard_persists_webhook_channel(monkeypatch, capsys):
         monkeypatch.setattr(monitor, "_wizard_ask_yes_no", lambda *args, **kwargs: next(answers))
         monkeypatch.setattr(monitor, "_wizard_ask_choice", lambda *args, **kwargs: 0)
         monkeypatch.setattr(monitor, "_wizard_ask_positive_int", lambda *args, **kwargs: 30)
+        monkeypatch.setattr(monitor, "_wizard_ask_duration", lambda question, default: default)
         monkeypatch.setattr(monitor, "_wizard_ask_secret", lambda *args, **kwargs: secret)
         monkeypatch.setattr(monitor, "_doctor_ask_yes_no", lambda question: False)
         monkeypatch.setattr(monitor, "_wizard_collect_cookie_auth", lambda *args, **kwargs: {"complete": False, "validated": False, "browser": None, "source": "not configured", "mount_required": False})
@@ -671,6 +746,7 @@ def test_setup_wizard_persists_ntfy_access_token(monkeypatch, capsys):
         monkeypatch.setattr(monitor, "_wizard_ask_yes_no", lambda *args, **kwargs: next(answers))
         monkeypatch.setattr(monitor, "_wizard_ask_choice", lambda *args, **kwargs: next(choices))
         monkeypatch.setattr(monitor, "_wizard_ask_positive_int", lambda *args, **kwargs: 30)
+        monkeypatch.setattr(monitor, "_wizard_ask_duration", lambda question, default: default)
         monkeypatch.setattr(monitor, "_wizard_ask_secret", lambda *args, **kwargs: next(secrets))
         monkeypatch.setattr(monitor, "_wizard_collect_cookie_auth", lambda *args, **kwargs: {"complete": False, "validated": False, "browser": None, "source": "not configured", "mount_required": False})
         with pytest.raises(SystemExit) as error:
@@ -773,7 +849,7 @@ def test_doctor_webhook_check_is_read_only(monkeypatch):
     post = Mock(side_effect=AssertionError("webhook request attempted"))
     monkeypatch.setattr(monitor.WEBHOOK_SESSION, "post", post)
     checks = monitor.doctor_check_webhook_notifications()
-    assert checks == [monitor.make_doctor_check("Notifications", "PASS", "Webhook URL and alert choices look valid", "The private link was not displayed. No webhook was sent during this passive check")]
+    assert checks == [monitor.make_doctor_check("Notifications", "PASS", f"{monitor.WEBHOOK_READY_CHECK_LABEL} for {monitor.webhook_provider_display_name()}", "The private link was not displayed. No webhook was sent during this passive check")]
     post.assert_not_called()
 
 
@@ -809,3 +885,89 @@ def test_spotify_retry_cap_is_unchanged_and_separate():
     webhook_adapter = monitor.WEBHOOK_SESSION.adapters["https://"]
     assert isinstance(webhook_adapter, monitor.HTTPAdapter)
     assert webhook_adapter.max_retries.total == 0
+
+
+# Verifies webhook delivery honors VERIFY_SSL like every other request, so a TLS-inspecting proxy works
+def test_webhook_delivery_honors_the_verification_setting(monkeypatch):
+    configure_webhook(monkeypatch)
+    monkeypatch.setattr(monitor, "VERIFY_SSL", False)
+    webhook_post = Mock(return_value=FakeResponse())
+    monkeypatch.setattr(monitor.WEBHOOK_SESSION, "post", webhook_post)
+
+    assert monitor.send_webhook("Title", "Body", "song") == 0
+    assert webhook_post.call_args.kwargs["verify"] is False
+
+
+# Verifies every delivery carries the deadline and refuses a redirect, which could retarget the payload
+def test_webhook_delivery_is_bounded_and_does_not_follow_redirects(monkeypatch):
+    configure_webhook(monkeypatch)
+    webhook_post = Mock(return_value=FakeResponse())
+    monkeypatch.setattr(monitor.WEBHOOK_SESSION, "post", webhook_post)
+
+    assert monitor.send_webhook("Title", "Body", "song") == 0
+    request = webhook_post.call_args
+    assert request.args == (monitor.WEBHOOK_URL,)
+    assert request.kwargs["timeout"] == monitor.WEBHOOK_TIMEOUT_SECONDS
+    assert request.kwargs["allow_redirects"] is False
+
+
+# Verifies a destination replaced mid-delivery is refused rather than posted to blindly
+def test_webhook_delivery_refuses_a_destination_that_stopped_validating(monkeypatch):
+    configure_webhook(monkeypatch)
+    monkeypatch.setattr(monitor, "WEBHOOK_URL", "http://example.test/hook")
+    webhook_post = Mock(return_value=FakeResponse())
+    monkeypatch.setattr(monitor.WEBHOOK_SESSION, "post", webhook_post)
+
+    with pytest.raises(monitor.req.exceptions.InvalidURL):
+        monitor.post_webhook_request(json={"content": "body"})
+    webhook_post.assert_not_called()
+
+
+# Verifies the artwork requirement stays on the last Pillow release that still supports Python 3.9
+def test_notification_images_requirement_matches_python_version(monkeypatch):
+    monkeypatch.setattr(monitor.sys, "version_info", (3, 9, 18))
+    assert monitor.notification_images_requirement() == "Pillow>=11.3.0,<12"
+    monkeypatch.setattr(monitor.sys, "version_info", (3, 10, 0))
+    assert monitor.notification_images_requirement() == "Pillow>=12.0.0"
+
+
+# Verifies the install command names the extra for package installs and nothing for containers
+def test_notification_images_install_command_matches_install_method():
+    assert "spotify_monitor[notification-images]" in monitor.notification_images_install_command("pip")
+    assert "Pillow>=" in monitor.notification_images_install_command("manual")
+    assert monitor.notification_images_install_command("docker") == ""
+    assert monitor.notification_images_install_command("compose") == ""
+
+
+# Verifies the ntfy wizard offers to install artwork support when Pillow is missing
+def test_webhook_wizard_installs_artwork_dependency(monkeypatch):
+    monkeypatch.setattr(monitor, "_wizard_notification_images_dependency_available", lambda: False)
+    monkeypatch.setattr(monitor, "_wizard_install_method", lambda: "pip")
+    installer = Mock(return_value=True)
+    monkeypatch.setattr(monitor, "_wizard_install_notification_images_dependency", installer)
+    answers = iter([True, True])
+    monkeypatch.setattr(monitor, "_wizard_ask_yes_no", lambda *args, **kwargs: next(answers))
+
+    assert monitor._wizard_collect_ntfy_images() is True
+    installer.assert_called_once_with("pip")
+
+
+# Verifies declining the artwork install keeps ntfy alerts text-only without running pip
+def test_webhook_wizard_declined_artwork_install_keeps_text_only(monkeypatch):
+    monkeypatch.setattr(monitor, "_wizard_notification_images_dependency_available", lambda: False)
+    monkeypatch.setattr(monitor, "_wizard_install_method", lambda: "manual")
+    monkeypatch.setattr(monitor, "_wizard_install_notification_images_dependency", Mock(side_effect=AssertionError("install attempted")))
+    answers = iter([True, False])
+    monkeypatch.setattr(monitor, "_wizard_ask_yes_no", lambda *args, **kwargs: next(answers))
+
+    assert monitor._wizard_collect_ntfy_images() is False
+
+
+# Verifies a container built without artwork support points the user at the published images
+def test_webhook_wizard_artwork_in_container_points_at_published_image(monkeypatch, capsys):
+    monkeypatch.setattr(monitor, "_wizard_notification_images_dependency_available", lambda: False)
+    monkeypatch.setattr(monitor, "_wizard_install_method", lambda: "docker")
+    monkeypatch.setattr(monitor, "_wizard_ask_yes_no", lambda *args, **kwargs: True)
+
+    assert monitor._wizard_collect_ntfy_images() is False
+    assert "published Docker images" in capsys.readouterr().out

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v1.3
+v1.4
 
 Automatic extractor for secret keys used for TOTP generation in Spotify Web Player JavaScript bundles
 https://misiektoja.github.io/spotify_monitor/debugging/
@@ -18,6 +18,9 @@ playwright install
 ---------------
 
 Change log:
+
+v1.4 (13 Aug 26):
+- Returned nonzero exit status when extraction or output writing fails
 
 v1.3 (30 Apr 26):
 - Added static extraction from inline secret object literals in current Spotify web-player bundles
@@ -41,7 +44,6 @@ import re
 from datetime import datetime
 import json
 from typing import List, Dict, Any
-from playwright.async_api import async_playwright
 import argparse
 import sys
 
@@ -130,7 +132,7 @@ def summarise(caps: List[Dict[str, Any]], mode=None):
 
     if not real:
         log('No real secrets with version.')
-        return
+        return False
 
     sorted_items = sorted(real.items(), key=lambda kv: int(kv[0]))
     formatted_data = [{"version": int(v), "secret": s} for v, s in sorted_items]
@@ -198,10 +200,22 @@ def summarise(caps: List[Dict[str, Any]], mode=None):
                 print(f"[+] Wrote secret bytes dict to {OUTPUT_FILES['bytes_json_dict']}")
         except Exception as e:
             print(f"Error writing output files: {e}", file=sys.stderr)
+            return False
+
+    return True
 
 
 # Extracts TOTP secrets from a live Spotify web-player session
 async def grab_live():
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError:
+        raise ImportError(
+            "\nPlaywright module is required for fetching secrets, please install it using:\n"
+            "  pip install playwright\n"
+            "  playwright install"
+        )
+
     hook = """(()=>{if(globalThis.__secretHookInstalled)return;globalThis.__secretHookInstalled=true;globalThis.__captures=[];
 Object.defineProperty(Object.prototype,'secret',{configurable:true,set:function(v){try{__captures.push({secret:v,version:this.version,obj:this});}catch(e){}
 Object.defineProperty(this,'secret',{value:v,writable:true,configurable:true,enumerable:true});}});})();"""
@@ -251,7 +265,7 @@ Object.defineProperty(this,'secret',{value:v,writable:true,configurable:true,enu
 
 
 # Parses CLI options and runs the secret extraction workflow
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(description='Extract Spotify web-player TOTP secrets')
     parser.add_argument('--secret', action='store_true', help='Output plain secrets JSON only')
     parser.add_argument('--secretbytes', action='store_true', help='Output secret-bytes JSON only')
@@ -277,11 +291,11 @@ def main():
 
     try:
         caps = asyncio.run(grab_live())
-        summarise(caps, mode)
+        return 0 if summarise(caps, mode) else 1
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+        return 1
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

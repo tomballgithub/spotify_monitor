@@ -2,6 +2,65 @@
 
 This is a high-level summary of the most important changes.
 
+# Changes in 3.3.1 (28 Aug 2026)
+
+Version **3.3.1** makes explicit **`--debug` and `--verbose` flags cover configuration startup** while preserving their precedence over saved defaults, and stops settings, diagnostics and fallback notices from being coloured as errors.
+
+**Bug fixes**:
+
+- **BUGFIX:** **Diagnostic flags cover configuration startup** - Explicit **`--debug`** and **`--verbose`** flags now take effect before configuration errors are reported, then remain enabled after the selected config loads
+- **BUGFIX:** **Accurate error colouring** - Lines that only mention a problem word are no longer painted red. The **`Disappeared timer`** and **`Error retry timer`** rows shown by **`--verbose`**, every **`[DEBUG]`** trace line, including the ones recording a retried or handled request, and the notice about switching to the web-player backend now keep their normal colours, while real failures stay red
+
+# Changes in 3.3 (27 Aug 2026)
+
+Version **3.3** adds **coloured terminal output** with a customizable theme, fixes **false Last.fm outage alerts**, retries **failed alert delivery** and escapes a friend's display name in email notifications. **Pillow is now optional**, **config files are parsed instead of executed**, access tokens are reused until they expire and releases ship with a checksum file plus a signed build attestation.
+
+**Features and improvements**:
+
+- **NEW:** **Coloured terminal output** - Live output is now coloured by default: usernames, track, playlist and album names, dates, durations, counters and links each get their own colour, while errors, warnings and received signals are highlighted as whole lines. Override any part through **`COLOR_THEME`**, which merges over the built-in theme, and turn colour off with **`--no-color`** or `COLORED_OUTPUT = False`. Colour switches itself off when output is redirected or piped, when `TERM` is unset or `dumb` and when `NO_COLOR` is set. **Log files stay plain text**, so `grep` and `tail` are unaffected, and the existing **grc** recipe still colours saved logs. Install the optional `colorama` package for the classic Windows Command Prompt
+- **CONFIG CHANGE:** **Artwork is now an optional extra** - **Pillow is no longer required**. Artwork moved to the `notification-images` extra and `NTFY_IMAGES` now defaults to `False`. Install with `pip install "spotify_monitor[notification-images]"` or let setup do it for you. **Upgraders who want cover art back should install the extra and set `NTFY_IMAGES = True`**
+- **IMPROVE:** **Fewer Friend Activity requests** - Cached access tokens are now reused until they expire, roughly halving the number of requests
+- **IMPROVE:** **Refreshed, automatically published Docker images** - Both images now run Python 3.13 on Debian 13 with a digest-pinned, patched base and no `pip` in the runtime, so a fresh pull carries no known fixable high/critical vulnerabilities. The secret grabber image is now built, versioned and published automatically, runs as a non-root user and is rebuilt weekly for security updates
+- **IMPROVE:** **Clearer ntfy webhook customization** - `WEBHOOK_TEMPLATE`, `WEBHOOK_USERNAME` and `WEBHOOK_AVATAR_URL` are documented as Discord-only; customize ntfy delivery through `WEBHOOK_HEADERS`
+- **IMPROVE:** **Checksums and signed attestation for releases** - Releases now ship a `SHA256SUMS.txt`, a signed build attestation checkable with `gh attestation verify` and the attestation bundle itself as an **`.intoto.jsonl` asset**, so provenance can be verified from the downloaded files without calling GitHub
+- **IMPROVE:** **Releases publish only after the tests pass** - PyPI and Docker Hub releases can no longer publish unless the full test suite passes, every workflow action is pinned to a commit SHA, release tags reach the workflow through the environment instead of a shell command and `--version` is checked against package metadata and these notes
+- **IMPROVE:** **Automated checks on every change** - A pinned Ruff lint pass now runs in CI ahead of the test suite, which covers Python 3.9 through 3.14 plus a Windows job. Optional pre-commit hooks and a shared `.editorconfig` catch the same issues before you commit
+- **IMPROVE:** **Continuous security scanning** - Dependencies, images and source are scanned on every change and weekly, with a published SBOM, Dependabot coverage for Python dependencies and a public OpenSSF Scorecard rating
+- **IMPROVE:** **Security policy and support guidance** - Added private vulnerability reporting, [SUPPORT.md](https://github.com/misiektoja/spotify_monitor/blob/main/SUPPORT.md), contribution guidance, a code of conduct, a dependency licensing notice and issue templates that collect version, install method and `--doctor` output
+- **IMPROVE:** Corrected and improved wording in setup wizard and doctor preflight
+
+**Bug fixes**:
+
+- **BUGFIX:** **No more false Last.fm outages** - Repeated plays are now matched pairwise instead of greedily
+- **BUGFIX:** **Alerts retried until every channel succeeds** - Failed Friend Activity and scrobble-health alerts stay pending until every enabled email and webhook channel goes through. Successful channels are not sent again while another channel retries
+- **BUGFIX:** **Clearer missing-play alerts** - Outage notifications now name the first missing play and correctly label the displayed tracks
+- **BUGFIX:** **Reliable Spotify links** - Links built from a Spotify URI are now parsed exactly instead of guessed
+- **BUGFIX:** **Accurate dotenv and activity-file state** - `SIGHUP` now clears removed secrets and resets caches while activity flag files are written atomically
+- **BUGFIX:** **Hardened email notifications** - A friend's display name is now escaped in emails, so it can no longer inject markup, a live link or a tracking image
+- **BUGFIX:** **Terminal-safe Spotify text** - Spotify-supplied friend, artist, track, album and context names are stripped of terminal control sequences before reaching the console or log file, including `--list-friends` and normal monitoring output. Colour codes are the one exception, since they can only change how text looks, and they are still removed from everything written to a log file
+- **BUGFIX:** **Webhook delivery respects `VERIFY_SSL`** - Discord and ntfy now honor the same TLS setting as other requests and follow no redirects, so alert content and headers cannot reach an unconfigured host
+- **BUGFIX:** **Configuration files are read as data** - The config file is now parsed instead of executed, so it can no longer run code at startup. Settings dropped by older upgrades are ignored gracefully and config backups keep owner-only permissions
+- **BUGFIX:** **Connectivity check respects configuration** - The startup internet check now honors `CHECK_INTERNET_URL`, `CHECK_INTERNET_TIMEOUT` and `VERIFY_SSL`
+- **BUGFIX:** **Reliable anti-hang watchdog** - The watchdog can no longer be disabled by a nested request timer
+- **BUGFIX:** **Safer debug utilities** - `spotify_monitor_totp_test` now accepts only HTTPS Spotify destinations for token validation and follows no redirects
+- **BUGFIX:** **Smaller fixes** - Generated config preserves emoji, track IDs are validated before local playback and the direct Linux container instructions map host IDs when they differ from 1000
+
+# Changes in 3.2.1 (04 Aug 2026)
+
+Version **3.2.1** makes Spotify-to-Last.fm token refreshes more resilient, adds portable log files and streamlines Friend Activity setup, help and diagnostics.
+
+**Features and improvements**:
+
+- **IMPROVE:** **Portable log separators** - The new `ASCII_LOG_SEPARATORS` setting controls whether separator-only lines saved to log files use ASCII hyphens. `"Auto"` enables them on Windows by default, `"On"` enables them on every operating system and `"Off"` preserves Unicode separators. Terminal separators stay Unicode. Log files and all other logged text remain UTF-8.
+- **IMPROVE:** **Flexible setup intervals** - The setup wizard accepts polling interval durations such as `30s`, `2m`, `1.5h`, `1h 30m` and `1d` while still saving the value as seconds
+- **IMPROVE:** **Focused command-line help** - `--help` now groups concise examples into Friend Activity and Scrobble Health sections so the main setup, monitoring and diagnostic commands are easier to find
+- **IMPROVE:** **Actionable Doctor output** - Details remain attached to their checks, final target-specific log destinations are validated and `pycookiecheat` is clearly identified as a Chromium-only import dependency that Firefox does not need
+- **IMPROVE:** **Clearer Friend Activity guidance** - Setup examples consistently document Spotify user IDs, URIs and profile URLs while in-app recovery links open the correct target guide
+
+**Bug fixes**:
+
+- **BUGFIX:** **Resilient recent-play token refreshes** - Spotify-to-Last.fm monitoring now retries a connection failure, timeout or temporary 5xx response once after a short delay. Rate limits and rejected credentials still return directly to the existing backoff and recovery handling
+
 # Changes in 3.2 (31 Jul 2026)
 
 Version **3.2** adds **Spotify-to-Last.fm scrobble health monitoring** plus flexible **webhook runtime controls and request customization** for Discord, ntfy and advanced integrations.

@@ -2,7 +2,10 @@ services:
   spotify-secrets-grabber:
     image: misiektoja/spotify-secrets-grabber:latest
     pull_policy: always
+    user: "${SPOTIFY_SECRET_GRABBER_UID:-1000}:${SPOTIFY_SECRET_GRABBER_GID:-1000}"
     working_dir: /work
+    environment:
+      HOME: /tmp
     # SELinux (Fedora/RHEL): change to ".:/work:Z"
     volumes:
       - .:/work

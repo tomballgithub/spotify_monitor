@@ -1,0 +1,115 @@
+name: Publish debug Docker image
+
+# The secret grabber ships on its own cadence, so this image tracks the extractor's version rather than
+# a spotify_monitor release: a change on main publishes it, and a weekly rebuild refreshes the base.
+on:
+  push:
+    branches: [main]
+    paths:
+      - debug/spotify_monitor_secret_grabber.py
+      - debug/spotify_monitor_secret_grabber_docker/**
+      - .github/workflows/publish-debug-docker.yml
+  schedule:
+    # Chromium and Debian publish fixes between extractor changes, so the image is rebuilt weekly.
+    - cron: "41 5 * * 3"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Optional image tag like 1.4, defaults to the version declared in the extractor
+        required: false
+        type: string
+      push_latest:
+        description: Also push latest tag
+        required: false
+        type: boolean
+        default: true
+
+env:
+  IMAGE_NAME: misiektoja/spotify-secrets-grabber
+
+permissions: {}
+
+jobs:
+  test:
+    name: Tests and container smoke checks
+    # A called workflow cannot exceed what the calling job grants, so the checkout in tests.yml needs this.
+    permissions:
+      contents: read
+    uses: ./.github/workflows/tests.yml
+
+  publish-debug-docker:
+    name: Build and publish multi-architecture debug image to Docker Hub
+    needs: test
+    # A fork cannot push to this Docker Hub namespace, so the scheduled rebuild stays with the source repository.
+    if: github.repository == 'misiektoja/spotify_monitor'
+    runs-on: ubuntu-latest
+    environment:
+      name: docker
+      url: https://hub.docker.com/r/misiektoja/spotify-secrets-grabber
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Resolve image tags
+        id: resolve_tags
+        shell: bash
+        # Event and input values reach the script through the environment. Interpolating them directly into
+        # run: would let a crafted input run shell commands in a job already holding the registry token
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          INPUT_PUSH_LATEST: ${{ github.event.inputs.push_latest }}
+        run: |
+          set -euo pipefail
+          base_tag="$INPUT_TAG"
+          push_latest="true"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            push_latest="$INPUT_PUSH_LATEST"
+          fi
+          if [[ -z "$base_tag" ]]; then
+            # The extractor declares its own version in its docstring, which is what users see in the tool
+            base_tag="$(grep -m1 -oE '^v[0-9]+\.[0-9]+(\.[0-9]+)?$' debug/spotify_monitor_secret_grabber.py | cut -c2-)"
+          fi
+          if [[ -z "$base_tag" ]]; then
+            echo "Failed to resolve image tag from the extractor version" >&2
+            exit 1
+          fi
+          # A tag becomes part of an image reference, so refuse anything outside the characters a tag may use
+          if [[ ! "$base_tag" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "Refusing unsafe image tag: $base_tag" >&2
+            exit 1
+          fi
+          tags=("${IMAGE_NAME}:${base_tag}" "${IMAGE_NAME}:${GITHUB_SHA::7}")
+          if [[ "$push_latest" == "true" ]]; then
+            tags+=("${IMAGE_NAME}:latest")
+          fi
+          {
+            echo "tags<<EOF"
+            printf '%s\n' "${tags[@]}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push multi-architecture image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ./debug
+          file: ./debug/spotify_monitor_secret_grabber_docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.resolve_tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

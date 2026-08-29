@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v3.2
+v3.3.1
 
 Tool implementing real-time tracking of Spotify friends music activity:
 https://github.com/misiektoja/spotify_monitor/
@@ -14,13 +14,13 @@ urllib3
 pyotp (needed for web-player token generation)
 python-dotenv (optional)
 wcwidth (optional, needed by TRUNCATE_CHARS feature)
-Pillow (needed for ntfy artwork attachments)
+Pillow (optional, needed only when NTFY_IMAGES attaches artwork to ntfy alerts)
 spotipy (optional, used when legacy OAuth app credentials are configured)
 pycookiecheat (optional, used for Chrome, Brave and Chromium cookie import)
+colorama (optional, for better colours on Windows terminals)
 """
 
-VERSION = "3.2"
-
+VERSION = "3.3.1"
 
 # API 401 error means sp_dc cookie has expired. Lasts one year. 03/15/2025
 
@@ -291,9 +291,11 @@ WEBHOOK_PROVIDER = "discord"
 WEBHOOK_URL = "your_webhook_url"
 
 # Discord display name (leave empty to use the webhook default)
+# Applies only when WEBHOOK_PROVIDER is "discord" (ignored by the ntfy provider)
 WEBHOOK_USERNAME = "Spotify Monitor"
 
 # Discord avatar URL (leave empty to use the webhook default)
+# Applies only when WEBHOOK_PROVIDER is "discord" (ignored by the ntfy provider)
 WEBHOOK_AVATAR_URL = ""
 
 # Whether to send a webhook notification when the user becomes active
@@ -332,6 +334,9 @@ WEBHOOK_HEADERS = {}
 # ----------------------------
 
 # Discord-format webhook request payload template
+# Applies only when WEBHOOK_PROVIDER is "discord". The "ntfy" provider needs no template and ignores this
+# value: it sends the alert body as a native ntfy message with the subject as its title. Use WEBHOOK_HEADERS
+# to add ntfy options such as priority or tags
 # Supported placeholders include title, description, version, image_url, fields, fields_str, color, timestamp,
 # username and avatar_url
 WEBHOOK_TEMPLATE = {
@@ -367,8 +372,10 @@ WEBHOOK_TRANSFORMS = []
 NTFY_ACCESS_TOKEN = ""
 
 # Whether to attach playlist or album artwork to supported ntfy alerts
+# Requires the optional Pillow package: pip install "spotify_monitor[notification-images]"
+# The published Docker images already include it
 # Image preparation or delivery failures fall back to text
-NTFY_IMAGES = True
+NTFY_IMAGES = False
 
 # Whether to use compact ntfy alert titles and bodies for smaller screens
 # Discord webhook and email content remain unchanged
@@ -608,6 +615,12 @@ SP_LOGFILE = "spotify_monitor"
 # Can also be disabled via the -d flag
 DISABLE_LOGGING = False
 
+# Controls conversion of separator-only log lines to ASCII:
+#   "Auto" - enable on Windows only (default)
+#   "On"   - enable on every operating system
+#   "Off"  - preserve Unicode separators in logs
+ASCII_LOG_SEPARATORS = "Auto"
+
 # ----------------------------
 # Terminal Output
 # ----------------------------
@@ -627,6 +640,58 @@ HORIZONTAL_LINE = 113
 
 # Whether to clear the terminal screen after starting the tool
 CLEAR_SCREEN = True
+
+# Whether to use coloured output in the terminal (auto-disabled if the terminal
+# does not appear to support colours or when output is redirected to a file)
+# Can also be disabled via the --no-color flag
+COLORED_OUTPUT = True
+
+# Colour theme used for different parts of the output
+# Keys are logical names used by the tool, values are colour/style strings
+# You can combine multiple attributes with spaces or '+', for example:
+#   "bright_cyan bold", "yellow", "red underline", "bright_magenta bold underline", "red bold blink"
+# Valid colour names: black, red, green, yellow, blue, magenta, cyan, white,
+# and their bright_ variants (bright_red, bright_green, ...).
+COLOR_THEME = {
+    # Headings and commands the wizard tells you to run
+    "header": "bright_cyan",
+    "section": "bright_white",
+    # Identity
+    "username": "blue underline",
+    "user_uri_id": "bright_magenta",
+    # Activity status values
+    "status_active": "green",
+    "status_inactive": "red",
+    "status_offline": "red",
+    "status_other": "white",
+    # Music info
+    "artist": "bright_yellow",
+    "track": "bright_yellow",
+    "album": "yellow",
+    "playlist": "yellow",
+    "duration": "green",
+    # Activity info
+    "status_change": "yellow",
+    # Misc
+    "timestamp_label": "",
+    "timestamp_value": "cyan",
+    "info": "cyan",
+    "warning": "yellow",
+    "error": "red",
+    "signal": "yellow",
+    "email": "bright_cyan",
+    "webhook": "bright_blue",
+    # Dates
+    "date": "magenta",
+    "date_range": "magenta",
+    # Boolean values
+    "boolean_true": "green",
+    "boolean_false": "red",
+    # Counters and differences
+    "count_up": "green",
+    "count_down": "red",
+    "link": "blue underline",
+}
 
 # Path to a file that is created when the user is active and deleted when inactive
 # Useful for external tools to detect streaming status
@@ -967,10 +1032,13 @@ DOTENV_FILE = ""
 FILE_SUFFIX = ""
 SP_LOGFILE = ""
 DISABLE_LOGGING = False
+ASCII_LOG_SEPARATORS = "Auto"
 DEBUG_MODE = False
 VERBOSE_MODE = False
 HORIZONTAL_LINE = 0
 CLEAR_SCREEN = False
+COLORED_OUTPUT = False
+COLOR_THEME: dict = {}
 SPOTIFY_INACTIVITY_CHECK_SIGNAL_VALUE = 0
 ENABLE_GENIUS_LYRICS_URL = False
 ENABLE_AZLYRICS_URL = False
@@ -1060,8 +1128,10 @@ re_replace_str = r'( - (\d*)( )*remaster$)|( - (\d*)( )*remastered( version)*( \
 # Default value for network-related timeouts in functions; in seconds
 FUNCTION_TIMEOUT = 15
 
-# Default value for alarm signal handler timeout; in seconds
-ALARM_TIMEOUT = 15
+# Enclosing main-loop watchdog timeout; in seconds
+# This is a backstop for the rare case where a per-request timeout does not fire. It must stay larger than a
+# single request's own alarm (FUNCTION_TIMEOUT + 2) so a nested request alarm never pre-empts legitimate work
+ALARM_TIMEOUT = 2 * (FUNCTION_TIMEOUT + 2) + 5
 ALARM_RETRY = 10
 
 # Variables for caching functionality of the Spotify 'cookie' access token and 'client' refresh token to avoid unnecessary refreshing
@@ -1134,6 +1204,11 @@ csvfieldnames = ['Date', 'Artist', 'Track', 'Playlist', 'Album', 'Last activity'
 
 CLI_CONFIG_PATH = None
 
+# Tracks relevant keys supplied by the active dotenv file and their pre-dotenv values
+DOTENV_MANAGED_KEYS: set[str] = set()
+DOTENV_BASE_VALUES: dict[str, object] = {}
+PENDING_ACTIVITY_NOTIFICATIONS = []
+
 # to solve the issue: 'SyntaxError: f-string expression part cannot include a backslash'
 nl_ch = "\n"
 
@@ -1146,13 +1221,17 @@ COOKIE_GUIDE_URL = DOCUMENTATION_URL + "/configuration/#spotify-sp_dc-cookie"
 MANUAL_COOKIE_GUIDE_URL = DOCUMENTATION_URL + "/configuration/#manual-cookie-extraction"
 CONTAINER_FIREFOX_GUIDE_URL = DOCUMENTATION_URL + "/usage/#import-firefox-into-container-authentication"
 CLIENT_GUIDE_URL = DOCUMENTATION_URL + "/configuration/#spotify-desktop-client"
-TARGET_GUIDE_URL = DOCUMENTATION_URL + "/configuration/#how-to-get-a-friends-user-uri-id"
+TARGET_GUIDE_URL = DOCUMENTATION_URL + "/configuration/#how-to-find-a-friends-spotify-profile-url"
 FOLLOWING_GUIDE_URL = DOCUMENTATION_URL + "/configuration/#following-the-monitored-user"
 SMTP_GUIDE_URL = DOCUMENTATION_URL + "/configuration/#smtp-settings"
 WEBHOOK_GUIDE_URL = DOCUMENTATION_URL + "/configuration/#webhook-settings"
 SECRETS_GUIDE_URL = DOCUMENTATION_URL + "/configuration/#storing-secrets"
 INTERVALS_GUIDE_URL = DOCUMENTATION_URL + "/usage/#check-intervals"
 DOCTOR_GUIDE_URL = DOCUMENTATION_URL + "/troubleshooting/#doctor-preflight"
+
+# Labels of the two Doctor checks that gate the optional delivery tests, matched by prefix so each can name its channel
+SMTP_READY_CHECK_LABEL = "SMTP connection and login succeeded"
+WEBHOOK_READY_CHECK_LABEL = "Webhook URL, headers and alert choices look valid"
 OAUTH_GUIDE_URL = DOCUMENTATION_URL + "/configuration/#spotify-oauth-app"
 SCROBBLE_AUTH_GUIDE_URL = DOCUMENTATION_URL + "/configuration/#spotify-recent-play-authorization"
 SPOTIFY_WEB_LOGIN_URL = "https://open.spotify.com/"
@@ -1187,8 +1266,8 @@ if sys.version_info < (3, 9):
     sys.exit(1)
 
 import importlib.util
+import ast
 import time
-import string
 import textwrap
 import json
 import os
@@ -1226,7 +1305,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import secrets
 import unicodedata
-from typing import Any, Callable, List, Optional, Sequence, Union, cast, TypeVar
+from typing import Any, Callable, List, Optional, Sequence, Tuple, Union, cast, TypeVar
 from email.utils import parseaddr, parsedate_to_datetime
 import sheets_helper #jmk
 
@@ -1246,6 +1325,9 @@ MAX_RETRY_AFTER_SECONDS = 60
 
 # Limit scrobble health to one immediate HTTP retry before its monitoring loop backs off
 SCROBBLE_HEALTH_HTTP_RETRIES = 1
+
+# Pause briefly before the immediate Spotify refresh-token retry
+SCROBBLE_HEALTH_IMMEDIATE_RETRY_DELAY = 1
 
 # Require three consecutive failed comparisons before sending an operational alert
 SCROBBLE_HEALTH_ERROR_NOTIFICATION_FAILURES = 3
@@ -1271,7 +1353,41 @@ try:
     PILImage = PILImageModule
 except ImportError:
     pass
-NTFY_IMAGES_AVAILABLE = PILImage is not None
+NOTIFICATION_IMAGES_AVAILABLE = PILImage is not None
+
+try:
+    from colorama import init as colorama_init  # type: ignore[import]
+except ImportError:
+    colorama_init = None
+
+
+# Returns the Pillow requirement that supports the running Python version
+def notification_images_requirement() -> str:
+    return "Pillow>=11.3.0,<12" if sys.version_info < (3, 10) else "Pillow>=12.0.0"
+
+
+# Returns the command that installs optional ntfy artwork support, or an empty string inside a container
+def notification_images_install_command(method: Optional[str] = None) -> str:
+    selected_method = _wizard_install_method() if method is None else method
+    if selected_method in ("docker", "compose"):
+        return ""
+    executable = sys.executable or ("python" if platform.system() == "Windows" else "python3")
+    requirement = "spotify_monitor[notification-images]" if selected_method == "pip" else notification_images_requirement()
+    return _wizard_render_command([executable, "-m", "pip", "install", requirement])
+
+
+# Reimports optional Pillow support after an installation and reports whether artwork is available
+def refresh_notification_images_availability() -> bool:
+    global PILImage, NOTIFICATION_IMAGES_AVAILABLE
+    importlib.invalidate_caches()
+    try:
+        from PIL import Image as reloaded_image_module
+        PILImage = reloaded_image_module
+    except ImportError:
+        PILImage = None
+    NOTIFICATION_IMAGES_AVAILABLE = PILImage is not None
+    return NOTIFICATION_IMAGES_AVAILABLE
+
 
 # Browsers supported by the sp_dc cookie importer
 IMPORT_BROWSERS = ("firefox", "chrome", "brave", "chromium")
@@ -1307,6 +1423,9 @@ CHROMIUM_USER_DATA_DIRS = {
 
 # Error text shared by all rejected Spotify target forms
 TARGET_INPUT_ERROR = "Invalid Spotify target. Use a raw user ID, spotify:user:USER_ID or https://open.spotify.com/user/USER_ID."
+
+# Spotify object types this tool builds links for, matched as whole URI parts
+SPOTIFY_OBJECT_TYPES = frozenset({"user", "artist", "track", "album", "playlist"})
 
 # Stable machine-readable recovery categories exposed to tests and future renderers
 RECOVERY_CODES = frozenset({"config.missing", "config.invalid", "dependency.missing", "secret.missing", "auth.cookie_invalid", "auth.client_invalid", "auth.rejected", "auth.scrobble_expired", "network.unavailable", "network.timeout", "spotify.rate_limited", "spotify.quota_exceeded", "spotify.unavailable", "target.invalid", "target.not_found", "target.not_visible", "smtp.invalid", "smtp.authentication", "smtp.connection", "webhook.invalid", "webhook.rejected", "webhook.rate_limited", "webhook.connection", "file.unreadable", "file.unwritable", "unknown"})
@@ -1393,8 +1512,10 @@ class StartupSummaryRow:
 
 # Prints the selected ASCII startup banner with a separately aligned version
 def print_startup_banner() -> None:
-    print(STARTUP_BANNER)
-    print(f"{'':21}v{VERSION}\n")
+    # Each line carries its own colour so the whole banner sits inside a colour span. The line rules skip
+    # text that is already coloured, which keeps the ASCII art from being read as quoted names or dates
+    print("\n".join(colorize("header", line) if line else line for line in STARTUP_BANNER.splitlines()))
+    print(colorize("info", f"{'':21}v{VERSION}") + "\n")
 
 
 # Returns True when a configured value is empty or still uses its shipped placeholder
@@ -1768,7 +1889,8 @@ def _split_inline_comment_preserving_strings(rhs: str) -> tuple[str, str]:
 def _format_config_value(value, prefer_double_quotes: bool) -> str:
     if isinstance(value, str):
         if prefer_double_quotes:
-            return json.dumps(value, ensure_ascii=True)
+            escaped = value.encode("unicode_escape").decode("ascii").replace('"', '\\"')
+            return f'"{escaped}"'
         escaped = value.encode("unicode_escape").decode("ascii").replace("'", "\\'")
         return f"'{escaped}'"
     if value is None or isinstance(value, (bool, int, float, list, tuple, dict)):
@@ -1776,9 +1898,55 @@ def _format_config_value(value, prefer_double_quotes: bool) -> str:
     raise TypeError(f"Unsupported config value type: {type(value).__name__}")
 
 
-# Validates Python config content without executing it
+# Settings that earlier versions wrote into generated configuration files and that later releases
+# removed. Ignoring them with a warning keeps an untouched older configuration working on upgrade,
+# while any other unknown name is still rejected so a typo cannot silently do nothing.
+# SECRET_CIPHER_DICT, SECRET_CIPHER_DICT_URL and TOTP_VER shipped in 2.3.1 through 2.9.2 and were
+# replaced in 3.0 by TOTP_VERSION and TOTP_SECRET_CIPHER_BYTES.
+RETIRED_CONFIG_SETTINGS = frozenset(("SECRET_CIPHER_DICT", "SECRET_CIPHER_DICT_URL", "TOTP_VER"))
+
+
+# Describes ignored retired settings in one sentence, optionally naming the file they can be deleted from
+def describe_retired_settings(names: Sequence[str], path: Any = "") -> str:
+    listed = ", ".join(sorted(names))
+    single = len(names) == 1
+    sentence = f"{listed} {'was' if single else 'were'} removed in a later version and {'is' if single else 'are'} ignored."
+    if path:
+        sentence += f" You can delete {'it' if single else 'them'} from {path}."
+    return sentence
+
+
+# Returns the setting names declared by the trusted built-in config template
+def _config_allowed_names() -> frozenset[str]:
+    template_tree = ast.parse(CONFIG_BLOCK, "<built-in-config>", "exec")
+    return frozenset(statement.targets[0].id for statement in template_tree.body if isinstance(statement, ast.Assign) and len(statement.targets) == 1 and isinstance(statement.targets[0], ast.Name))
+
+
+# Parses allowlisted literal config assignments without executing file content
+def parse_config_content(content: str, filename: str = "<config>", retired_out: Optional[List[str]] = None) -> dict[str, Any]:
+    tree = ast.parse(content, filename, "exec")
+    allowed_names = _config_allowed_names()
+    parsed_values: dict[str, Any] = {}
+    for statement in tree.body:
+        if not isinstance(statement, ast.Assign) or len(statement.targets) != 1 or not isinstance(statement.targets[0], ast.Name):
+            raise ValueError(f"Line {getattr(statement, 'lineno', '?')}: only NAME = literal assignments are allowed")
+        name = statement.targets[0].id
+        if name in RETIRED_CONFIG_SETTINGS and name not in allowed_names:
+            if retired_out is not None and name not in retired_out:
+                retired_out.append(name)
+            continue
+        if name not in allowed_names:
+            raise ValueError(f"Line {statement.lineno}: unsupported configuration setting {name!r}")
+        try:
+            parsed_values[name] = ast.literal_eval(statement.value)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"Line {statement.lineno}: {name} must use a literal value") from exc
+    return parsed_values
+
+
+# Validates config content through the same restricted parser used at startup
 def validate_config_content(content: str, filename: str = "<generated-config>") -> None:
-    compile(content, filename, "exec")
+    parse_config_content(content, filename)
 
 
 # Renders CONFIG_BLOCK with current non-secret runtime values and preserved template secrets
@@ -1845,10 +2013,14 @@ def write_config_file(destination, content: str):
                 collision_suffix = "" if collision_index == 0 else f"-{collision_index:02d}"
                 candidate = destination_path.with_name(f"{destination_path.name}.{timestamp}{collision_suffix}.bak")
                 try:
-                    with destination_path.open("rb") as source_file, candidate.open("xb") as backup_file:
+                    backup_descriptor = os.open(candidate, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                    with destination_path.open("rb") as source_file, os.fdopen(backup_descriptor, "wb") as backup_file:
                         shutil.copyfileobj(source_file, backup_file)
                         backup_file.flush()
                         os.fsync(backup_file.fileno())
+                    if os.name == "posix":
+                        source_owner_mode = destination_path.stat().st_mode & 0o600
+                        os.chmod(candidate, source_owner_mode)
                     backup_path = candidate
                     break
                 except FileExistsError:
@@ -1936,6 +2108,41 @@ def update_dotenv_file(destination, updates):
             temporary_path.unlink()
 
     return {"path": str(destination_path), "updated_keys": tuple(key for key, _ in update_items)}
+
+
+# Reads one dotenv file into a validated non-interpolated string mapping
+def read_dotenv_mapping(path: Union[str, Path]) -> dict[str, str]:
+    from dotenv.parser import parse_stream
+    with open(path, "r", encoding="utf-8") as dotenv_file:
+        bindings = list(parse_stream(dotenv_file))
+    malformed = [binding for binding in bindings if binding.error]
+    if malformed:
+        raise ValueError(f"Dotenv syntax error near line {malformed[0].original.line}")
+    return {binding.key: binding.value for binding in bindings if binding.key is not None and binding.value is not None}
+
+
+# Applies supported dotenv settings while retaining values needed when keys are removed
+def apply_dotenv_mapping(values: dict[str, str], initialize_base: bool = False) -> tuple[str, ...]:
+    global DOTENV_MANAGED_KEYS
+    supported_keys = frozenset((*SECRET_KEYS, *ENVIRONMENT_SETTING_KEYS))
+    if initialize_base:
+        for key in supported_keys:
+            DOTENV_BASE_VALUES[key] = os.environ[key] if key in os.environ else globals().get(key)
+    previous_values = {key: globals().get(key) for key in supported_keys}
+    selected_keys = supported_keys.intersection(values)
+    for key in selected_keys:
+        os.environ[key] = values[key]
+        globals()[key] = values[key]
+    for key in DOTENV_MANAGED_KEYS.difference(selected_keys):
+        base_value = DOTENV_BASE_VALUES.get(key)
+        if base_value is None:
+            os.environ.pop(key, None)
+            globals()[key] = ""
+        else:
+            os.environ[key] = str(base_value)
+            globals()[key] = base_value
+    DOTENV_MANAGED_KEYS = set(selected_keys)
+    return tuple(sorted(key for key in supported_keys if globals().get(key) != previous_values[key]))
 
 
 # Raised when a browser cookie cannot be extracted, validated or persisted safely
@@ -2600,7 +2807,7 @@ web_player_retry = CappedRetry(
 web_player_adapter = HTTPAdapter(max_retries=web_player_retry, pool_connections=100, pool_maxsize=100)
 SESSION.mount("https://api-partner.spotify.com", web_player_adapter)
 
-# Scrobble health retries transient server failures once while returning quota responses to its monitoring loop
+# Scrobble health GET requests retry transient failures once while returning quota responses to its monitoring loop
 scrobble_health_retry = CappedRetry(
     total=SCROBBLE_HEALTH_HTTP_RETRIES,
     connect=SCROBBLE_HEALTH_HTTP_RETRIES,
@@ -2676,86 +2883,474 @@ def resolve_truncate_chars(cli_value, configured_value, logging_disabled):
     return truncate_chars
 
 
-# Logger class to output messages to stdout and log file
-class Logger(object):
-    def __init__(self, filename, mode="both"):
-        self.terminal = sys.stdout
-        if not DISABLE_LOGGING:
-            self.logfile = open(filename, "a", buffering=1, encoding="utf-8")
-        self.mode = mode
-        self._suppress_next_newline = False
+# Reports whether separator-only log lines should use ASCII on this system
+def ascii_log_separators_enabled():
+    mode = str(ASCII_LOG_SEPARATORS).strip().lower()
+    if mode not in {"auto", "on", "off"}:
+        raise ValueError("ASCII_LOG_SEPARATORS must be 'Auto', 'On' or 'Off'")
+    return mode == "on" or (mode == "auto" and platform.system() == "Windows")
 
-    def write(self, message):
-        message = apply_privacy_substitutions(message)
-        if not DISABLE_LOGGING:
-            if self.mode in ["both", "log"]:
-                self.logfile.write(message.expandtabs(8))
-                self.logfile.flush()
-        if self.mode in ["both", "screen"]:
-            if ALT_VIEW and message.startswith("[DEBUG"):
-                self._suppress_next_newline = True
-                return
-            if ALT_VIEW and message == "\n" and self._suppress_next_newline:
-                self._suppress_next_newline = False
-                return
-            self._suppress_next_newline = False
-            if TRUNCATE_CHARS:
-                message = truncate_string_per_line(message, TRUNCATE_CHARS)
-            self.terminal.write(message.expandtabs(8))
-            self.terminal.flush()
 
-    def flush(self):
-        pass  # Needed for compatibility with sys.stdout
+# Converts Unicode-only horizontal separator lines to ASCII when configured
+def normalize_log_separators(message):
+    if not ascii_log_separators_enabled():
+        return message
+    return re.sub(r"(?m)^─+$", lambda match: match.group(0).replace("─", "-"), message)
 
-# Helper functions using persistent loggers
-def print_to_log(message):
-    """Prints only to the log file."""
-##jmkfix
-    message = apply_privacy_substitutions(message)
-    if not ALT_VIEW:
-        sys.__stdout__.write(str(message).expandtabs(8) + "\n")  # Force writing to actual console
-        sys.__stdout__.flush()
+
+# ANSI escape sequence helper used for colouring and stripping colour codes
+ANSI_ESCAPE_RE = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
+
+# The only escape sequence this tool emits is an SGR colour/style change, so it is the only one worth keeping
+SGR_SEQUENCE_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+# Every other control character is dropped, keeping only tab and newline. A carriage return would let Spotify-supplied
+# text overwrite an already printed line, and the inline doctor progress that uses one writes to the terminal directly
+TERMINAL_CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+# Removes terminal control sequences that Spotify-supplied text could use to drive the terminal, keeping this tool's own colours
+def sanitize_terminal_text(message):
+    if not isinstance(message, str) or not message:
+        return message
+    parts = []
+    position = 0
+    for match in SGR_SEQUENCE_RE.finditer(message):
+        parts.append(TERMINAL_CONTROL_RE.sub("", message[position:match.start()]))
+        parts.append(match.group(0))
+        position = match.end()
+    parts.append(TERMINAL_CONTROL_RE.sub("", message[position:]))
+    return "".join(parts)
+
+
+# Internal flag & style map for colour handling
+COLOR_ENABLED = False
+_COLOR_STYLES: dict = {}
+
+# Default built-in colour theme. Values can be overridden via COLOR_THEME in config
+DEFAULT_COLOR_THEME = {
+    # Headings and commands the wizard tells you to run
+    "header": "bright_cyan",
+    "section": "bright_white",
+    # Identity
+    "username": "blue underline",
+    "user_uri_id": "bright_magenta",
+    # Activity status values
+    "status_active": "green",
+    "status_inactive": "red",
+    "status_offline": "red",
+    "status_other": "white",
+    # Music info
+    "artist": "bright_yellow",
+    "track": "bright_yellow",
+    "album": "yellow",
+    "playlist": "yellow",
+    "duration": "green",
+    # Activity info
+    "status_change": "yellow",
+    # Misc
+    "timestamp_label": "",
+    "timestamp_value": "cyan",
+    "info": "cyan",
+    "warning": "yellow",
+    "error": "red",
+    "signal": "yellow",
+    "email": "bright_cyan",
+    "webhook": "bright_blue",
+    # Dates
+    "date": "magenta",
+    "date_range": "magenta",
+    # Boolean values
+    "boolean_true": "green",
+    "boolean_false": "red",
+    # Counters and differences
+    "count_up": "green",
+    "count_down": "red",
+    "link": "blue underline",
+}
+
+ANSI_RESET = "\033[0m"
+
+# Mapping of style names to ANSI SGR codes
+_STYLE_CODES = {
+    "bold": "1",
+    "dim": "2",
+    "underline": "4",
+    "blink": "5",
+    "black": "30",
+    "red": "31",
+    "green": "32",
+    "yellow": "33",
+    "blue": "34",
+    "magenta": "35",
+    "cyan": "36",
+    "white": "37",
+    "bright_black": "90",
+    "bright_red": "91",
+    "bright_green": "92",
+    "bright_yellow": "93",
+    "bright_blue": "94",
+    "bright_magenta": "95",
+    "bright_cyan": "96",
+    "bright_white": "97",
+}
+
+# Output labels whose value is coloured with one theme style, longest label first so a prefix cannot win
+_LABEL_STYLES = (
+    (("Username:", "Spotify user:", "Display name:"), "username"),
+    (("User URI ID:", "Spotify user ID:", "User URI:"), "user_uri_id"),
+    (("Last played:", "Last track:", "Track:"), "track"),
+    (("Playlist:",), "playlist"),
+    (("Context (Album):", "Album:"), "album"),
+    (("Context (Artist):", "Artist:"), "artist"),
+    (("Duration:",), "duration"),
+)
+
+# Pre-compiled regexes used for line-level colourisation
+_FROM_TO_COUNT_RE = re.compile(r"(from\s+)(\d+)(\s+to\s+)(\d+)")
+_DIFF_COUNT_UP_RE = re.compile(r"(\(\+\d+\))")
+_DIFF_COUNT_DOWN_RE = re.compile(r"(\(-\d+\))")
+_USER_TAG_RE = re.compile(r"((?:Spotify user|for user|by user|of user|Monitoring(?:\s+Spotify)?\s+user):?)([\t ]+)((?!ID\b)[\w.:-]+)")
+
+# A quoted value right after "user" is the monitored URI ID, the same value the "User URI ID:" row reports
+_QUOTED_USER_ID_CONTEXT_RE = re.compile(r"\buser(?:\s+id)?\s+$", re.IGNORECASE)
+_DURATION_RE = re.compile(r"~?\b[0-9]{1,20}[ \t]{1,20}(?:seconds?|minutes?|hours?|days?|weeks?|months?|years?)\b", re.IGNORECASE)
+_LONG_DATE_RE = re.compile(r"\b(?:\w{3}\s+)?\d{1,2}\s+\w{3}(?:\s+\d{2,4})?[\s,]*\d{2}:\d{2}(:\d{2})?(\s*[AP]M)?\b", re.IGNORECASE)
+_TIME_ONLY_RE = re.compile(r"(?<![\w:])(~?(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?(?:\s*[AP]M)?)(?![\w:])", re.IGNORECASE)
+_SHORT_RANGE_DATE_RE = re.compile(r"\(\w{3}\s+\d{1,2}\s+\w{3}\s+\d{2}:\d{2}(\s*[AP]M)?\s*-\s*\d{2}:\d{2}(\s*[AP]M)?\)", re.IGNORECASE)
+_DATE_RANGE_RE = re.compile(r"\b\w{3}\s+\d{1,2}\s+\w{3}\s+\d{2}:\d{2}(\s*[AP]M)?\s*-\s*\d{2}:\d{2}(\s*[AP]M)?\b", re.IGNORECASE)
+_HOUR_RANGE_RE = re.compile(r"\b\d{2}:\d{2}(\s*[AP]M)?\s*-\s*\d{2}:\d{2}(\s*[AP]M)?\b", re.IGNORECASE)
+_URL_RE = re.compile(r"(https?://[^\s\]]+)")
+_PERCENTAGE_RE = re.compile(r"\(\d{1,3}%")
+_BOOLEAN_TRUE_RE = re.compile(r"\bTrue\b|\bEnabled\b")
+_BOOLEAN_FALSE_RE = re.compile(r"\bFalse\b|\bDisabled\b")
+_NOTIFICATION_SUMMARY_STATE_RE = re.compile(r"^(\* Notifications \((?:email|webhook)\):\s+)(On|Off)(.*)$")
+# Startup summary rows whose label happens to contain a problem word. They report a configured setting, not a
+# failure, so the whole-line error style must skip them and leave their value coloured like any other row
+_STARTUP_SUMMARY_TIMER_ROW_RE = re.compile(r"^\* (?:disappeared|error retry) timer:")
+# Words that report a problem. The same word used as a key in a 'key=value' diagnostic detail names a setting
+# such as 'timeout=15' or a counter such as 'failures=3', so it leaves its line unpainted
+_ERROR_KEYWORD_RE = re.compile(r"\b(?:failures?|failed|forbidden|timeout|disappeared)\b(?!\s*=)")
+# A backend fallback notice reports a recovery that worked, not the failure that made the tool switch over
+_RECOVERY_NOTICE_RE = re.compile(r"\bswitched to\b")
+# A debug trace line records what the tool tried, including attempts that fail and are then handled, so it keeps
+# its own colours instead of being painted as the failure it reports
+_DEBUG_LINE_RE = re.compile(r"^\[debug \d{2}:\d{2}:\d{2}\]")
+# Doctor status markers, coloured with the same theme parts the reference tools use for them
+_DOCTOR_MARK_RE = re.compile(r"^\[(PASS|WARN|FAIL|SKIP)\]")
+_DOCTOR_MARK_STYLES = {"PASS": "boolean_true", "WARN": "warning", "FAIL": "error", "SKIP": "info"}
+# Quoted names such as track, playlist and album titles. At least one word character is required so a run of
+# ASCII art between two apostrophes is not read as a name
+_QUOTED_CONTENT_RE = re.compile(r"(')([^'\n]*\w[^'\n]*)(')")
+
+# Quoted values shaped like a file name or a filesystem path stay plain, since a log or state destination is
+# not content. Spotify names routinely contain slashes and dots, so only these two shapes are excluded
+_QUOTED_FILE_LIKE_RE = re.compile(r"^[~.]?[\\/]|^[A-Za-z]:[\\/]|\.[A-Za-z0-9]{1,8}$")
+
+# Listing rows that name one playlist, for example "- 'Playlist name'"
+_LIST_ITEM_NAME_RE = re.compile(r"^\s*-\s+'")
+_PLAYBACK_STOPPED_RE = re.compile(r"\b(SKIPPED|PAUSED)\b")
+_PLAYBACK_STARTED_RE = re.compile(r"\b(RESUMED|LOOP|PLAYING)\b")
+_PLAYBACK_CHANGED_RE = re.compile(r"\b(CONT)\b")
+_ACTIVE_WORD_RE = re.compile(r"\b(ACTIVE|PRIVATE MODE)\b")
+_INACTIVE_WORD_RE = re.compile(r"\b(INACTIVE|OFFLINE)\b")
+
+
+# Builds ANSI escape sequence from a style description string
+def _build_ansi_sequence(style_str):
+    if not style_str:
+        return ""
+    parts = re.split(r"[+ ]+", style_str.strip().lower())
+    codes = []
+    for p in parts:
+        code = _STYLE_CODES.get(p)
+        if code:
+            codes.append(code)
+    if not codes:
+        return ""
+    return f"\033[{';'.join(codes)}m"
+
+
+# Detects whether the given output stream likely supports ANSI colours
+def _stream_supports_color(stream):
+    if not hasattr(stream, "isatty") or not stream.isatty():
+        return False
+    if os.getenv("NO_COLOR"):
+        return False
+    # On Windows with colorama, skip TERM check since colorama handles ANSI translation
+    # Windows Terminal and Command Prompt often don't set TERM, but colorama works fine
+    if not (colorama_init and platform.system() == 'Windows'):
+        term = os.getenv("TERM", "")
+        if term.lower() in ("", "dumb", "unknown"):
+            return False
+    # If stdin is a pipe, we're likely being piped (e.g. via tee), so disable colors to avoid writing ANSI codes to files
+    if hasattr(sys.stdin, "isatty") and not sys.stdin.isatty():
+        return False
+    return True
+
+
+# Initializes colour handling based on config and terminal capabilities
+def init_color_output(stream):
+    global COLOR_ENABLED, _COLOR_STYLES
+
+    # On Windows, initialize colorama before checking color support
+    # This allows colorama to enable ANSI support, which may affect the isatty() check
+    if colorama_init and platform.system() == 'Windows':
+        try:
+            colorama_init(autoreset=False)
+        except Exception:
+            pass
+
+    COLOR_ENABLED = bool(globals().get("COLORED_OUTPUT", False)) and _stream_supports_color(stream)
+
+    if not COLOR_ENABLED:
+        _COLOR_STYLES = {}
+        return
+
+    user_theme = globals().get("COLOR_THEME") if isinstance(globals().get("COLOR_THEME"), dict) else {}
+    theme = {**DEFAULT_COLOR_THEME, **(user_theme or {})}
+
+    styles = {}
+    for name, style_str in theme.items():
+        seq = _build_ansi_sequence(style_str)
+        if seq:
+            styles[name] = seq
+    _COLOR_STYLES = styles
+
+
+# Applies a configured colour style (by logical part name) to the given text
+def colorize(part, text):
+    if not COLOR_ENABLED:
+        return text
+    start = _COLOR_STYLES.get(part)
+    if not start:
+        return text
+    return f"{start}{text}{ANSI_RESET}"
+
+
+# Returns coloured representation of a textual Spotify activity status string
+def colorize_status(status_text):
+    status = (status_text or "").strip().lower()
+    if status in ("active", "online", "available", "private mode", "yes"):
+        key = "status_active"
+    elif status in ("inactive", "no"):
+        key = "status_inactive"
+    elif status in ("offline", "invisible"):
+        key = "status_offline"
     else:
-        if not DISABLE_LOGGING:
-            log_logger.write(str(message).expandtabs(8) + "\n")
+        key = "status_other"
+    return colorize(key, status_text)
 
-def print_to_both(message):
-    """Prints to both the log file and screen, bypassing sys.stdout redirection."""
-    message = apply_privacy_substitutions(message)
-    if not DISABLE_LOGGING:
-        log_logger.write(str(message).expandtabs(8) + "\n")
-    if (TRUNCATE_CHARS):
-        message = truncate_string_per_line(message.expandtabs(8), TRUNCATE_CHARS)
-    sys.__stdout__.write(str(message) + "\n")  # Force writing to actual console
-    sys.__stdout__.flush()
 
-# DEBUG_JMK: 0 = disabled, 1 = log only, 2 = screen & log, 3 = screen only
-def print_to_screen(message):
-    message = apply_privacy_substitutions(message)
-    """Prints only to the screen, bypassing sys.stdout redirection, unless debugging."""
-    if DEBUG_JMK in (1, 2):
-        if log_logger:
-            log_logger.write(str(message).expandtabs(8) + "\n")
-    if (TRUNCATE_CHARS):
-        message = truncate_string_per_line(message.expandtabs(8), TRUNCATE_CHARS)
-    sys.__stdout__.write(str(message) + "\n")  # Force writing to actual console
-    sys.__stdout__.flush()
+# Splits a recognized output label from its value without applying a backtracking expression
+def _split_output_label(value, labels):
+    body = value.rstrip("\n")
+    cursor = len(body) - len(body.lstrip())
+    if body[cursor:cursor + 1] == "*":
+        cursor += 1
+        cursor += len(body[cursor:]) - len(body[cursor:].lstrip())
+    for label in labels:
+        if not body.startswith(label, cursor):
+            continue
+        value_start = cursor + len(label)
+        value_start += len(body[value_start:]) - len(body[value_start:].lstrip())
+        if value_start == cursor + len(label):
+            return None
+        return body[:value_start], body[value_start:]
+    return None
 
-# DEBUG_JMK: 0 = disabled, 1 = log only, 2 = screen & log, 3 = screen only
-def print_debug(message):
-    message = apply_privacy_substitutions(message)
-    """Prints to the log file and/or screen, depending on configuration."""
-    if DEBUG_JMK:
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        message = f"[DEBUG {timestamp}] {message}"
-        if not DISABLE_LOGGING:
-            if DEBUG_JMK in (1, 2):
-                log_logger.write(str(message).expandtabs(8) + "\n")
-        if DEBUG_JMK in (2, 3):
-            if (TRUNCATE_CHARS):
-                message = truncate_string_per_line(message.expandtabs(8), TRUNCATE_CHARS)
-            sys.__stdout__.write(str(message) + "\n")  # Force writing to actual console
-            sys.__stdout__.flush()
+
+# Helper to apply a block style while preserving internal highlights
+def _apply_style_nested(line, style_name):
+    start_style = _COLOR_STYLES.get(style_name)
+    if not start_style:
+        return line
+    # Wrap the line in the style, but ensure internal resets (\033[0m), return to the style immediately instead of resetting to plain
+    line = f"{start_style}{line}{ANSI_RESET}"
+    line = line.replace(ANSI_RESET, f"{ANSI_RESET}{start_style}")
+    # Fix double trailing reset
+    if line.endswith(f"{ANSI_RESET}{start_style}"):
+        line = line[:-len(start_style)]
+    return line
+
+
+# Applies one substitution only to the parts of a line that are not already inside a colour span, so a later
+# rule cannot reclaim text an earlier rule has already coloured
+def _sub_outside_color(pattern, replacement, line):
+    if ANSI_RESET not in line:
+        return pattern.sub(replacement, line)
+    parts = []
+    position = 0
+    inside = False
+    for match in SGR_SEQUENCE_RE.finditer(line):
+        segment = line[position:match.start()]
+        parts.append(segment if inside else pattern.sub(replacement, segment))
+        parts.append(match.group(0))
+        inside = match.group(0) != ANSI_RESET
+        position = match.end()
+    trailing = line[position:]
+    parts.append(trailing if inside else pattern.sub(replacement, trailing))
+    return "".join(parts)
+
+
+# Colours one quoted name unless the quoted value is shaped like a file name or a path
+def _colorize_quoted_name(match, style_name):
+    name = match.group(2)
+    if _QUOTED_FILE_LIKE_RE.search(name):
+        return match.group(0)
+    # What sits right before the quote decides the colour, so a target ID is not read as a track title
+    if _QUOTED_USER_ID_CONTEXT_RE.search(match.string[:match.start()]):
+        style_name = "user_uri_id"
+    return f"{match.group(1)}{colorize(style_name, name)}{match.group(3)}"
+
+
+# Applies colour rules to a single output line
+def _colorize_line(line):
+    lowered = line.lower()
+
+    # Notification summary rows carry their own On/Off state word
+    notification_match = _NOTIFICATION_SUMMARY_STATE_RE.match(line)
+    if notification_match:
+        prefix, state, suffix = notification_match.groups()
+        state_style = "boolean_true" if state == "On" else "boolean_false"
+        return f"{prefix}{colorize(state_style, state)}{suffix}"
+
+    # Doctor status markers keep the rest of their line plain so long labels stay readable
+    doctor_match = _DOCTOR_MARK_RE.match(line)
+    if doctor_match:
+        return colorize(_DOCTOR_MARK_STYLES[doctor_match.group(1)], doctor_match.group(0)) + line[doctor_match.end():]
+
+    # Timestamp lines get a dimmed label and a coloured value
+    labeled_value = _split_output_label(line, ("Timestamp:",))
+    if labeled_value:
+        label, rest = labeled_value
+        colored = f"{colorize('timestamp_label', label)}{colorize('timestamp_value', rest)}"
+        return colored + ("\n" if line.endswith("\n") else "")
+
+    # Any '<something> URL:' row is a link, checked before the label table so 'Album URL:' is not read as 'Album:'
+    labeled_value = _split_output_label(line, ("URL:",))
+    if labeled_value or " URL:" in line:
+        line = _sub_outside_color(_URL_RE, lambda mo: colorize("link", mo.group(0)), line)
+        return line
+
+    # Status rows report the monitored friend's presence
+    labeled_value = _split_output_label(line, ("STATUS:", "Status:"))
+    if labeled_value:
+        label, status = labeled_value
+        colored = f"{label}{colorize_status(status)}"
+        return colored + ("\n" if line.endswith("\n") else "")
+
+    # Labelled Spotify metadata rows keep their label plain and colour only the value
+    for labels, style_name in _LABEL_STYLES:
+        labeled_value = _split_output_label(line, labels)
+        if not labeled_value:
+            continue
+        label, rest = labeled_value
+        colored = f"{label}{colorize(style_name, rest)}"
+        return colored + ("\n" if line.endswith("\n") else "")
+
+    # Highlight the Spotify user named inside a sentence
+    line = _sub_outside_color(_USER_TAG_RE, lambda mo: f"{mo.group(1)}{mo.group(2)}{colorize('user_uri_id', mo.group(3))}", line)
+
+    # Highlight counters and their differences
+    line = _sub_outside_color(_FROM_TO_COUNT_RE, lambda mo: f"{mo.group(1)}{colorize('count_up' if int(mo.group(4)) >= int(mo.group(2)) else 'count_down', mo.group(2))}{mo.group(3)}{colorize('count_up' if int(mo.group(4)) >= int(mo.group(2)) else 'count_down', mo.group(4))}", line)
+    line = _sub_outside_color(_DIFF_COUNT_UP_RE, lambda mo: colorize("count_up", mo.group(0)), line)
+    line = _sub_outside_color(_DIFF_COUNT_DOWN_RE, lambda mo: colorize("count_down", mo.group(0)), line)
+
+    # Highlight durations and listening percentages
+    line = _sub_outside_color(_DURATION_RE, lambda mo: colorize("duration", mo.group(0)), line)
+    line = _sub_outside_color(_PERCENTAGE_RE, lambda mo: f"({colorize('count_up', mo.group(0)[1:])}", line)
+
+    # Highlight date ranges before single dates so a range is not split into two dates
+    line = _sub_outside_color(_SHORT_RANGE_DATE_RE, lambda mo: colorize("date_range", mo.group(0)), line)
+    line = _sub_outside_color(_DATE_RANGE_RE, lambda mo: colorize("date_range", mo.group(0)), line)
+    line = _sub_outside_color(_HOUR_RANGE_RE, lambda mo: colorize("date_range", mo.group(0)), line)
+    line = _sub_outside_color(_LONG_DATE_RE, lambda mo: colorize("date", mo.group(0)), line)
+    line = _sub_outside_color(_TIME_ONLY_RE, lambda mo: colorize("date", mo.group(0)), line)
+
+    # Highlight URLs / links
+    line = _sub_outside_color(_URL_RE, lambda mo: colorize("link", mo.group(0)), line)
+
+    # Highlight quoted names, taking the colour of what the line is about. A line that is only a quoted string
+    # is a free-form description, so it stays plain instead of being read as a name
+    if not line.lstrip().startswith("'"):
+        if _LIST_ITEM_NAME_RE.match(line):
+            quoted_style = "playlist"
+        elif "username" in lowered:
+            quoted_style = "username"
+        elif "playlist" in lowered:
+            quoted_style = "playlist"
+        else:
+            quoted_style = "track"
+        line = _sub_outside_color(_QUOTED_CONTENT_RE, lambda mo: _colorize_quoted_name(mo, quoted_style), line)
+
+    # Highlight boolean values
+    line = _sub_outside_color(_BOOLEAN_TRUE_RE, lambda mo: colorize("boolean_true", mo.group(0)), line)
+    line = _sub_outside_color(_BOOLEAN_FALSE_RE, lambda mo: colorize("boolean_false", mo.group(0)), line)
+
+    # Highlight playback and presence keywords
+    line = _sub_outside_color(_PLAYBACK_STOPPED_RE, lambda mo: colorize("status_inactive", mo.group(0)), line)
+    line = _sub_outside_color(_PLAYBACK_STARTED_RE, lambda mo: colorize("status_active", mo.group(0)), line)
+    line = _sub_outside_color(_PLAYBACK_CHANGED_RE, lambda mo: colorize("status_change", mo.group(0)), line)
+    line = _sub_outside_color(_ACTIVE_WORD_RE, lambda mo: colorize("status_active", mo.group(0)), line)
+    line = _sub_outside_color(_INACTIVE_WORD_RE, lambda mo: colorize("status_inactive", mo.group(0)), line)
+
+    # Block highlighting (activity headers, errors, warnings, signals)
+    # Applied last so the internal colours above are preserved through the nesting logic
+    is_summary_timer_row = bool(_STARTUP_SUMMARY_TIMER_ROW_RE.match(lowered))
+    is_recovery_notice = bool(_RECOVERY_NOTICE_RE.search(lowered))
+    is_debug_line = bool(_DEBUG_LINE_RE.match(lowered))
+    is_error = not is_summary_timer_row and not is_recovery_notice and not is_debug_line and (
+        bool(_ERROR_KEYWORD_RE.search(lowered)) or "critical:" in lowered or (
+            "* error" in lowered and "[errors =" not in lowered
+        )
+    )
+    is_warning = any(w in lowered for w in ("* warning:", "caution:")) and "[warnings =" not in lowered
+    is_signal = "* signal" in lowered and "received" in lowered
+    is_info = "* info:" in lowered
+
+    if lowered.startswith("to fix:"):
+        line = _apply_style_nested(line, "info")
+    elif is_error:
+        line = _apply_style_nested(line, "error")
+    elif is_warning:
+        line = _apply_style_nested(line, "warning")
+    elif is_signal:
+        line = _apply_style_nested(line, "signal")
+    elif "sending email" in lowered:
+        line = _apply_style_nested(line, "email")
+    elif "sending webhook" in lowered:
+        line = _apply_style_nested(line, "webhook")
+    elif is_info:
+        line = _apply_style_nested(line, "info")
+
+    return line
+
+
+# Applies colourisation to multi-line text, preserving line breaks
+def apply_color_to_text(text):
+    if not COLOR_ENABLED or not isinstance(text, str):
+        return text
+
+    parts = []
+    for chunk in text.splitlines(keepends=True):
+        if chunk.endswith(("\n", "\r")):
+            stripped = chunk.rstrip("\r\n")
+            newline = chunk[len(stripped):]
+            parts.append(_colorize_line(stripped) + newline)
+        else:
+            parts.append(_colorize_line(chunk))
+    return "".join(parts)
+
+
+# Returns the underlying terminal behind any number of sanitizing stream wrappers
+def unwrap_terminal_stream(stream):
+    while isinstance(stream, TerminalStream):
+        stream = stream.terminal
+    return stream
+
+
+def print_de
 
 def timestring():
     now = datetime.now()
@@ -3138,13 +3733,14 @@ def load_spotify_tracks_from_file(filename):
 
 
     def terminal_only(self, message):
+        message = sanitize_terminal_text(message)
         if TRUNCATE_CHARS:
             message = truncate_string_per_line(message, TRUNCATE_CHARS)
-        self.terminal.write(message)
+        self.terminal.write(apply_color_to_text(message))
         self.terminal.flush()
 
     def log_only(self, message):
-        self.logfile.write(message.expandtabs(8))
+        self.logfile.write(normalize_log_separators(ANSI_ESCAPE_RE.sub("", sanitize_terminal_text(message)).expandtabs(8)))
         self.logfile.flush()
 
     def flush(self):
@@ -3152,20 +3748,81 @@ def load_spotify_tracks_from_file(filename):
         self.logfile.flush()
 
 
-def flag_file_create():
-    try:
-        with open(FLAG_FILE, "w") as f:
-            f.write("This indicates active streaming by monitored user")
-    except Exception:
-        pass
+# Sanitizing stdout wrapper used before logging policy and one-shot mode resolution
+class TerminalStream(object):
+    # Stores the wrapped terminal stream
+    def __init__(self, stream):
+        self.terminal = stream
+
+    # Writes one sanitized and coloured message to the wrapped terminal
+    def write(self, message):
+        self.terminal.write(apply_color_to_text(sanitize_terminal_text(message)))
+        self.terminal.flush()
+
+    # Writes one message to the terminal while matching the Logger interface
+    def terminal_only(self, message):
+        self.write(message)
+
+    # Discards log-only output while file logging is disabled
+    def log_only(self, message):
+        return
+
+    # Flushes the wrapped terminal
+    def flush(self):
+        self.terminal.flush()
+
+    # Forwards remaining stream attributes to the wrapped terminal
+    def __getattr__(self, name):
+        return getattr(self.terminal, name)
 
 
-def flag_file_delete():
+# Atomically creates the configured activity flag or disables the integration after a visible failure
+def flag_file_create() -> bool:
+    global FLAG_FILE
+    if not FLAG_FILE:
+        return True
+    flag_path = Path(FLAG_FILE)
+    temporary_path: Optional[Path] = None
     try:
-        if os.path.exists(FLAG_FILE):
-            os.remove(FLAG_FILE)
-    except Exception:
-        pass
+        if flag_path.exists() and not flag_path.is_file():
+            raise OSError(f"Destination is not a regular file: {flag_path}")
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", prefix=f".{flag_path.name}.", suffix=".tmp", dir=str(flag_path.parent), delete=False) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+            temporary_file.write("This indicates active streaming by monitored user")
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        os.replace(temporary_path, flag_path)
+        temporary_path = None
+        return True
+    except Exception as exc:
+        failed_path = FLAG_FILE
+        FLAG_FILE = ""
+        print_recovery_error(exc, "file_write", detail=f"Activity flag integration was disabled after the file could not be created: {failed_path}")
+        print(f"* Activity flag integration was disabled for: {failed_path}")
+        return False
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
+
+
+# Deletes the configured activity flag or disables the integration after a visible failure
+def flag_file_delete() -> bool:
+    global FLAG_FILE
+    if not FLAG_FILE:
+        return True
+    try:
+        flag_path = Path(FLAG_FILE)
+        if flag_path.exists() and not flag_path.is_file():
+            raise OSError(f"Destination is not a regular file: {flag_path}")
+        if flag_path.exists():
+            flag_path.unlink()
+        return True
+    except Exception as exc:
+        failed_path = FLAG_FILE
+        FLAG_FILE = ""
+        print_recovery_error(exc, "file_write", detail=f"Activity flag integration was disabled after the stale file could not be deleted: {failed_path}")
+        print(f"* Activity flag integration was disabled for: {failed_path}")
+        return False
 
 
 # Class used to generate timeout exceptions
@@ -3178,6 +3835,31 @@ def timeout_handler(sig, frame):
     raise TimeoutException
 
 
+# Starts a POSIX alarm without discarding an earlier enclosing deadline
+def _start_timeout_alarm(timeout: float):
+    if platform.system() == "Windows" or not hasattr(signal, "setitimer"):
+        return None
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    previous_delay, previous_interval = signal.getitimer(signal.ITIMER_REAL)
+    effective_timeout = min(float(timeout), previous_delay) if previous_delay > 0 else float(timeout)
+    signal.signal(signal.SIGALRM, timeout_handler)
+    signal.setitimer(signal.ITIMER_REAL, effective_timeout)
+    return previous_handler, previous_delay, previous_interval, time.monotonic()
+
+
+# Restores the enclosing POSIX alarm with its elapsed time deducted
+def _restore_timeout_alarm(alarm_state) -> None:
+    if alarm_state is None:
+        return
+    previous_handler, previous_delay, previous_interval, started_at = alarm_state
+    elapsed = max(0.0, time.monotonic() - started_at)
+    signal.signal(signal.SIGALRM, previous_handler)
+    if previous_delay > 0:
+        signal.setitimer(signal.ITIMER_REAL, max(previous_delay - elapsed, 0.000001), previous_interval)
+    else:
+        signal.setitimer(signal.ITIMER_REAL, 0, previous_interval)
+
+
 # Signal handler when user presses Ctrl+C
 def signal_handler(sig, frame):
     sys.stdout = stdout_bck
@@ -3188,7 +3870,11 @@ def signal_handler(sig, frame):
 
 
 # Checks internet connectivity
-def check_internet(url=CHECK_INTERNET_URL, timeout=CHECK_INTERNET_TIMEOUT, verify=VERIFY_SSL):
+def check_internet(url=None, timeout=None, verify=None):
+    # Resolve at call time so config file and dotenv overrides take effect (these globals change after import)
+    url = CHECK_INTERNET_URL if url is None else url
+    timeout = CHECK_INTERNET_TIMEOUT if timeout is None else timeout
+    verify = VERIFY_SSL if verify is None else verify
     try:
         debug_print(f"HTTP GET {url} [connectivity check], timeout={timeout}, verify_ssl={verify}")
         _ = req.get(url, headers={'User-Agent': USER_AGENT}, timeout=timeout, verify=verify)
@@ -3219,6 +3905,11 @@ def debug_print(message):
         return
     if DEBUG_MODE:
         timestamp = datetime.now().strftime("%H:%M:%S")
+        # Every message is redacted by sanitize_error_text, which CodeQL does not model as a sanitizer. The one
+        # reported flow carries OAUTH_APP_VALIDATION_TRACK_URI, a public track URI that the password name
+        # heuristic matches only because the constant is spelled with oauth
+
+        # codeql[py/clear-text-logging-sensitive-data]
         print(f"[DEBUG {timestamp}] {sanitize_error_text(message)}")
 
 
@@ -3544,6 +4235,12 @@ def normalized_webhook_provider(provider: Any = None) -> str:
     return normalized if normalized in ("discord", "ntfy") else ""
 
 
+# Returns the webhook provider name spelled the way its service brands it, for user-facing text
+def webhook_provider_display_name(provider: Any = None) -> str:
+    normalized = normalized_webhook_provider(provider)
+    return {"discord": "Discord", "ntfy": "ntfy"}.get(normalized, normalized)
+
+
 # Detects Discord and public ntfy webhook providers from distinctive URL shapes
 def detect_webhook_provider(url: Any) -> str:
     if not validate_webhook_url(url):
@@ -3805,7 +4502,7 @@ def spotify_image_url_is_allowed(image_url: str) -> bool:
 
 # Builds one bounded in-memory JPEG for an ntfy attachment
 def build_ntfy_image(image_url: str = "") -> Optional[bytes]:
-    if not NTFY_IMAGES or not image_url or not NTFY_IMAGES_AVAILABLE:
+    if not NTFY_IMAGES or not image_url or not NOTIFICATION_IMAGES_AVAILABLE:
         return None
     try:
         if not spotify_image_url_is_allowed(image_url):
@@ -3853,6 +4550,15 @@ def build_ntfy_image(image_url: str = "") -> Optional[bytes]:
     except Exception as error:
         debug_print(f"NTFY image generation failed, sending text only: {error}")
         return None
+
+
+# Sends one webhook request with the destination, deadline, TLS verification and redirect policy every delivery shares
+def post_webhook_request(**request_kwargs: Any) -> Any:
+    destination = str(WEBHOOK_URL or "").strip()
+    # Revalidated here because a dotenv reload can replace the destination after the delivery started
+    if not validate_webhook_url(destination):
+        raise req.exceptions.InvalidURL("WEBHOOK_URL must contain a complete HTTPS link")
+    return WEBHOOK_SESSION.post(destination, timeout=WEBHOOK_TIMEOUT_SECONDS, verify=VERIFY_SSL, allow_redirects=False, **request_kwargs)
 
 
 # Sends one webhook through an isolated bounded retry path that never uses Spotify retries
@@ -3909,14 +4615,14 @@ def send_webhook(title: str, description: str, notification_type: str = "song", 
                 if use_ntfy_image:
                     image_params = dict(ntfy_params)
                     image_params["message"] = ntfy_message
-                    response = WEBHOOK_SESSION.post(str(WEBHOOK_URL).strip(), data=ntfy_image, params=image_params, headers={**request_headers, "Content-Type": "image/jpeg", "X-Filename": NTFY_IMAGE_FILENAME}, timeout=WEBHOOK_TIMEOUT_SECONDS)
+                    response = post_webhook_request(data=ntfy_image, params=image_params, headers={**request_headers, "Content-Type": "image/jpeg", "X-Filename": NTFY_IMAGE_FILENAME})
                 else:
-                    response = WEBHOOK_SESSION.post(str(WEBHOOK_URL).strip(), data=ntfy_message.encode("utf-8"), params=ntfy_params, headers=request_headers, timeout=WEBHOOK_TIMEOUT_SECONDS)
+                    response = post_webhook_request(data=ntfy_message.encode("utf-8"), params=ntfy_params, headers=request_headers)
             else:
                 if isinstance(discord_payload, str):
-                    response = WEBHOOK_SESSION.post(str(WEBHOOK_URL).strip(), data=discord_payload, headers=request_headers, timeout=WEBHOOK_TIMEOUT_SECONDS)
+                    response = post_webhook_request(data=discord_payload, headers=request_headers)
                 else:
-                    response = WEBHOOK_SESSION.post(str(WEBHOOK_URL).strip(), json=discord_payload, headers=request_headers, timeout=WEBHOOK_TIMEOUT_SECONDS)
+                    response = post_webhook_request(json=discord_payload, headers=request_headers)
             if 200 <= response.status_code <= 299:
                 return 0
             last_error = response
@@ -3951,19 +4657,40 @@ def send_webhook(title: str, description: str, notification_type: str = "song", 
     return 1
 
 # Sends one alert through the enabled email and webhook channels
-def send_notification_channels(notification_type: str, subject: str, body: str, body_html: str = "", email_enabled: bool = False, webhook_enabled: Optional[bool] = None, image_url: str = "", subject_short: str = "", body_short: str = "", ntfy_priority: int = 0, ntfy_tags: str = "") -> tuple[bool, bool]:
-    email_attempted = bool(email_enabled)
-    webhook_attempted = webhook_event_enabled(notification_type) if webhook_enabled is None else bool(webhook_enabled)
-    if email_attempted:
+def send_notification_channels(notification_type: str, subject: str, body: str, body_html: str = "", email_enabled: bool = False, webhook_enabled: Optional[bool] = None, image_url: str = "", subject_short: str = "", body_short: str = "", ntfy_priority: int = 0, ntfy_tags: str = "", retain_failures: bool = True) -> tuple[bool, bool]:
+    email_selected = bool(email_enabled)
+    webhook_selected = webhook_event_enabled(notification_type) if webhook_enabled is None else bool(webhook_enabled)
+    email_succeeded = False
+    webhook_succeeded = False
+    if email_selected:
         print(f"Sending email notification to {RECEIVER_EMAIL}")
-        send_email(subject, body, body_html, SMTP_SSL)
-    if webhook_attempted:
+        email_succeeded = send_email(subject, body, body_html, SMTP_SSL) == 0
+    if webhook_selected:
         print("Sending webhook notification")
         use_short_content = NTFY_SHORT is True and normalized_webhook_provider() == "ntfy"
         webhook_subject = (subject_short or subject) if use_short_content else subject
         webhook_body = (body_short or body) if use_short_content else body
-        send_webhook(webhook_subject, webhook_body, notification_type, force=True, image_url=image_url, ntfy_priority=ntfy_priority, ntfy_tags=ntfy_tags)
-    return email_attempted, webhook_attempted
+        webhook_succeeded = send_webhook(webhook_subject, webhook_body, notification_type, force=True, image_url=image_url, ntfy_priority=ntfy_priority, ntfy_tags=ntfy_tags) == 0
+    if retain_failures and notification_type in ("active", "inactive") and ((email_selected and not email_succeeded) or (webhook_selected and not webhook_succeeded)):
+        pending = {"notification_type": notification_type, "subject": subject, "body": body, "body_html": body_html, "email_enabled": email_selected and not email_succeeded, "webhook_enabled": webhook_selected and not webhook_succeeded, "image_url": image_url, "subject_short": subject_short, "body_short": body_short, "ntfy_priority": ntfy_priority, "ntfy_tags": ntfy_tags}
+        if not any(item["notification_type"] == notification_type and item["subject"] == subject for item in PENDING_ACTIVITY_NOTIFICATIONS):
+            if len(PENDING_ACTIVITY_NOTIFICATIONS) >= 10:
+                PENDING_ACTIVITY_NOTIFICATIONS.pop(0)
+            PENDING_ACTIVITY_NOTIFICATIONS.append(pending)
+    return email_succeeded, webhook_succeeded
+
+
+# Retries retained activity transitions once per monitoring check until each channel succeeds
+def retry_pending_activity_notifications() -> None:
+    pending_notifications = list(PENDING_ACTIVITY_NOTIFICATIONS)
+    PENDING_ACTIVITY_NOTIFICATIONS.clear()
+    for pending in pending_notifications:
+        print(f"Retrying pending {pending['notification_type']} notification")
+        email_succeeded, webhook_succeeded = send_notification_channels(pending["notification_type"], pending["subject"], pending["body"], pending["body_html"], pending["email_enabled"], pending["webhook_enabled"], image_url=pending["image_url"], subject_short=pending["subject_short"], body_short=pending["body_short"], ntfy_priority=pending["ntfy_priority"], ntfy_tags=pending["ntfy_tags"], retain_failures=False)
+        pending["email_enabled"] = pending["email_enabled"] and not email_succeeded
+        pending["webhook_enabled"] = pending["webhook_enabled"] and not webhook_succeeded
+        if pending["email_enabled"] or pending["webhook_enabled"]:
+            PENDING_ACTIVITY_NOTIFICATIONS.append(pending)
 
 
 # Initializes the CSV file
@@ -4228,6 +4955,7 @@ def reload_secrets_signal_handler(sig, frame):
     suffix = "\n" if TOKEN_SOURCE == 'client' else ""
     auth_values_before = (REFRESH_TOKEN, SP_DC_COOKIE, SP_APP_CLIENT_ID, SP_APP_CLIENT_SECRET, SPOTIFY_SCROBBLE_CLIENT_ID, SPOTIFY_SCROBBLE_REDIRECT_URI, SPOTIFY_SCROBBLE_REFRESH_TOKEN, DEVICE_ID, SYSTEM_ID, USER_URI_ID)
     webhook_url_changed = False
+    dotenv_changed_keys: tuple[str, ...] = ()
 
     # disable autoscan if DOTENV_FILE set to none
     env_path = None
@@ -4237,34 +4965,27 @@ def reload_secrets_signal_handler(sig, frame):
         # reload .env if python-dotenv is installed
         default_dotenv_filename = SCROBBLE_HEALTH_DOTENV_FILENAME if MONITOR_MODE == "scrobble_health" else DEFAULT_DOTENV_FILENAME
         try:
-            from dotenv import load_dotenv, find_dotenv
+            from dotenv import find_dotenv
             if DOTENV_FILE:
                 env_path = DOTENV_FILE
             else:
                 env_path = find_dotenv(filename=default_dotenv_filename)
             if env_path:
-                load_dotenv(env_path, override=True, interpolate=False)
+                dotenv_changed_keys = apply_dotenv_mapping(read_dotenv_mapping(env_path))
             else:
                 print(f"* No {default_dotenv_filename if not DOTENV_FILE else 'dotenv'} file found, skipping env-var reload{suffix}")
         except ImportError:
             env_path = None
             print(f"* python-dotenv not installed, skipping env-var reload{suffix}")
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            print_recovery_error(exc, "config_invalid", detail=f"Dotenv file '{env_path}' could not be reloaded: {exc}")
+            env_path = None
 
     if env_path:
-        for environment_key in (*SECRET_KEYS, *ENVIRONMENT_SETTING_KEYS):
-            old_val = globals().get(environment_key)
-            val = os.getenv(environment_key)
-            if environment_key == "SP_DC_COOKIE":
-                if ALT_COOKIE:
-                    val = os.getenv("SP_DC_COOKIE2")
-            if environment_key == "LOGIN_REQUEST_BODY_FILE":
-                if ALT_COOKIE:
-                    val = os.getenv("LOGIN_REQUEST_BODY_FILE2")
-            if val is not None and val != old_val:
-                globals()[environment_key] = val
-                if environment_key == "WEBHOOK_URL":
-                    webhook_url_changed = True
-                print(f"* Reloaded {environment_key} from {env_path}{suffix}")
+        for environment_key in dotenv_changed_keys:
+            if environment_key == "WEBHOOK_URL":
+                webhook_url_changed = True
+            print(f"* Reloaded {environment_key} from {env_path}{suffix}")
 
     if TOKEN_SOURCE == 'client':
 
@@ -4320,9 +5041,14 @@ def reload_secrets_signal_handler(sig, frame):
         detected_provider = detect_webhook_provider(WEBHOOK_URL)
         if detected_provider and detected_provider != normalized_webhook_provider():
             WEBHOOK_PROVIDER = detected_provider
-            print(f"* Updated webhook provider to {detected_provider}{suffix}")
+            print(f"* Updated webhook provider to {webhook_provider_display_name(detected_provider)}{suffix}")
 
     print_cur_ts("Timestamp:\t\t\t")
+
+
+# Escapes one value for safe interpolation into a quoted HTML attribute such as href or src
+def escape_html_attr(value) -> str:
+    return escape(str(value or ""), quote=True)
 
 
 # Returns Apple & lyrics search URLs for specified track
@@ -4385,15 +5111,15 @@ def format_lyrics_urls_email_html(genius_url, azlyrics_url, tekstowo_url, musixm
     escaped_artist = escape(artist)
     escaped_track = escape(track)
     if ENABLE_GENIUS_LYRICS_URL:
-        lines.append(f'Genius lyrics URL: <a href="{genius_url}">{escaped_artist} - {escaped_track}</a>')
+        lines.append(f'Genius lyrics URL: <a href="{escape_html_attr(genius_url)}">{escaped_artist} - {escaped_track}</a>')
     if ENABLE_AZLYRICS_URL:
-        lines.append(f'AZLyrics URL: <a href="{azlyrics_url}">{escaped_artist} - {escaped_track}</a>')
+        lines.append(f'AZLyrics URL: <a href="{escape_html_attr(azlyrics_url)}">{escaped_artist} - {escaped_track}</a>')
     if ENABLE_TEKSTOWO_URL:
-        lines.append(f'Tekstowo.pl URL: <a href="{tekstowo_url}">{escaped_artist} - {escaped_track}</a>')
+        lines.append(f'Tekstowo.pl URL: <a href="{escape_html_attr(tekstowo_url)}">{escaped_artist} - {escaped_track}</a>')
     if ENABLE_MUSIXMATCH_URL:
-        lines.append(f'Musixmatch URL: <a href="{musixmatch_url}">{escaped_artist} - {escaped_track}</a>')
+        lines.append(f'Musixmatch URL: <a href="{escape_html_attr(musixmatch_url)}">{escaped_artist} - {escaped_track}</a>')
     if ENABLE_LYRICS_COM_URL:
-        lines.append(f'Lyrics.com URL: <a href="{lyrics_com_url}">{escaped_artist} - {escaped_track}</a>')
+        lines.append(f'Lyrics.com URL: <a href="{escape_html_attr(lyrics_com_url)}">{escaped_artist} - {escaped_track}</a>')
     return "<br>".join(lines) if lines else ""
 
 
@@ -4435,15 +5161,15 @@ def format_music_urls_email_html(apple_music_url, youtube_music_url, amazon_musi
     escaped_artist = escape(artist)
     escaped_track = escape(track)
     if ENABLE_APPLE_MUSIC_URL:
-        lines.append(f'Apple Music URL: <a href="{apple_music_url}">{escaped_artist} - {escaped_track}</a>')
+        lines.append(f'Apple Music URL: <a href="{escape_html_attr(apple_music_url)}">{escaped_artist} - {escaped_track}</a>')
     if ENABLE_YOUTUBE_MUSIC_URL:
-        lines.append(f'YouTube Music URL: <a href="{youtube_music_url}">{escaped_artist} - {escaped_track}</a>')
+        lines.append(f'YouTube Music URL: <a href="{escape_html_attr(youtube_music_url)}">{escaped_artist} - {escaped_track}</a>')
     if ENABLE_AMAZON_MUSIC_URL:
-        lines.append(f'Amazon Music URL: <a href="{amazon_music_url}">{escaped_artist} - {escaped_track}</a>')
+        lines.append(f'Amazon Music URL: <a href="{escape_html_attr(amazon_music_url)}">{escaped_artist} - {escaped_track}</a>')
     if ENABLE_DEEZER_URL:
-        lines.append(f'Deezer URL: <a href="{deezer_url}">{escaped_artist} - {escaped_track}</a>')
+        lines.append(f'Deezer URL: <a href="{escape_html_attr(deezer_url)}">{escaped_artist} - {escaped_track}</a>')
     if ENABLE_TIDAL_URL:
-        lines.append(f'Tidal URL: <a href="{tidal_url}">{escaped_artist} - {escaped_track}</a>')
+        lines.append(f'Tidal URL: <a href="{escape_html_attr(tidal_url)}">{escaped_artist} - {escaped_track}</a>')
     return "<br>".join(lines) if lines else ""
 
 
@@ -4468,9 +5194,7 @@ def check_token_validity(access_token: str, client_id: Optional[str] = None, use
             "Client-Id": client_id
         })
 
-    if platform.system() != 'Windows':
-        signal.signal(signal.SIGALRM, timeout_handler)
-        signal.alarm(FUNCTION_TIMEOUT + 2)
+    alarm_state = _start_timeout_alarm(FUNCTION_TIMEOUT + 2)
     try:
         debug_print(
             f"Token validity check mode={check_mode}, url={url}, "
@@ -4484,8 +5208,7 @@ def check_token_validity(access_token: str, client_id: Optional[str] = None, use
         valid = False
         debug_print(f"HTTP GET {url} -> failed during token validity check [mode={check_mode}]")
     finally:
-        if platform.system() != 'Windows':
-            signal.alarm(0)
+        _restore_timeout_alarm(alarm_state)
     return valid
 
 
@@ -4582,10 +5305,9 @@ def fetch_server_time(session: req.Session, ua: str) -> int:
         "Accept": "*/*",
     }
 
+    alarm_state = None
     try:
-        if platform.system() != 'Windows':
-            signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(FUNCTION_TIMEOUT + 2)
+        alarm_state = _start_timeout_alarm(FUNCTION_TIMEOUT + 2)
         debug_print(f"HTTP HEAD {SERVER_TIME_URL} [server time] timeout={FUNCTION_TIMEOUT}")
         response = session.head(SERVER_TIME_URL, headers=headers, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
         response.raise_for_status()
@@ -4595,8 +5317,7 @@ def fetch_server_time(session: req.Session, ua: str) -> int:
     except Exception as e:
         raise Exception(f"fetch_server_time() head network request error: {e}")
     finally:
-        if platform.system() != 'Windows':
-            signal.alarm(0)
+        _restore_timeout_alarm(alarm_state)
 
     date_hdr = response.headers.get("Date")
     if not date_hdr:
@@ -4653,10 +5374,9 @@ def refresh_access_token_from_sp_dc(sp_dc: str) -> dict:
 
     last_err = ""
 
+    alarm_state = None
     try:
-        if platform.system() != "Windows":
-            signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(FUNCTION_TIMEOUT + 2)
+        alarm_state = _start_timeout_alarm(FUNCTION_TIMEOUT + 2)
 
         debug_print(f"HTTP GET {TOKEN_URL} [sp_dc transport] params={sanitize_debug_params(params)} headers={sanitize_debug_headers(headers)}")
         response = session.get(TOKEN_URL, params=params, headers=headers, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
@@ -4670,16 +5390,14 @@ def refresh_access_token_from_sp_dc(sp_dc: str) -> dict:
         last_err = str(e)
         debug_print(f"HTTP GET {TOKEN_URL} [sp_dc transport] failed: {e}")
     finally:
-        if platform.system() != "Windows":
-            signal.alarm(0)
+        _restore_timeout_alarm(alarm_state)
 
     if not transport or (sp_dc and not check_token_validity(token, data.get("clientId", ""), USER_AGENT)):
         params["reason"] = "init"
 
+        alarm_state = None
         try:
-            if platform.system() != "Windows":
-                signal.signal(signal.SIGALRM, timeout_handler)
-                signal.alarm(FUNCTION_TIMEOUT + 2)
+            alarm_state = _start_timeout_alarm(FUNCTION_TIMEOUT + 2)
 
             debug_print(f"HTTP GET {TOKEN_URL} [sp_dc init] params={sanitize_debug_params(params)} headers={sanitize_debug_headers(headers)}")
             response = session.get(TOKEN_URL, params=params, headers=headers, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
@@ -4693,8 +5411,7 @@ def refresh_access_token_from_sp_dc(sp_dc: str) -> dict:
             last_err = str(e)
             debug_print(f"HTTP GET {TOKEN_URL} [sp_dc init] failed: {e}")
         finally:
-            if platform.system() != "Windows":
-                signal.alarm(0)
+            _restore_timeout_alarm(alarm_state)
 
     if not init or not data or "accessToken" not in data:
         raise Exception(f"refresh_access_token_from_sp_dc(): Unsuccessful token request{': ' + last_err if last_err else ''}")
@@ -4717,7 +5434,7 @@ def spotify_get_access_token_from_sp_dc(sp_dc: str):
 
     now = time.time()
 
-    if SP_CACHED_ACCESS_TOKEN and now < SP_ACCESS_TOKEN_EXPIRES_AT and check_token_validity(SP_CACHED_ACCESS_TOKEN, SP_CACHED_CLIENT_ID, USER_AGENT):
+    if SP_CACHED_ACCESS_TOKEN and now < SP_ACCESS_TOKEN_EXPIRES_AT:
         debug_print("Using cached Spotify access token (sp_dc source)")
         return SP_CACHED_ACCESS_TOKEN
 
@@ -4738,7 +5455,7 @@ def spotify_get_access_token_from_sp_dc(sp_dc: str):
             SP_ACCESS_TOKEN_EXPIRES_AT = token_data["expires_at"]
             SP_CACHED_CLIENT_ID = client_id
 
-            if SP_CACHED_ACCESS_TOKEN is None or not check_token_validity(SP_CACHED_ACCESS_TOKEN, SP_CACHED_CLIENT_ID, USER_AGENT):
+            if SP_CACHED_ACCESS_TOKEN is None:
                 debug_print("Received token is invalid, retrying")
                 retry += 1
                 time.sleep(TOKEN_RETRY_TIMEOUT)
@@ -4932,6 +5649,28 @@ def persist_spotify_scrobble_refresh_token(refresh_token: str) -> bool:
         return False
 
 
+# Posts a Spotify refresh-token request with one bounded retry for transient failures
+def spotify_post_scrobble_refresh_token(request_session: req.Session, token_data: dict) -> Any:
+    max_attempts = SCROBBLE_HEALTH_HTTP_RETRIES + 1
+    for attempt in range(max_attempts):
+        debug_print(f"HTTP POST {SPOTIFY_SCROBBLE_TOKEN_URL} [scrobble health token refresh, attempt {attempt + 1}/{max_attempts}]")
+        try:
+            response = request_session.post(SPOTIFY_SCROBBLE_TOKEN_URL, data=token_data, headers={"User-Agent": USER_AGENT}, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
+        except (req.ConnectionError, req.Timeout) as exc:
+            if attempt + 1 >= max_attempts:
+                raise
+            debug_print(f"Spotify recent-play token refresh failed temporarily: {sanitize_error_text(exc)}. Retrying in {display_time(SCROBBLE_HEALTH_IMMEDIATE_RETRY_DELAY)}")
+            time.sleep(SCROBBLE_HEALTH_IMMEDIATE_RETRY_DELAY)
+            continue
+        if 500 <= response.status_code <= 599 and attempt + 1 < max_attempts:
+            debug_print(f"Spotify recent-play token refresh returned HTTP {response.status_code}. Retrying in {display_time(SCROBBLE_HEALTH_IMMEDIATE_RETRY_DELAY)}")
+            response.close()
+            time.sleep(SCROBBLE_HEALTH_IMMEDIATE_RETRY_DELAY)
+            continue
+        return response
+    raise RuntimeError("Spotify recent-play token refresh exhausted its bounded retry")
+
+
 # Refreshes and caches a user-owned Spotify recent-play access token
 def spotify_get_scrobble_access_token(client_id: Optional[str] = None, refresh_token: Optional[str] = None, session: Optional[req.Session] = None) -> str:
     global SPOTIFY_SCROBBLE_REFRESH_TOKEN, SP_CACHED_SCROBBLE_ACCESS_TOKEN, SP_SCROBBLE_ACCESS_TOKEN_EXPIRES_AT, SP_CACHED_SCROBBLE_AUTH_FINGERPRINT
@@ -4945,8 +5684,7 @@ def spotify_get_scrobble_access_token(client_id: Optional[str] = None, refresh_t
         return SP_CACHED_SCROBBLE_ACCESS_TOKEN
     request_session = SCROBBLE_HEALTH_SESSION if session is None else session
     token_data = {"client_id": selected_client_id, "grant_type": "refresh_token", "refresh_token": selected_refresh_token}
-    debug_print(f"HTTP POST {SPOTIFY_SCROBBLE_TOKEN_URL} [scrobble health token refresh]")
-    response = request_session.post(SPOTIFY_SCROBBLE_TOKEN_URL, data=token_data, headers={"User-Agent": USER_AGENT}, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
+    response = spotify_post_scrobble_refresh_token(request_session, token_data)
     if response.status_code == 429 or response.status_code >= 500:
         spotify_raise_scrobble_http_error(response)
     oauth_error, oauth_description = spotify_scrobble_oauth_error(response)
@@ -5073,6 +5811,79 @@ def scrobble_time_distance(play: SpotifyPlay, scrobble: LastfmScrobble) -> float
     return min(candidates)
 
 
+@dataclass
+class _FlowEdge:
+    to: int
+    reverse: int
+    capacity: int
+    cost: float
+
+
+# Adds one forward and reverse edge to a residual flow graph
+def _add_flow_edge(graph: List[List[_FlowEdge]], source: int, destination: int, capacity: int, cost: float) -> None:
+    graph[source].append(_FlowEdge(destination, len(graph[destination]), capacity, cost))
+    graph[destination].append(_FlowEdge(source, len(graph[source]) - 1, 0, -cost))
+
+
+# Finds a maximum-cardinality minimum-distance matching between plays and scrobbles
+def match_scrobble_plays(plays: Sequence[SpotifyPlay], scrobbles: Sequence[LastfmScrobble], match_window: float) -> List[tuple[int, int]]:
+    play_count = len(plays)
+    scrobble_count = len(scrobbles)
+    source = 0
+    first_play = 1
+    first_scrobble = first_play + play_count
+    sink = first_scrobble + scrobble_count
+    graph: List[List[_FlowEdge]] = [[] for _ in range(sink + 1)]
+    for play_index in range(play_count):
+        _add_flow_edge(graph, source, first_play + play_index, 1, 0.0)
+    for scrobble_index in range(scrobble_count):
+        _add_flow_edge(graph, first_scrobble + scrobble_index, sink, 1, 0.0)
+    scrobble_keys = [(normalize_scrobble_text(scrobble.artist), normalize_scrobble_text(scrobble.track)) for scrobble in scrobbles]
+    for play_index, play in enumerate(plays):
+        play_key = (normalize_scrobble_text(play.artist), normalize_scrobble_text(play.track))
+        for scrobble_index, scrobble in enumerate(scrobbles):
+            distance = scrobble_time_distance(play, scrobble)
+            if scrobble_keys[scrobble_index] == play_key and distance <= match_window:
+                _add_flow_edge(graph, first_play + play_index, first_scrobble + scrobble_index, 1, distance)
+
+    while True:
+        distances = [float("inf")] * len(graph)
+        previous_nodes = [-1] * len(graph)
+        previous_edges = [-1] * len(graph)
+        distances[source] = 0.0
+        for _ in range(len(graph) - 1):
+            changed = False
+            for node, edges in enumerate(graph):
+                if distances[node] == float("inf"):
+                    continue
+                for edge_index, edge in enumerate(edges):
+                    candidate_distance = distances[node] + edge.cost
+                    if edge.capacity > 0 and candidate_distance < distances[edge.to] - 1e-12:
+                        distances[edge.to] = candidate_distance
+                        previous_nodes[edge.to] = node
+                        previous_edges[edge.to] = edge_index
+                        changed = True
+            if not changed:
+                break
+        if previous_nodes[sink] < 0:
+            break
+        node = sink
+        while node != source:
+            previous_node = previous_nodes[node]
+            edge = graph[previous_node][previous_edges[node]]
+            edge.capacity -= 1
+            graph[node][edge.reverse].capacity += 1
+            node = previous_node
+
+    matches: List[tuple[int, int]] = []
+    for play_index in range(play_count):
+        for edge in graph[first_play + play_index]:
+            if first_scrobble <= edge.to < sink and edge.capacity == 0:
+                matches.append((play_index, edge.to - first_scrobble))
+                break
+    return matches
+
+
 # Compares recent completed Spotify plays with Last.fm and returns trailing unmatched evidence
 def evaluate_scrobble_health(spotify_plays: Sequence[SpotifyPlay], lastfm_scrobbles: Sequence[LastfmScrobble], now: Optional[float] = None, dead_period: Optional[int] = None, min_unmatched: Optional[int] = None, match_window: Optional[int] = None, lookback: Optional[int] = None) -> ScrobbleHealthEvaluation:
     current_time = time.time() if now is None else now
@@ -5086,18 +5897,9 @@ def evaluate_scrobble_health(spotify_plays: Sequence[SpotifyPlay], lastfm_scrobb
     if not recent_plays:
         latest_lastfm = max((scrobble.played_at for scrobble in recent_scrobbles), default=0)
         return ScrobbleHealthEvaluation("idle", latest_lastfm_at=latest_lastfm)
-    unused_scrobbles = set(range(len(recent_scrobbles)))
-    matched_play_indexes: set[int] = set()
-    matched_pairs: List[tuple[SpotifyPlay, LastfmScrobble]] = []
-    for play_index, play in enumerate(recent_plays):
-        play_key = (normalize_scrobble_text(play.artist), normalize_scrobble_text(play.track))
-        candidates = [index for index in unused_scrobbles if (normalize_scrobble_text(recent_scrobbles[index].artist), normalize_scrobble_text(recent_scrobbles[index].track)) == play_key and scrobble_time_distance(play, recent_scrobbles[index]) <= selected_match_window]
-        if not candidates:
-            continue
-        matched_index = min(candidates, key=lambda index: scrobble_time_distance(play, recent_scrobbles[index]))
-        unused_scrobbles.remove(matched_index)
-        matched_play_indexes.add(play_index)
-        matched_pairs.append((play, recent_scrobbles[matched_index]))
+    matched_indexes = match_scrobble_plays(recent_plays, recent_scrobbles, selected_match_window)
+    matched_play_indexes = {play_index for play_index, _ in matched_indexes}
+    matched_pairs = [(recent_plays[play_index], recent_scrobbles[scrobble_index]) for play_index, scrobble_index in matched_indexes]
     latest_match_at = max((recent_plays[index].played_at for index in matched_play_indexes), default=0)
     unmatched = tuple(play for index, play in enumerate(recent_plays) if index not in matched_play_indexes and play.played_at > latest_match_at)
     latest_spotify = recent_plays[-1].played_at
@@ -5148,7 +5950,7 @@ def render_scrobble_history_comparison(spotify_plays: Sequence[SpotifyPlay], las
 
 # Loads a persisted scrobble health state while ignoring malformed or unsupported data
 def load_scrobble_health_state(path: Union[str, Path]) -> dict:
-    default_state = {"status": "unknown", "last_notification_at": 0.0, "broken_since": 0.0, "broken_latest_spotify_at": 0.0}
+    default_state = {"status": "unknown", "last_notification_at": 0.0, "last_notification_attempt_at": 0.0, "pending_notification": "", "broken_since": 0.0, "broken_latest_spotify_at": 0.0}
     state_path = Path(path)
     if not state_path.is_file():
         return default_state
@@ -5161,7 +5963,15 @@ def load_scrobble_health_state(path: Union[str, Path]) -> dict:
     state = dict(default_state)
     if payload.get("status") in ("unknown", "idle", "healthy", "suspect", "broken"):
         state["status"] = payload["status"]
-    for key in ("last_notification_at", "broken_since", "broken_latest_spotify_at"):
+    if payload.get("pending_notification") in ("", "outage", "outage_reminder", "recovery"):
+        state["pending_notification"] = payload["pending_notification"]
+    if state["pending_notification"]:
+        pending_email = payload.get("pending_email")
+        pending_webhook = payload.get("pending_webhook")
+        if isinstance(pending_email, bool) and isinstance(pending_webhook, bool):
+            state["pending_email"] = pending_email
+            state["pending_webhook"] = pending_webhook
+    for key in ("last_notification_at", "last_notification_attempt_at", "broken_since", "broken_latest_spotify_at"):
         value = payload.get(key)
         if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
             state[key] = float(value)
@@ -5191,29 +6001,70 @@ def transition_scrobble_health_state(state: dict, evaluation: ScrobbleHealthEval
     selected_repeat = SCROBBLE_HEALTH_REPEAT_INTERVAL if repeat_interval is None else repeat_interval
     next_state = dict(state)
     previous_status = state.get("status", "unknown")
-    action = ""
+    pending_notification = str(state.get("pending_notification", ""))
+    previous_pending_notification = pending_notification
     if evaluation.status == "broken":
         if previous_status != "broken":
             next_state["broken_since"] = current_time
-            action = "outage"
-        elif selected_repeat > 0 and current_time - float(state.get("last_notification_at", 0)) >= selected_repeat:
-            action = "outage_reminder"
+            pending_notification = "outage"
+            next_state["last_notification_attempt_at"] = 0.0
+        elif not pending_notification and selected_repeat > 0 and float(state.get("last_notification_at", 0)) > 0 and current_time - float(state.get("last_notification_at", 0)) >= selected_repeat:
+            pending_notification = "outage_reminder"
+            next_state["last_notification_attempt_at"] = 0.0
         next_state["status"] = "broken"
         next_state["broken_latest_spotify_at"] = max(float(state.get("broken_latest_spotify_at", 0)), evaluation.latest_spotify_at)
     elif previous_status == "broken":
         confirmed_recovery = evaluation.status == "healthy" and evaluation.latest_match_at > float(state.get("broken_latest_spotify_at", 0))
         if confirmed_recovery:
             next_state.update({"status": "healthy", "broken_since": 0.0, "broken_latest_spotify_at": 0.0})
-            action = "recovery"
+            pending_notification = "recovery"
+            next_state["last_notification_attempt_at"] = 0.0
     else:
         next_state["status"] = evaluation.status
-    if action:
-        next_state["last_notification_at"] = current_time
+    next_state["pending_notification"] = pending_notification
+    if pending_notification != previous_pending_notification:
+        next_state.pop("pending_email", None)
+        next_state.pop("pending_webhook", None)
+    action = pending_notification
+    if action in ("outage", "outage_reminder") and evaluation.status != "broken":
+        action = ""
     return next_state, action
 
 
-# Sends one scrobble outage or recovery message through the configured channels
-def send_scrobble_health_notification(username: str, evaluation: ScrobbleHealthEvaluation, action: str) -> None:
+# Resolves which configured scrobble-health channels still need the pending alert
+def pending_scrobble_health_notification_channels(state: dict) -> tuple[bool, bool]:
+    email_enabled = bool(SCROBBLE_HEALTH_NOTIFICATION)
+    webhook_enabled = webhook_event_enabled("scrobble_health")
+    if "pending_email" not in state and "pending_webhook" not in state:
+        return email_enabled, webhook_enabled
+    return bool(state.get("pending_email")) and email_enabled, bool(state.get("pending_webhook")) and webhook_enabled
+
+
+# Records one notification attempt while keeping each failed delivery channel pending for the next check
+def record_scrobble_health_notification(state: dict, action: str, selected_channels: tuple[bool, bool], successful_channels: tuple[bool, bool], now: Optional[float] = None) -> dict:
+    next_state = dict(state)
+    if not action:
+        return next_state
+    current_time = time.time() if now is None else now
+    email_selected, webhook_selected = selected_channels
+    email_succeeded, webhook_succeeded = successful_channels
+    pending_email = email_selected and not email_succeeded
+    pending_webhook = webhook_selected and not webhook_succeeded
+    next_state["last_notification_attempt_at"] = current_time
+    if pending_email or pending_webhook:
+        next_state["pending_email"] = pending_email
+        next_state["pending_webhook"] = pending_webhook
+    else:
+        next_state["last_notification_at"] = current_time
+        if next_state.get("pending_notification") == action:
+            next_state["pending_notification"] = ""
+        next_state.pop("pending_email", None)
+        next_state.pop("pending_webhook", None)
+    return next_state
+
+
+# Sends one scrobble outage or recovery message and reports each selected channel's result
+def send_scrobble_health_notification(username: str, evaluation: ScrobbleHealthEvaluation, action: str, selected_channels: Optional[tuple[bool, bool]] = None) -> tuple[bool, bool]:
     profile_url = f"https://www.last.fm/user/{quote(username, safe='')}"
     settings_url = "https://www.last.fm/settings/applications"
     notification_timestamp = get_cur_ts()
@@ -5224,21 +6075,26 @@ def send_scrobble_health_notification(username: str, evaluation: ScrobbleHealthE
     else:
         count = len(evaluation.unmatched)
         oldest = get_date_from_ts(evaluation.unmatched[0].played_at) if evaluation.unmatched else "unknown"
-        examples = "\n".join(f"- {get_date_from_ts(play.played_at)} | {play.artist} - {play.track}" for play in evaluation.unmatched[-5:])
+        recent_missing = evaluation.unmatched[-5:]
+        examples = "\n".join(f"- {get_date_from_ts(play.played_at)} | {play.artist} - {play.track}" for play in recent_missing)
+        examples_heading = f"{len(recent_missing)} most recent missing plays:" if count > len(recent_missing) else "Missing plays:"
         reminder = " This is a repeat reminder because the outage is still unresolved." if action == "outage_reminder" else ""
         subject = f"spotify_monitor: Spotify scrobbling may be disconnected for {username}"
-        message = f"{count} consecutive completed Spotify plays were not found on Last.fm. The oldest missing play was recorded by Spotify at {oldest}.{reminder}\n\nRecent missing plays:\n{examples}\n\nReauthorize Spotify Scrobbling: {settings_url}\nLast.fm profile: {profile_url}"
+        message = f"{count} consecutive completed Spotify plays were not found on Last.fm. The first missing Spotify play was at {oldest}.{reminder}\n\n{examples_heading}\n{examples}\n\nReauthorize Spotify Scrobbling: {settings_url}\nLast.fm profile: {profile_url}"
         ntfy_tags = "warning,musical_note"
     body = f"{message}\n\nTimestamp: {notification_timestamp}"
     print(f"* {subject}\n{message}")
-    send_notification_channels("scrobble_health", subject, body, email_enabled=SCROBBLE_HEALTH_NOTIFICATION, ntfy_priority=4, ntfy_tags=ntfy_tags)
+    email_selected, webhook_selected = selected_channels if selected_channels is not None else (bool(SCROBBLE_HEALTH_NOTIFICATION), webhook_event_enabled("scrobble_health"))
+    successful_channels = send_notification_channels("scrobble_health", subject, body, email_enabled=email_selected, webhook_enabled=webhook_selected, ntfy_priority=4, ntfy_tags=ntfy_tags)
     print_cur_ts("\nTimestamp:\t\t\t")
+    return successful_channels
 
 
 # Runs the continuous Spotify-to-Last.fm scrobble health comparison
 def spotify_monitor_scrobble_health(username: str, state_path: Union[str, Path]) -> None:
     state = load_scrobble_health_state(state_path)
-    operational_error_notified = False
+    operational_error_email_notified = False
+    operational_error_webhook_notified = False
     operational_error_failures = 0
     first_successful_check = True
     print(f"* Scrobble health monitoring started for Last.fm profile {username}.")
@@ -5255,7 +6111,9 @@ def spotify_monitor_scrobble_health(username: str, state_path: Union[str, Path])
             evaluation = evaluate_scrobble_health(spotify_plays, lastfm_scrobbles)
             next_state, action = transition_scrobble_health_state(state, evaluation)
             if action:
-                send_scrobble_health_notification(username, evaluation, action)
+                selected_channels = pending_scrobble_health_notification_channels(next_state)
+                successful_channels = send_scrobble_health_notification(username, evaluation, action, selected_channels)
+                next_state = record_scrobble_health_notification(next_state, action, selected_channels, successful_channels)
             if next_state != state:
                 save_scrobble_health_state(state_path, next_state)
                 state = next_state
@@ -5281,7 +6139,8 @@ def spotify_monitor_scrobble_health(username: str, state_path: Union[str, Path])
                 if VERBOSE_MODE:
                     print_cur_ts("\nTimestamp:\t\t\t")
             first_successful_check = False
-            operational_error_notified = False
+            operational_error_email_notified = False
+            operational_error_webhook_notified = False
             operational_error_failures = 0
             time.sleep(SCROBBLE_HEALTH_CHECK_INTERVAL)
         except Exception as exc:
@@ -5293,11 +6152,15 @@ def spotify_monitor_scrobble_health(username: str, state_path: Union[str, Path])
             notifications_enabled = ERROR_NOTIFICATION or webhook_event_enabled("error")
             if operational_error_failures < SCROBBLE_HEALTH_ERROR_NOTIFICATION_FAILURES and notifications_enabled:
                 print(f"* Operational alert deferred until {SCROBBLE_HEALTH_ERROR_NOTIFICATION_FAILURES} consecutive check failures.")
-            if operational_error_failures >= SCROBBLE_HEALTH_ERROR_NOTIFICATION_FAILURES and not operational_error_notified and notifications_enabled:
+            if operational_error_failures >= SCROBBLE_HEALTH_ERROR_NOTIFICATION_FAILURES and notifications_enabled:
                 subject = "spotify_monitor: scrobble health check error"
                 body = f"The Spotify-to-Last.fm comparison failed {operational_error_failures} consecutive times. Existing outage state was preserved.\n\n{recovery_advice.summary}\nTo fix: {recovery_advice.fix}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                send_notification_channels("error", subject, body, email_enabled=ERROR_NOTIFICATION)
-                operational_error_notified = True
+                email_pending = ERROR_NOTIFICATION and not operational_error_email_notified
+                webhook_pending = webhook_event_enabled("error") and not operational_error_webhook_notified
+                if email_pending or webhook_pending:
+                    email_succeeded, webhook_succeeded = send_notification_channels("error", subject, body, email_enabled=email_pending, webhook_enabled=webhook_pending)
+                    operational_error_email_notified = operational_error_email_notified or email_succeeded
+                    operational_error_webhook_notified = operational_error_webhook_notified or webhook_succeeded
             print_cur_ts("Timestamp:\t\t\t")
             time.sleep(SPOTIFY_ERROR_INTERVAL)
 
@@ -5629,7 +6492,9 @@ def build_clienttoken_request_protobuf(app_version, device_id, system_id, cpu_ar
 def spotify_get_access_token_from_client(device_id, system_id, user_uri_id, refresh_token, client_token):
     global SP_CACHED_ACCESS_TOKEN, SP_CACHED_REFRESH_TOKEN, SP_ACCESS_TOKEN_EXPIRES_AT
 
-    if SP_CACHED_ACCESS_TOKEN and time.time() < SP_ACCESS_TOKEN_EXPIRES_AT and check_token_validity(SP_CACHED_ACCESS_TOKEN, user_agent=USER_AGENT):
+    # Trusted on its cached expiry rather than probed every cycle. A token Spotify rejects early surfaces
+    # as a 401 from the actual request, which clears this cache so the next cycle refreshes it
+    if SP_CACHED_ACCESS_TOKEN and time.time() < SP_ACCESS_TOKEN_EXPIRES_AT:
         debug_print("Using cached Spotify access token (client source)")
         return SP_CACHED_ACCESS_TOKEN
 
@@ -5661,10 +6526,8 @@ def spotify_get_access_token_from_client(device_id, system_id, user_uri_id, refr
         "Accept-Encoding": "gzip, deflate, br, zstd"
     }
 
+    alarm_state = _start_timeout_alarm(FUNCTION_TIMEOUT + 2)
     try:
-        if platform.system() != 'Windows':
-            signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(FUNCTION_TIMEOUT + 2)
         debug_print(f"HTTP POST {LOGIN_URL} [client auth] headers={sanitize_debug_headers(headers)} payload_len={len(protobuf_body)}")
         response = req.post(LOGIN_URL, headers=headers, data=protobuf_body, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
         debug_print(f"HTTP POST {LOGIN_URL} [client auth] -> {response.status_code}")
@@ -5675,8 +6538,7 @@ def spotify_get_access_token_from_client(device_id, system_id, user_uri_id, refr
         debug_print(f"HTTP POST {LOGIN_URL} [client auth] failed: {e}")
         raise Exception(f"spotify_get_access_token_from_client() network request error: {e}")
     finally:
-        if platform.system() != 'Windows':
-            signal.alarm(0)
+        _restore_timeout_alarm(alarm_state)
 
     if response.status_code != 200:
         if response.headers.get("client-token-error") == "INVALID_CLIENTTOKEN":
@@ -5757,10 +6619,8 @@ def spotify_get_client_token(app_version, device_id, system_id, **device_overrid
         "Accept-Encoding": "gzip, deflate, br, zstd",
     }
 
+    alarm_state = _start_timeout_alarm(FUNCTION_TIMEOUT + 2)
     try:
-        if platform.system() != 'Windows':
-            signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(FUNCTION_TIMEOUT + 2)
         debug_print(f"HTTP POST {CLIENTTOKEN_URL} [client token] app_version={app_version}, device_overrides={device_overrides}, payload_len={len(body)}")
         response = req.post(CLIENTTOKEN_URL, headers=headers, data=body, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
         debug_print(f"HTTP POST {CLIENTTOKEN_URL} [client token] -> {response.status_code}")
@@ -5771,8 +6631,7 @@ def spotify_get_client_token(app_version, device_id, system_id, **device_overrid
         debug_print(f"HTTP POST {CLIENTTOKEN_URL} [client token] failed: {e}")
         raise Exception(f"spotify_get_client_token() network request error: {e}")
     finally:
-        if platform.system() != 'Windows':
-            signal.alarm(0)
+        _restore_timeout_alarm(alarm_state)
 
     if response.status_code != 200:
         raise req.HTTPError(f"Spotify client-token request failed with HTTP {response.status_code}", response=response)
@@ -5909,33 +6768,26 @@ def spotify_get_friends_json(access_token):
     return friends_json
 
 
-# Converts Spotify URI (e.g. spotify:user:username) to URL (e.g. https://open.spotify.com/user/username)
+# Converts Spotify URI (e.g. spotify:user:username) to URL (e.g. https://open.spotify.com/user/username), returning an empty string when the reference cannot be parsed
 def spotify_convert_uri_to_url(uri):
     # add si parameter so link opens in native Spotify app after clicking
     si = "?si=1"
     # si=""
 
-    uri = uri or ''
-    url = ""
     if not isinstance(uri, str):
-        return url
-    if "spotify:user:" in uri:
-        s_id = uri.split(':', 2)[2]
-        url = f"https://open.spotify.com/user/{s_id}{si}"
-    elif "spotify:artist:" in uri:
-        s_id = uri.split(':', 2)[2]
-        url = f"https://open.spotify.com/artist/{s_id}{si}"
-    elif "spotify:track:" in uri:
-        s_id = uri.split(':', 2)[2]
-        url = f"https://open.spotify.com/track/{s_id}{si}"
-    elif "spotify:album:" in uri:
-        s_id = uri.split(':', 2)[2]
-        url = f"https://open.spotify.com/album/{s_id}{si}"
-    elif "spotify:playlist:" in uri:
-        s_id = uri.split(':', 2)[2]
-        url = f"https://open.spotify.com/playlist/{s_id}{si}"
+        return ""
 
-    return url
+    # Whole colon-separated parts are matched so an object ID that merely contains "spotify:user:" or
+    # any other object prefix cannot change how the reference is read
+    parts = uri.strip().split(":")
+    if len(parts) != 3 or parts[0].casefold() != "spotify":
+        return ""
+
+    object_type = parts[1].casefold()
+    if object_type not in SPOTIFY_OBJECT_TYPES or not parts[2]:
+        return ""
+
+    return f"https://open.spotify.com/{object_type}/{parts[2]}{si}"
 
 
 # Returns list of Spotify friends with normalized playlist owner metadata
@@ -5943,7 +6795,7 @@ def spotify_list_friends(friend_activity, access_token):
 
     print(f"Number of friends:\t\t{len(friend_activity['friends'])}\n")
 
-    for index, friend in enumerate(friend_activity["friends"]):
+    for friend in friend_activity["friends"]:
         sp_uri = friend["user"].get("uri").split("spotify:user:", 1)[1]
         sp_username = friend["user"].get("name")
         sp_artist = friend["track"]["artist"].get("name")
@@ -6087,6 +6939,7 @@ def build_startup_summary(target: str, config_path, env_path, output_path) -> Li
             StartupSummaryRow("Notifications (webhook)", notification_state_webhook, concise=True),
             StartupSummaryRow("Output", output_state, concise=True, full=False, log=False),
             StartupSummaryRow("Output logging", str(output_path) if output_path else "Disabled", concise=False),
+            StartupSummaryRow("ASCII log separators", f"{ascii_log_separators_enabled()} (mode: {ASCII_LOG_SEPARATORS})", concise=False),
             StartupSummaryRow("State file", SCROBBLE_HEALTH_STATE_FILE, concise=True),
             StartupSummaryRow("Config", str(config_path) if config_path else "None", concise=True),
             StartupSummaryRow("Dotenv", str(env_path) if env_path else "None", concise=True),
@@ -6107,6 +6960,7 @@ def build_startup_summary(target: str, config_path, env_path, output_path) -> Li
         StartupSummaryRow("Webhook URL", WEBHOOK_URL or "Invalid", concise=False),
         StartupSummaryRow("Output", output_state, concise=True, full=False, log=False),
         StartupSummaryRow("Output logging", str(output_path) if output_path else "Disabled", concise=False),
+        StartupSummaryRow("ASCII log separators", f"{ascii_log_separators_enabled()} (mode: {ASCII_LOG_SEPARATORS})", concise=False),
         StartupSummaryRow("Config", str(config_path) if config_path else "None", concise=True),
         StartupSummaryRow("Dotenv", str(env_path) if env_path else "None", concise=True),
         StartupSummaryRow("Metadata backend", spotify_get_metadata_backend_description(), concise=True),
@@ -6757,9 +7611,7 @@ def is_user_removed(access_token, user_uri_id, oauth_app=False):
             "Client-Id": SP_CACHED_CLIENT_ID
         })
 
-    if platform.system() != 'Windows':
-        signal.signal(signal.SIGALRM, timeout_handler)
-        signal.alarm(FUNCTION_TIMEOUT + 2)
+    alarm_state = _start_timeout_alarm(FUNCTION_TIMEOUT + 2)
 
     try:
         temp_session = req.Session()
@@ -6786,19 +7638,28 @@ def is_user_removed(access_token, user_uri_id, oauth_app=False):
     except Exception:
         return False
     finally:
-        if platform.system() != 'Windows':
-            signal.alarm(0)
+        _restore_timeout_alarm(alarm_state)
 
 
+# Builds a safe Spotify track URI for local playback integrations
+def spotify_playback_uri(sp_track_uri_id) -> str:
+    if not isinstance(sp_track_uri_id, str) or re.fullmatch(r"[A-Za-z0-9]+", sp_track_uri_id) is None:
+        raise ValueError("Spotify playback track ID must contain only ASCII letters and digits")
+    return f"spotify:track:{sp_track_uri_id}"
+
+
+# Opens one validated Spotify track through the selected macOS integration
 def spotify_macos_play_song(sp_track_uri_id, method=SPOTIFY_MACOS_PLAYING_METHOD):
+    track_uri = spotify_playback_uri(sp_track_uri_id)
     if method == "apple-script":   # apple-script
-        script = f'tell app "Spotify" to play track "spotify:track:{sp_track_uri_id}"'
+        script = f'tell app "Spotify" to play track "{track_uri}"'
         proc = subprocess.Popen(['osascript', '-'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
         stdout, stderr = proc.communicate(script)
     else:                          # trigger-url - just trigger track URL in the client
-        subprocess.call(('open', spotify_convert_uri_to_url(f"spotify:track:{sp_track_uri_id}")))
+        subprocess.call(('open', spotify_convert_uri_to_url(track_uri)))
 
 
+# Applies a play or pause action through the selected macOS integration
 def spotify_macos_play_pause(action, method=SPOTIFY_MACOS_PLAYING_METHOD):
     if method == "apple-script":   # apple-script
         if str(action).lower() == "pause":
@@ -6811,37 +7672,43 @@ def spotify_macos_play_pause(action, method=SPOTIFY_MACOS_PLAYING_METHOD):
             stdout, stderr = proc.communicate(script)
 
 
+# Opens one validated Spotify track through the selected Linux integration
 def spotify_linux_play_song(sp_track_uri_id, method=SPOTIFY_LINUX_PLAYING_METHOD):
+    track_uri = spotify_playback_uri(sp_track_uri_id)
     if method == "dbus-send":      # dbus-send
-        subprocess.call((f"dbus-send --type=method_call --dest=org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.OpenUri string:'spotify:track:{sp_track_uri_id}'"), shell=True)
+        subprocess.call(("dbus-send", "--type=method_call", "--dest=org.mpris.MediaPlayer2.spotify", "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player.OpenUri", f"string:{track_uri}"))
     elif method == "qdbus":        # qdbus
-        subprocess.call((f"qdbus org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.OpenUri spotify:track:{sp_track_uri_id}"), shell=True)
+        subprocess.call(("qdbus", "org.mpris.MediaPlayer2.spotify", "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player.OpenUri", track_uri))
     else:                          # trigger-url - just trigger track URL in the client
-        subprocess.call(('xdg-open', spotify_convert_uri_to_url(f"spotify:track:{sp_track_uri_id}")), stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+        subprocess.call(('xdg-open', spotify_convert_uri_to_url(track_uri)), stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
 
 
+# Applies a play or pause action through the selected Linux integration
 def spotify_linux_play_pause(action, method=SPOTIFY_LINUX_PLAYING_METHOD):
     if method == "dbus-send":      # dbus-send
         if str(action).lower() == "pause":
-            subprocess.call((f"dbus-send --type=method_call --dest=org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.Pause"), shell=True)
+            subprocess.call(("dbus-send", "--type=method_call", "--dest=org.mpris.MediaPlayer2.spotify", "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player.Pause"))
         elif str(action).lower() == "play":
-            subprocess.call((f"dbus-send --type=method_call --dest=org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.Play"), shell=True)
+            subprocess.call(("dbus-send", "--type=method_call", "--dest=org.mpris.MediaPlayer2.spotify", "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player.Play"))
     elif method == "qdbus":        # qdbus
         if str(action).lower() == "pause":
-            subprocess.call((f"qdbus org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.Pause"), shell=True)
+            subprocess.call(("qdbus", "org.mpris.MediaPlayer2.spotify", "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player.Pause"))
         elif str(action).lower() == "play":
-            subprocess.call((f"qdbus org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player.Play"), shell=True)
+            subprocess.call(("qdbus", "org.mpris.MediaPlayer2.spotify", "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player.Play"))
 
 
+# Opens one validated Spotify track through the selected Windows integration
 def spotify_win_play_song(sp_track_uri_id, method=SPOTIFY_WINDOWS_PLAYING_METHOD):
     WIN_SPOTIFY_APP_PATH = r'%APPDATA%\Spotify\Spotify.exe'
+    track_uri = spotify_playback_uri(sp_track_uri_id)
 
     if method == "start-uri":      # start-uri
-        subprocess.call((f"start spotify:track:{sp_track_uri_id}"), shell=True)
+        # os.startfile exists only on Windows, so the lookup stays dynamic to keep the type checker quiet on other platforms
+        getattr(os, "startfile")(track_uri)  # noqa: B009
     elif method == "spotify-cmd":  # spotify-cmd
-        subprocess.call((f"{WIN_SPOTIFY_APP_PATH} --uri=spotify:track:{sp_track_uri_id}"), shell=True)
+        subprocess.call((os.path.expandvars(WIN_SPOTIFY_APP_PATH), f"--uri={track_uri}"))
     else:                          # trigger-url - just trigger track URL in the client
-        getattr(os, "startfile")(spotify_convert_uri_to_url(f"spotify:track:{sp_track_uri_id}"))
+        getattr(os, "startfile")(spotify_convert_uri_to_url(track_uri))  # noqa: B009
 
 
 # Finds one optional config file using the selected default filename
@@ -6880,17 +7747,56 @@ def find_scrobble_health_config_file(cli_path=None):
     return _find_config_file(cli_path, SCROBBLE_HEALTH_CONFIG_FILENAME)
 
 
-# Loads one UTF-8 Python config atomically and optionally collects structured failures
-def load_config_file(config_path, namespace=None, error_out=None, report_errors=True):
+# Returns the --config-file value from raw arguments, before argparse has run
+def early_config_file_argument(arguments=None):
+    values = list(sys.argv[1:] if arguments is None else arguments)
+    for index, argument in enumerate(values):
+        if argument == "--config-file" and index + 1 < len(values):
+            return values[index + 1]
+        if argument.startswith("--config-file="):
+            return argument.split("=", 1)[1]
+    return None
+
+
+# Applies the config settings that take effect before argument parsing, leaving errors to the later load
+# The startup banner and the screen clear both run before argparse, so colour has to be resolved here or a
+# configured COLORED_OUTPUT would only take effect after the first output was already written
+def apply_early_output_config() -> None:
+    global CLEAR_SCREEN, COLORED_OUTPUT
+    try:
+        cli_path = early_config_file_argument()
+        if cli_path is not None and cli_path.casefold() == "none":
+            # Config discovery is disabled for this run, so there is nothing to peek at
+            return
+        scrobble_health_cli = "scrobble_health" in sys.argv[1:] or "--authorize-scrobble-health" in sys.argv[1:] or "--setup-scrobble-health" in sys.argv[1:]
+        expanded_path = os.path.expanduser(cli_path) if cli_path else None
+        config_path = find_scrobble_health_config_file(expanded_path) if scrobble_health_cli else find_config_file(expanded_path)
+        if not config_path:
+            return
+        # Reading a config no longer runs it, so this early peek cannot have side effects
+        values = parse_config_content(Path(config_path).read_text(encoding="utf-8"), str(config_path))
+    except Exception:
+        # A broken or unreadable config is reported with full detail once arguments are parsed
+        return
+    if isinstance(values.get("CLEAR_SCREEN"), bool):
+        CLEAR_SCREEN = values["CLEAR_SCREEN"]
+    if isinstance(values.get("COLORED_OUTPUT"), bool):
+        COLORED_OUTPUT = values["COLORED_OUTPUT"]
+
+
+# Loads one UTF-8 literal config atomically and optionally collects structured failures and ignored settings
+def load_config_file(config_path, namespace=None, error_out=None, report_errors=True, retired_out=None):
     target_namespace = globals() if namespace is None else namespace
+    retired_settings: List[str] = []
     try:
         with open(config_path, "r", encoding="utf-8") as config_file:
             source = config_file.read()
-        compiled = compile(source, str(config_path), "exec")
-        candidate_namespace = dict(target_namespace)
-        exec(compiled, candidate_namespace)
-        candidate_namespace.pop("__builtins__", None)
-        target_namespace.update(candidate_namespace)
+        target_namespace.update(parse_config_content(source, str(config_path), retired_settings))
+        if retired_out is not None:
+            retired_out.extend(retired_settings)
+        if retired_settings and report_errors:
+            quoted_path = "'" + str(config_path) + "'"
+            print(f"* Note: {describe_retired_settings(retired_settings, quoted_path)}")
         return True
     except SyntaxError as exc:
         details = [f"Config file '{config_path}' has invalid Python syntax"]
@@ -6918,6 +7824,16 @@ def load_config_file(config_path, namespace=None, error_out=None, report_errors=
             print("To fix: Save the file as UTF-8 then retry.")
             print(f"Guide: {CONFIG_GUIDE_URL}")
         return False
+    except ValueError as exc:
+        detail = f"Config file '{config_path}' contains unsupported content: {exc}"
+        advice = classify_recovery_error(exc, "config_invalid", detail)
+        if error_out is not None:
+            error_out.append(advice)
+        if report_errors:
+            print(f"* Error: {detail}")
+            print("To fix: Use only documented NAME = literal assignments from the generated configuration then retry.")
+            print(f"Guide: {CONFIG_GUIDE_URL}")
+        return False
     except Exception as exc:
         advice = classify_recovery_error(exc, "config_invalid", f"Config file '{config_path}' failed with {type(exc).__name__}: {exc}")
         if error_out is not None:
@@ -6932,6 +7848,15 @@ def make_doctor_check(section: str, status: str, label: str, detail: Any = "", a
     if status not in ("PASS", "WARN", "FAIL"):
         raise ValueError(f"Unsupported doctor status: {status}")
     return DoctorCheck(section, status, sanitize_error_text(label), sanitize_error_text(detail), advice)
+
+
+# Explains what missing artwork support means for the current NTFY_IMAGES setting and how to install it
+def doctor_notification_images_detail() -> str:
+    install_command = notification_images_install_command()
+    remedy = f"Install it with: {install_command}" if install_command else "The published Docker images already include it, so rebuild from one of them"
+    if NTFY_IMAGES:
+        return f"NTFY_IMAGES is enabled, so ntfy alerts are sent as text only until Pillow is installed. Normal monitoring is unaffected. {remedy}"
+    return f"Required only when NTFY_IMAGES attaches artwork to ntfy alerts, which is currently disabled. Normal monitoring is unaffected. {remedy}"
 
 
 # Checks the active Python version and required or optional runtime dependencies
@@ -6958,7 +7883,7 @@ def doctor_check_environment(version_info=None, spec_finder: Optional[Callable[[
             advice = make_recovery_advice("dependency.missing", f"Required dependency {package_name} is missing", f"Install {package_name} then retry", False)
             checks.append(make_doctor_check("Environment", "FAIL", advice.summary, advice=advice))
 
-    optional = (("spotipy", "Spotipy", "legacy OAuth metadata only"), ("pycookiecheat", "pycookiecheat", "Chromium browser import only"))
+    optional = (("spotipy", "Spotipy", "Used only for legacy OAuth metadata"), ("pycookiecheat", "pycookiecheat", "Used only for importing cookies from Chromium-based browsers. Firefox cookie import does not need it"), ("PIL", "Pillow", "Used only for artwork attachments in ntfy alerts"))
     for module_name, package_name, purpose in optional:
         try:
             present = find_spec(module_name) is not None
@@ -6967,7 +7892,13 @@ def doctor_check_environment(version_info=None, spec_finder: Optional[Callable[[
         if present:
             checks.append(make_doctor_check("Environment", "PASS", f"Optional dependency {package_name} is installed", purpose))
         else:
-            checks.append(make_doctor_check("Environment", "WARN", f"Optional dependency {package_name} is not installed", f"Optional: {purpose}. Normal monitoring is unaffected when this feature is unused"))
+            if module_name == "pycookiecheat":
+                missing_purpose = "Required only for importing cookies from Chromium-based browsers. Normal monitoring is unaffected. Firefox cookie import is also unaffected"
+            elif module_name == "PIL":
+                missing_purpose = doctor_notification_images_detail()
+            else:
+                missing_purpose = f"Optional: {purpose}. Normal monitoring is unaffected when this feature is unused"
+            checks.append(make_doctor_check("Environment", "WARN", f"Optional dependency {package_name} is not installed", missing_purpose))
     return checks
 
 
@@ -6996,19 +7927,106 @@ def nearest_existing_parent(path: Path) -> Path:
     return candidate
 
 
+# Resolves the target or mode-specific suffix used by the runtime log file
+def resolve_log_file_suffix(target_value=None, lastfm_username=None) -> str:
+    if FILE_SUFFIX:
+        return str(FILE_SUFFIX)
+    if lastfm_username is not None:
+        safe_lastfm_suffix = re.sub(r"[^A-Za-z0-9._-]+", "_", str(lastfm_username)).strip("._")
+        return f"lastfm_{safe_lastfm_suffix or 'scrobble_health'}"
+    if target_value:
+        return resolve_target_user_id(target_value, None) or ""
+    return ""
+
+
+# Builds the exact log path used for one effective suffix
+def build_log_path(base_path, suffix: str) -> Path:
+    log_path = Path(os.path.expanduser(str(base_path)))
+    if log_path.suffix == "" and suffix:
+        log_path = log_path.parent / f"{log_path.name}_{suffix}.log"
+    return log_path
+
+
+# Returns all type and range errors in settings that control runtime timing or counts
+def runtime_configuration_errors() -> List[str]:
+    errors: List[str] = []
+    positive_numbers = (("SPOTIFY_CHECK_INTERVAL", SPOTIFY_CHECK_INTERVAL), ("SPOTIFY_ERROR_INTERVAL", SPOTIFY_ERROR_INTERVAL), ("SPOTIFY_INACTIVITY_CHECK", SPOTIFY_INACTIVITY_CHECK), ("SPOTIFY_DISAPPEARED_CHECK_INTERVAL", SPOTIFY_DISAPPEARED_CHECK_INTERVAL), ("SCROBBLE_HEALTH_CHECK_INTERVAL", SCROBBLE_HEALTH_CHECK_INTERVAL), ("SCROBBLE_HEALTH_DEAD_PERIOD", SCROBBLE_HEALTH_DEAD_PERIOD), ("SCROBBLE_HEALTH_MATCH_WINDOW", SCROBBLE_HEALTH_MATCH_WINDOW), ("SCROBBLE_HEALTH_LOOKBACK", SCROBBLE_HEALTH_LOOKBACK), ("CHECK_INTERNET_TIMEOUT", CHECK_INTERNET_TIMEOUT), ("TOKEN_RETRY_TIMEOUT", TOKEN_RETRY_TIMEOUT))
+    nonnegative_numbers = (("LIVENESS_CHECK_INTERVAL", LIVENESS_CHECK_INTERVAL), ("SCROBBLE_HEALTH_REPEAT_INTERVAL", SCROBBLE_HEALTH_REPEAT_INTERVAL), ("SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE", SP_USER_GOT_OFFLINE_DELAY_BEFORE_PAUSE))
+    positive_integers = (("SCROBBLE_HEALTH_MIN_UNMATCHED", SCROBBLE_HEALTH_MIN_UNMATCHED), ("ERROR_500_NUMBER_LIMIT", ERROR_500_NUMBER_LIMIT), ("ERROR_NETWORK_ISSUES_NUMBER_LIMIT", ERROR_NETWORK_ISSUES_NUMBER_LIMIT), ("TOKEN_MAX_RETRIES", TOKEN_MAX_RETRIES))
+    for name, value in positive_numbers:
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
+            errors.append(f"{name} must be a number greater than zero, not {value!r}")
+    for name, value in nonnegative_numbers:
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
+            errors.append(f"{name} must be a number zero or greater, not {value!r}")
+    for name, value in positive_integers:
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            errors.append(f"{name} must be an integer greater than zero, not {value!r}")
+    if not isinstance(SMTP_PORT, int) or isinstance(SMTP_PORT, bool) or not 1 <= SMTP_PORT <= 65535:
+        errors.append(f"SMTP_PORT must be an integer from 1 through 65535, not {SMTP_PORT!r}")
+    if SP_USER_GOT_OFFLINE_TRACK_ID and (not isinstance(SP_USER_GOT_OFFLINE_TRACK_ID, str) or re.fullmatch(r"[A-Za-z0-9]+", SP_USER_GOT_OFFLINE_TRACK_ID) is None):
+        errors.append("SP_USER_GOT_OFFLINE_TRACK_ID must be a raw Spotify track ID containing only ASCII letters and digits")
+    return errors
+
+
+# Returns whether one secret holds a usable value, treating the shipped 'your_...' defaults as unset
+def doctor_secret_is_set(value) -> bool:
+    return isinstance(value, str) and bool(value.strip()) and not value.strip().startswith("your_")
+
+
+# Groups configured secret names by the source each value actually came from
+def doctor_secret_sources(env_path=None) -> Tuple[List[str], List[str], List[str]]:
+    file_keys = set()
+    if env_path:
+        try:
+            from dotenv import dotenv_values
+            file_keys = {key for key, value in dotenv_values(env_path, interpolate=False).items() if value}
+        except Exception:
+            file_keys = set()
+    from_file: List[str] = []
+    from_environment: List[str] = []
+    from_settings: List[str] = []
+    for key in SECRET_KEYS:
+        if not doctor_secret_is_set(globals().get(key)):
+            continue
+        if key in file_keys:
+            from_file.append(key)
+        elif os.environ.get(key):
+            from_environment.append(key)
+        else:
+            from_settings.append(key)
+    return from_file, from_environment, from_settings
+
+
+# Reports which secrets are in effect and where each one was read from
+def doctor_secret_checks(env_path=None) -> List[DoctorCheck]:
+    from_file, from_environment, from_settings = doctor_secret_sources(env_path)
+    checks: List[DoctorCheck] = []
+    if from_file:
+        checks.append(make_doctor_check("Configuration", "PASS", "Secrets loaded from the dotenv file", ", ".join(from_file)))
+    if from_environment:
+        checks.append(make_doctor_check("Configuration", "PASS", "Secrets loaded from the environment", ", ".join(from_environment)))
+    if from_settings:
+        checks.append(make_doctor_check("Configuration", "PASS", "Secrets loaded from the configuration file or command line", ", ".join(from_settings)))
+    if not checks:
+        checks.append(make_doctor_check("Configuration", "PASS", "No secrets loaded", "Nothing was read from a dotenv file, the environment or the command line"))
+    return checks
+
+
 # Validates effective config values and configured file destinations without writing them
-def doctor_check_configuration(config_path=None, env_path=None, startup_checks: Sequence[DoctorCheck] = ()) -> List[DoctorCheck]:
+def doctor_check_configuration(config_path=None, env_path=None, startup_checks: Sequence[DoctorCheck] = (), target_value=None, lastfm_username=None) -> List[DoctorCheck]:
     checks = list(startup_checks)
     if not any(check.section == "Configuration" and "configuration file" in check.label.lower() for check in checks):
         if config_path:
-            checks.append(make_doctor_check("Configuration", "PASS", "Configuration file loaded", str(config_path)))
+            checks.append(make_doctor_check("Configuration", "PASS", "Configuration file loaded", f"Path: {config_path}"))
         else:
             checks.append(make_doctor_check("Configuration", "PASS", "No configuration file selected", "Using built-in defaults and command-line overrides"))
     if not any(check.section == "Configuration" and "dotenv" in check.label.lower() for check in checks):
         if env_path:
-            checks.append(make_doctor_check("Configuration", "PASS", "Dotenv file loaded", str(env_path)))
+            checks.append(make_doctor_check("Configuration", "PASS", "Dotenv file loaded", f"Path: {env_path}"))
         else:
             checks.append(make_doctor_check("Configuration", "PASS", "No dotenv file selected", "Using environment variables and other configured sources"))
+    checks.extend(doctor_secret_checks(env_path))
 
     if MONITOR_MODE != "scrobble_health" and TOKEN_SOURCE not in ("cookie", "client"):
         advice = classify_recovery_error(context="config_invalid", detail=f"TOKEN_SOURCE must be cookie or client, not {TOKEN_SOURCE!r}")
@@ -7025,14 +8043,9 @@ def doctor_check_configuration(config_path=None, env_path=None, startup_checks: 
             advice = classify_recovery_error(context="config_invalid", detail="TOTP_VERSION must be a positive integer plus TOTP_SECRET_CIPHER_BYTES a non-empty sequence of integers; refresh them with debug/spotify_monitor_secret_grabber.py if Spotify rotated the web-player secret")
             checks.append(make_doctor_check("Configuration", "FAIL", "Web-player TOTP parameters are invalid", advice.detail, advice))
 
-    numeric_values = (("SPOTIFY_CHECK_INTERVAL", SPOTIFY_CHECK_INTERVAL, 1, None), ("SPOTIFY_ERROR_INTERVAL", SPOTIFY_ERROR_INTERVAL, 0, None), ("SPOTIFY_INACTIVITY_CHECK", SPOTIFY_INACTIVITY_CHECK, 0, None), ("SPOTIFY_DISAPPEARED_CHECK_INTERVAL", SPOTIFY_DISAPPEARED_CHECK_INTERVAL, 0, None), ("SCROBBLE_HEALTH_CHECK_INTERVAL", SCROBBLE_HEALTH_CHECK_INTERVAL, 1, None), ("SCROBBLE_HEALTH_DEAD_PERIOD", SCROBBLE_HEALTH_DEAD_PERIOD, 1, None), ("SCROBBLE_HEALTH_MIN_UNMATCHED", SCROBBLE_HEALTH_MIN_UNMATCHED, 1, None), ("SCROBBLE_HEALTH_MATCH_WINDOW", SCROBBLE_HEALTH_MATCH_WINDOW, 1, None), ("SCROBBLE_HEALTH_LOOKBACK", SCROBBLE_HEALTH_LOOKBACK, 1, None), ("SCROBBLE_HEALTH_REPEAT_INTERVAL", SCROBBLE_HEALTH_REPEAT_INTERVAL, 0, None), ("SMTP_PORT", SMTP_PORT, 1, 65535))
-    invalid_numeric = []
-    for name, value, minimum, maximum in numeric_values:
-        valid = isinstance(value, (int, float)) and not isinstance(value, bool) and value >= minimum and (maximum is None or value <= maximum)
-        if not valid:
-            invalid_numeric.append(f"{name}={value!r}")
-    if invalid_numeric:
-        advice = classify_recovery_error(context="config_invalid", detail="Invalid numeric settings: " + ", ".join(invalid_numeric))
+    numeric_errors = runtime_configuration_errors()
+    if numeric_errors:
+        advice = classify_recovery_error(context="config_invalid", detail="Invalid numeric settings: " + "; ".join(numeric_errors))
         checks.append(make_doctor_check("Configuration", "FAIL", "One or more numeric settings are invalid", advice.detail, advice))
     else:
         checks.append(make_doctor_check("Configuration", "PASS", "Numeric intervals and ports are valid"))
@@ -7040,7 +8053,7 @@ def doctor_check_configuration(config_path=None, env_path=None, startup_checks: 
     if MONITOR_LIST_FILE:
         monitor_path = Path(MONITOR_LIST_FILE).expanduser()
         if monitor_path.is_file() and os.access(monitor_path, os.R_OK):
-            checks.append(make_doctor_check("Configuration", "PASS", "Monitored-track list is readable", str(monitor_path)))
+            checks.append(make_doctor_check("Configuration", "PASS", "Monitored-track list is readable", f"Path: {monitor_path}"))
         else:
             advice = classify_recovery_error(context="file_read", detail=f"Monitored-track list is unreadable: {monitor_path}")
             checks.append(make_doctor_check("Configuration", "FAIL", advice.summary, advice.detail, advice))
@@ -7049,11 +8062,18 @@ def doctor_check_configuration(config_path=None, env_path=None, startup_checks: 
     if CSV_FILE:
         destinations.append(("CSV destination", Path(CSV_FILE)))
     if not DISABLE_LOGGING and SP_LOGFILE:
-        destinations.append(("Log destination", Path(SP_LOGFILE)))
+        try:
+            log_suffix = resolve_log_file_suffix(target_value, lastfm_username)
+        except ValueError:
+            log_suffix = ""
+        if log_suffix:
+            destinations.append(("Log destination", build_log_path(SP_LOGFILE, log_suffix)))
+        else:
+            checks.append(make_doctor_check("Configuration", "PASS", "Log destination will be finalized after a target is selected", f"Base path: {Path(os.path.expanduser(SP_LOGFILE))}"))
     for label, destination in destinations:
         parent = nearest_existing_parent(destination)
         if parent.is_dir() and os.access(parent, os.W_OK):
-            checks.append(make_doctor_check("Configuration", "PASS", f"{label} appears writable", str(destination.expanduser())))
+            checks.append(make_doctor_check("Configuration", "PASS", f"{label} appears writable", f"Path: {destination.expanduser()}"))
         else:
             advice = classify_recovery_error(context="file_write", detail=f"{label} is not writable: {destination.expanduser()}")
             checks.append(make_doctor_check("Configuration", "FAIL", advice.summary, advice.detail, advice))
@@ -7224,7 +8244,7 @@ def doctor_check_notifications() -> List[DoctorCheck]:
             smtp_object.quit()
         finally:
             smtp_object = None
-        return [make_doctor_check("Notifications", "PASS", "SMTP connection and login succeeded", "No email was sent during this passive check")]
+        return [make_doctor_check("Notifications", "PASS", SMTP_READY_CHECK_LABEL, "No email was sent during this passive check")]
     except Exception as exc:
         advice = classify_recovery_error(exc, "smtp")
         return [make_doctor_check("Notifications", "FAIL", advice.summary, advice.detail, advice)]
@@ -7257,7 +8277,7 @@ def doctor_check_webhook_notifications() -> List[DoctorCheck]:
     if not webhook_notifications_enabled():
         advice = make_recovery_advice("webhook.invalid", "Webhook alerts are on but no alert types are selected", "Turn on at least one webhook alert in spotify_monitor.conf or set WEBHOOK_ENABLED to False", False)
         return [make_doctor_check("Notifications", "WARN", advice.summary, "No webhook was sent during this passive check", advice)]
-    return [make_doctor_check("Notifications", "PASS", "Webhook URL and alert choices look valid", "The private link was not displayed. No webhook was sent during this passive check")]
+    return [make_doctor_check("Notifications", "PASS", f"{WEBHOOK_READY_CHECK_LABEL} for {webhook_provider_display_name()}", "The private link was not displayed. No webhook was sent during this passive check")]
 
 
 # Prompts for explicit doctor delivery consent and defaults safely to no
@@ -7275,17 +8295,17 @@ def _doctor_ask_yes_no(question: str) -> bool:
         print("  Please answer 'y' or 'n'.")
 
 
-# Returns whether one exact doctor check passed
+# Returns whether the doctor check owning one label prefix passed
 def _doctor_report_has_pass(report: DoctorReport, label: str) -> bool:
-    return any(check.status == "PASS" and check.label == label for check in report.checks)
+    return any(check.status == "PASS" and check.label.startswith(label) for check in report.checks)
 
 
 # Offers separate real delivery tests only after interactive confirmation
 def _doctor_offer_notification_tests(report: DoctorReport) -> List[DoctorCheck]:
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         return []
-    email_ready = _doctor_report_has_pass(report, "SMTP connection and login succeeded")
-    webhook_ready = _doctor_report_has_pass(report, "Webhook URL and alert choices look valid")
+    email_ready = _doctor_report_has_pass(report, SMTP_READY_CHECK_LABEL)
+    webhook_ready = _doctor_report_has_pass(report, WEBHOOK_READY_CHECK_LABEL)
     if not email_ready and not webhook_ready:
         return []
     print("\nOptional delivery tests\n")
@@ -7301,7 +8321,7 @@ def _doctor_offer_notification_tests(report: DoctorReport) -> List[DoctorCheck]:
         else:
             print("[SKIP] Test email was not sent")
     if webhook_ready:
-        provider = normalized_webhook_provider()
+        provider = webhook_provider_display_name()
         if _doctor_ask_yes_no(f"Send one test webhook through {provider} now? This will publish a real notification"):
             result = send_webhook("Spotify Monitor doctor test", "This test notification was sent after approval in --doctor. Your webhook delivery settings work.", "song", force=True)
             check = make_doctor_check("Notifications", "PASS" if result == 0 else "FAIL", "Doctor test webhook delivered" if result == 0 else "Doctor test webhook delivery failed", "One real test webhook was sent after confirmation" if result == 0 else "The approved test webhook could not be delivered")
@@ -7309,10 +8329,6 @@ def _doctor_offer_notification_tests(report: DoctorReport) -> List[DoctorCheck]:
             print(f"[{check.status}] {check.label}")
         else:
             print("[SKIP] Test webhook was not sent")
-    if results:
-        failures = sum(check.status == "FAIL" for check in results)
-        print(f"\nDelivery test summary: {failures} failure(s)")
-    print()
     return results
 
 
@@ -7325,7 +8341,7 @@ def build_doctor_report(target_value=None, config_path=None, env_path=None, star
     report.checks.extend(doctor_check_container_playback())
     if progress is not None:
         progress("configuration")
-    report.checks.extend(doctor_check_configuration(config_path, env_path, startup_checks))
+    report.checks.extend(doctor_check_configuration(config_path, env_path, startup_checks, target_value))
     if progress is not None:
         progress("authentication")
     report.checks.extend(doctor_check_authentication(report))
@@ -7345,20 +8361,25 @@ def build_doctor_report(target_value=None, config_path=None, env_path=None, star
     return report
 
 
+# Prints what Doctor will and will not do, before the checks start
+def render_doctor_notice() -> None:
+    write_notice = "A rotated Spotify recent-play refresh token may be updated in the selected dotenv file." if MONITOR_MODE == "scrobble_health" else "No files will be written."
+    print(f"Running preflight checks. {write_notice} Interactive email and webhook tests run only after separate approval.\n")
+
+
 # Renders one sectioned ASCII doctor report with action lines for failures
 def render_doctor_report(report: DoctorReport) -> str:
-    write_notice = "A rotated Spotify recent-play refresh token may be updated in the selected dotenv file." if MONITOR_MODE == "scrobble_health" else "No files will be written."
-    lines = ["Doctor", "", f"{write_notice} In an interactive terminal, real email and webhook tests are offered separately and run only after approval."]
+    lines = [colorize("header", "Doctor")]
     sections = ("Environment", "Configuration", "Authentication", "Metadata", "Connectivity", "Target", "Scrobble health", "Notifications")
     for section in sections:
         section_checks = [item for item in report.checks if item.section == section]
         if not section_checks:
             continue
-        lines.extend(("", section))
+        lines.extend(("", colorize("section", section)))
         for check in section_checks:
             lines.append(f"[{'PASS' if check.status == 'PASS' else check.status}] {check.label}")
             if check.detail:
-                lines.append(check.detail)
+                lines.append(f"  {check.detail}")
             rendered_advice = check.advice
             if check.status == "FAIL" and rendered_advice is None:
                 rendered_advice = classify_recovery_error()
@@ -7366,34 +8387,53 @@ def render_doctor_report(report: DoctorReport) -> str:
                 lines.append(f"To fix: {rendered_advice.fix}")
     failures = sum(check.status == "FAIL" for check in report.checks)
     warnings = sum(check.status == "WARN" for check in report.checks)
-    lines.extend(("", "Summary", f"{failures} failure(s), {warnings} warning(s)", "", f"Guide: {DOCTOR_GUIDE_URL}"))
+    if failures:
+        summary_line = colorize("error", f"  {failures} check(s) failed, {warnings} warning(s). Fix the failures above before relying on the tool.")
+    elif warnings:
+        summary_line = colorize("warning", f"  All critical checks passed with {warnings} warning(s). Review the warnings above.")
+    else:
+        summary_line = colorize("boolean_true", "  All checks passed. You are good to go!")
+    lines.extend(("", colorize("header", "Summary"), summary_line, "", f"Guide: {DOCTOR_GUIDE_URL}"))
     return sanitize_error_text("\n".join(lines))
 
 
+# Returns the raw terminal stream for trusted Doctor cursor movement
+def _doctor_terminal_stream():
+    stream = sys.stdout
+    while isinstance(stream, (Logger, TerminalStream)):
+        stream = stream.terminal
+    return stream
+
+
 # Shows one transient doctor step only on an interactive terminal
+# The line stays uncoloured on purpose: it is erased by writing exactly len(line) spaces, and escape
+# sequences would make that width wrong and leave a styled remnant behind
 def _doctor_progress(label: str) -> None:
-    if sys.stdout.isatty():
+    terminal = _doctor_terminal_stream()
+    if terminal.isatty():
         previous_width = getattr(_doctor_progress, "width", 0)
         if previous_width:
-            sys.stdout.write("\r" + (" " * previous_width) + "\r")
-        line = f"* Checking {label} ..."
+            terminal.write("\r" + (" " * previous_width) + "\r")
+        line = f"* Checking {ANSI_ESCAPE_RE.sub('', sanitize_terminal_text(label))} ..."
         _doctor_progress.width = len(line)  # type: ignore[attr-defined]
-        sys.stdout.write("\r" + line)
-        sys.stdout.flush()
+        terminal.write("\r" + line)
+        terminal.flush()
 
 
 # Clears the transient doctor progress line on an interactive terminal
 def _doctor_progress_clear() -> None:
+    terminal = _doctor_terminal_stream()
     width = getattr(_doctor_progress, "width", 0)
-    if sys.stdout.isatty() and width:
-        sys.stdout.write("\r" + (" " * width) + "\r")
-        sys.stdout.flush()
+    if terminal.isatty() and width:
+        terminal.write("\r" + (" " * width) + "\r")
+        terminal.flush()
         _doctor_progress.width = 0  # type: ignore[attr-defined]
 
 
 # Runs doctor preflight plus approved delivery tests and returns zero unless one check fails
 def run_doctor(target_value=None, config_path=None, env_path=None, startup_checks: Sequence[DoctorCheck] = ()) -> int:
     progress = _doctor_progress if sys.stdout.isatty() else None
+    render_doctor_notice()
     try:
         report = build_doctor_report(target_value, config_path, env_path, startup_checks, progress=progress)
     finally:
@@ -7411,13 +8451,14 @@ def run_scrobble_health_doctor(username: str, config_path=None, env_path=None, s
     evaluation: Optional[ScrobbleHealthEvaluation] = None
     spotify_recent_access_ok = False
     progress = _doctor_progress if sys.stdout.isatty() else None
+    render_doctor_notice()
     try:
         if progress is not None:
             progress("environment")
         report.checks.extend(doctor_check_environment())
         if progress is not None:
             progress("configuration")
-        report.checks.extend(doctor_check_configuration(config_path, env_path, startup_checks))
+        report.checks.extend(doctor_check_configuration(config_path, env_path, startup_checks, lastfm_username=username))
         if progress is not None:
             progress("Spotify recent plays")
         try:
@@ -7555,7 +8596,7 @@ def _wizard_validate_destination(method: str, path, label: str) -> Path:
 # Prints one labelled command with sibling-style indentation and spacing
 def _wizard_print_command(label: str, command: str, suffix: str = "") -> None:
     print(label)
-    print(f"    {command}{suffix}\n")
+    print(f"    {colorize('section', command)}{colorize('info', suffix) if suffix else ''}\n")
 
 
 # Converts a wizard destination into the matching path inside the /data container mount
@@ -7597,9 +8638,9 @@ def _wizard_print_monitor_after_doctor(config_path, env_path, target: Optional[s
     method = _wizard_install_method()
     command_target = None if target_is_saved else target or "SPOTIFY_USER_URI_ID"
     command = _wizard_action_command(method, "", config_path, env_path, command_target)
-    print("\nNext steps\n")
+    print(colorize('header', "\nNext steps\n"))
     print("After Doctor passes, start monitoring:")
-    print(f"    {command}\n")
+    print(f"    {colorize('section', command)}\n")
 
 
 # Prints the install-aware scrobble health command after a successful Doctor run
@@ -7617,9 +8658,9 @@ def _wizard_print_scrobble_health_monitor_after_doctor(config_path, env_path, us
     if include_refresh_token_placeholder:
         action += " --scrobble-refresh-token SPOTIFY_SCROBBLE_REFRESH_TOKEN"
     command = _wizard_action_command(method, action, config_path, env_path)
-    print("\nNext steps\n")
+    print(colorize('header', "\nNext steps\n"))
     print("After Doctor passes, start scrobble health monitoring:")
-    print(f"    {command}\n")
+    print(f"    {colorize('section', command)}\n")
     if include_api_key_placeholder or include_refresh_token_placeholder:
         print("Replace the uppercase credential placeholders before running. Doctor does not repeat private command-line values.\n")
 
@@ -7674,26 +8715,10 @@ def _build_help_epilog() -> str:
     protobuf_file = "/data/login.protobuf" if method in ("docker", "compose") else "<protobuf_file>"
     sections = [
         "Examples:",
+        "",
+        "Friend Activity:",
         "  # Guided setup, recommended for the first run",
         f"  {prefix} --setup",
-        "",
-        "  # Guided setup for Spotify-to-Last.fm scrobble health monitoring",
-        f"  {prefix} --setup-scrobble-health",
-        "",
-        "  # Reauthorize the user-owned Spotify app for scrobble health",
-        f"  {prefix} --authorize-scrobble-health",
-        "",
-        "  # Start the separate Spotify-to-Last.fm scrobble health mode",
-        f"  {prefix} --monitor-mode scrobble_health",
-        "",
-        "  # Start scrobble health with a Last.fm profile selected for this run",
-        f"  {prefix} --monitor-mode scrobble_health --lastfm-username <lastfm_username>",
-        "",
-        "  # Diagnose scrobble health and list recent Spotify and Last.fm history",
-        f"  {prefix} --monitor-mode scrobble_health --doctor --verbose",
-        "",
-        "  # Select Friend Activity for this run",
-        f"  {prefix} --monitor-mode friend_activity <spotify_user_id>",
         "",
     ]
     if method in ("docker", "compose"):
@@ -7724,9 +8749,6 @@ def _build_help_epilog() -> str:
         "  # Save a Discord or ntfy webhook URL through a hidden prompt",
         f"  {_wizard_set_webhook_url_cmd(method, webhook_env)}",
         "",
-        "  # Send one test webhook without starting monitoring",
-        f"  {prefix} --send-test-webhook",
-        "",
     ))
     sections.extend((
         "  # Monitor one Spotify user",
@@ -7744,6 +8766,15 @@ def _build_help_epilog() -> str:
     ))
     if method == "compose":
         sections.extend(("", "  # Start from the target saved by setup", "  docker compose up --no-log-prefix"))
+    sections.extend((
+        "",
+        "Scrobble Health:",
+        "  # Guided setup for Spotify-to-Last.fm monitoring",
+        f"  {prefix} --setup-scrobble-health",
+        "",
+        "  # Start Spotify-to-Last.fm monitoring",
+        f"  {prefix} --monitor-mode scrobble_health",
+    ))
     sections.extend(("", f"Guide: {QUICK_START_GUIDE_URL}"))
     return "\n".join(sections) + "\n"
 
@@ -7789,14 +8820,40 @@ def _wizard_install_chromium_dependency(method: str) -> bool:
     return False
 
 
+# Returns whether ntfy artwork support is available in the active Python environment
+def _wizard_notification_images_dependency_available() -> bool:
+    try:
+        return importlib.util.find_spec("PIL") is not None
+    except (AttributeError, ImportError, ValueError):
+        return False
+
+
+# Installs ntfy artwork support into the active Python environment
+def _wizard_install_notification_images_dependency(method: str) -> bool:
+    requirement = "spotify_monitor[notification-images]" if method == "pip" else notification_images_requirement()
+    executable = sys.executable or ("python" if platform.system() == "Windows" else "python3")
+    command = [executable, "-m", "pip", "install", requirement]
+    print(f"Installing ntfy artwork support with:\n    {_wizard_render_command(command)}\n")
+    try:
+        result = subprocess.run(command, check=False)
+    except OSError as exc:
+        print(f"  Installation could not start: {exc}")
+        return False
+    if result.returncode == 0 and refresh_notification_images_availability():
+        print("\nntfy artwork support was installed successfully.")
+        return True
+    print("\nntfy artwork support could not be installed. Keeping ntfy alerts text-only.")
+    return False
+
+
 # Explains how setup displays and accepts recommended prompt defaults
 def _wizard_print_default_guidance() -> None:
-    print("\nPress Enter to accept the shown default. Ctrl+C cancels.\n")
+    print("Press Enter to accept the shown default. Ctrl+C cancels.\n")
 
 
 # Prints the installation method and output files shared by both setup wizards
 def _wizard_print_setup_destinations(method: str, config_path: Path, env_path: Path) -> None:
-    print(f"Detected install method: {method}")
+    print(f"Detected install method: {colorize('username', method)}")
     print(f"Configuration:          {config_path}")
     print(f"Dotenv:                 {env_path}\n")
 
@@ -7804,7 +8861,7 @@ def _wizard_print_setup_destinations(method: str, config_path: Path, env_path: P
 # Reads one setup line and exits cleanly when Ctrl+C or Ctrl+D cancels input
 def _wizard_input(prompt_text: str) -> str:
     try:
-        return input(prompt_text)
+        return input(colorize("info", prompt_text))
     except (EOFError, KeyboardInterrupt):
         print("\nSetup cancelled.")
         raise SystemExit(1) from None
@@ -7843,7 +8900,7 @@ def _wizard_ask_choice(question: str, options, default_index: int = 0) -> int:
     for index, option in enumerate(options, start=1):
         label, description = option
         marker = " (default)" if index - 1 == default_index else ""
-        print(f"  {index}. {label}{marker}")
+        print(f"  {colorize('username', str(index))}. {label}{colorize('info', marker)}")
         if description:
             for line in description.splitlines():
                 print(f"     {line}")
@@ -7882,14 +8939,26 @@ def _wizard_format_duration(seconds: int) -> str:
     return raw if readable == raw else f"{raw} - {readable}"
 
 
-# Parses one positive whole-number duration with an optional time unit
+# Parses one positive setup duration from whole or compound time units
 def _wizard_parse_duration(value: str) -> Optional[int]:
-    match = re.fullmatch(r"([1-9]\d*)\s*([a-z]*)", value.strip().casefold())
-    if not match:
+    normalized = value.strip().casefold()
+    matches = list(re.finditer(r"(\d+(?:\.\d+)?)\s*([a-z]*)", normalized))
+    if not matches:
         return None
     unit_seconds = {"": 1, "s": 1, "sec": 1, "secs": 1, "second": 1, "seconds": 1, "m": 60, "min": 60, "mins": 60, "minute": 60, "minutes": 60, "h": 3600, "hr": 3600, "hrs": 3600, "hour": 3600, "hours": 3600, "d": 86400, "day": 86400, "days": 86400}
-    multiplier = unit_seconds.get(match.group(2))
-    return int(match.group(1)) * multiplier if multiplier is not None else None
+    cursor = 0
+    total = 0.0
+    for match in matches:
+        if normalized[cursor:match.start()].strip():
+            return None
+        multiplier = unit_seconds.get(match.group(2))
+        if multiplier is None or len(matches) > 1 and not match.group(2):
+            return None
+        total += float(match.group(1)) * multiplier
+        cursor = match.end()
+    if normalized[cursor:].strip() or total < 1 or not total.is_integer():
+        return None
+    return int(total)
 
 
 # Prompts until the user provides a positive duration or accepts the readable default
@@ -7902,7 +8971,7 @@ def _wizard_ask_duration(question: str, default: int) -> int:
         parsed = _wizard_parse_duration(value)
         if parsed is not None:
             return parsed
-        print("  Enter a positive duration such as 120, 120s, 2m, 1h or 1d.")
+        print("  Enter a positive duration such as 120, 2m, 1.5h, 1h 30m or 1d.")
 
 
 # Reads a required secret through getpass without echoing the entered value
@@ -8067,11 +9136,32 @@ def _wizard_collect_ntfy_access_token(secret_updates: dict, env_path: Path) -> N
         _wizard_queue_secret(secret_updates, env_path, "NTFY_ACCESS_TOKEN", token)
 
 
+# Offers artwork attachments for ntfy alerts and installs the optional Pillow dependency on request
+def _wizard_collect_ntfy_images() -> bool:
+    available = _wizard_notification_images_dependency_available()
+    if not available:
+        print("  Artwork attachments need the optional Pillow package, which is not installed.")
+    if not _wizard_ask_yes_no("Attach playlist and album artwork to ntfy alerts?", default=available):
+        return False
+    if available:
+        return True
+    method = _wizard_install_method()
+    if method in ("docker", "compose"):
+        print("  This image was built without Pillow, so artwork cannot be attached.")
+        print("  The published Docker images include it. Keeping ntfy alerts text-only.")
+        return False
+    if not _wizard_ask_yes_no("Install Pillow now?", default=True):
+        print("  Keeping ntfy alerts text-only. Install Pillow later then set NTFY_IMAGES to True.")
+        return False
+    return _wizard_install_notification_images_dependency(method)
+
+
 # Collects hidden webhook secrets and mode-appropriate alert choices without sending a message
 def _wizard_collect_webhook(config_values: dict, secret_updates: dict, env_path: Path, scrobble_health: bool = False) -> List[str]:
     notification_names = ("WEBHOOK_ACTIVE_NOTIFICATION", "WEBHOOK_INACTIVE_NOTIFICATION", "WEBHOOK_TRACK_NOTIFICATION", "WEBHOOK_SONG_NOTIFICATION", "WEBHOOK_SONG_ON_LOOP_NOTIFICATION", "WEBHOOK_ERROR_NOTIFICATION")
     if not _wizard_ask_yes_no("Set up webhook alerts (Discord, ntfy etc.)?", default=False):
         config_values["WEBHOOK_ENABLED"] = False
+        config_values["NTFY_IMAGES"] = False
         config_values.update({name: False for name in notification_names})
         if scrobble_health:
             config_values["WEBHOOK_SCROBBLE_HEALTH_NOTIFICATION"] = False
@@ -8104,6 +9194,7 @@ def _wizard_collect_webhook(config_values: dict, secret_updates: dict, env_path:
             _wizard_queue_secret(secret_updates, env_path, "WEBHOOK_URL", webhook_url)
     if provider == "ntfy":
         _wizard_collect_ntfy_access_token(secret_updates, env_path)
+    config_values["NTFY_IMAGES"] = _wizard_collect_ntfy_images() if provider == "ntfy" and not scrobble_health else False
     config_values["WEBHOOK_ENABLED"] = True
     config_values["WEBHOOK_USERNAME"] = "Spotify Monitor"
     if scrobble_health:
@@ -8271,7 +9362,7 @@ def _wizard_collect_client_auth(config_values: dict, env_path: Path, secret_upda
 
 # Checks the target follow state and offers one confirmed follow mutation when needed
 def _wizard_offer_target_follow(target_user_id: str) -> str:
-    print("\nFollowing check\n")
+    print(colorize('header', "\nFollowing check\n"))
     report = DoctorReport()
     checks = doctor_check_authentication(report)
     if report.access_token is None:
@@ -8372,7 +9463,7 @@ def _wizard_finish_browser_import(auth: dict, env_path: Path) -> dict:
 # Config values reset before one setup section is collected again
 WIZARD_AUTH_CONFIG_KEYS = ("TOKEN_SOURCE", "LOGIN_REQUEST_BODY_FILE", "CLIENTTOKEN_REQUEST_BODY_FILE", "DEVICE_ID", "SYSTEM_ID", "USER_URI_ID", "APP_VERSION", "CPU_ARCH", "OS_BUILD", "PLATFORM", "OS_MAJOR", "OS_MINOR", "CLIENT_MODEL")
 WIZARD_EMAIL_CONFIG_KEYS = ("SMTP_HOST", "SMTP_PORT", "SMTP_SSL", "SMTP_USER", "SENDER_EMAIL", "RECEIVER_EMAIL", "ACTIVE_NOTIFICATION", "INACTIVE_NOTIFICATION", "TRACK_NOTIFICATION", "SONG_NOTIFICATION", "SONG_ON_LOOP_NOTIFICATION", "ERROR_NOTIFICATION")
-WIZARD_WEBHOOK_CONFIG_KEYS = ("WEBHOOK_ENABLED", "WEBHOOK_PROVIDER", "WEBHOOK_USERNAME", "WEBHOOK_ACTIVE_NOTIFICATION", "WEBHOOK_INACTIVE_NOTIFICATION", "WEBHOOK_TRACK_NOTIFICATION", "WEBHOOK_SONG_NOTIFICATION", "WEBHOOK_SONG_ON_LOOP_NOTIFICATION", "WEBHOOK_ERROR_NOTIFICATION")
+WIZARD_WEBHOOK_CONFIG_KEYS = ("WEBHOOK_ENABLED", "WEBHOOK_PROVIDER", "WEBHOOK_USERNAME", "NTFY_IMAGES", "WEBHOOK_ACTIVE_NOTIFICATION", "WEBHOOK_INACTIVE_NOTIFICATION", "WEBHOOK_TRACK_NOTIFICATION", "WEBHOOK_SONG_NOTIFICATION", "WEBHOOK_SONG_ON_LOOP_NOTIFICATION", "WEBHOOK_ERROR_NOTIFICATION")
 
 
 # Holds editable setup answers until the user explicitly saves them
@@ -8439,7 +9530,7 @@ def _wizard_collect_auth_section(state: WizardSetupState, method: str) -> None:
 # Collects the polling interval using the current answer as its default
 def _wizard_collect_polling_section(state: WizardSetupState) -> None:
     current_interval = int(state.config_values.get("SPOTIFY_CHECK_INTERVAL", SPOTIFY_CHECK_INTERVAL))
-    state.config_values["SPOTIFY_CHECK_INTERVAL"] = _wizard_ask_positive_int("Spotify polling interval in seconds", current_interval)
+    state.config_values["SPOTIFY_CHECK_INTERVAL"] = _wizard_ask_duration("Spotify polling interval (seconds or use s/m/h/d)", current_interval)
 
 
 # Collects email settings after clearing pending answers from that section
@@ -8489,9 +9580,10 @@ def _wizard_collect_destination_section(state: WizardSetupState, method: str) ->
 
 # Prints the current editable setup answers without exposing secrets
 def _wizard_print_setup_summary(state: WizardSetupState, method: str) -> None:
-    print("\nSetup summary\n")
+    print(colorize('header', "\nSetup summary\n"))
     print(f"  Target: {state.target}")
     print(f"  Persist target: {'yes' if state.persist_target else 'no'}")
+    print(f"  Polling interval: {_wizard_format_duration(int(state.config_values['SPOTIFY_CHECK_INTERVAL']))}")
     print(f"  Token source: {state.auth['source']}")
     print(f"  Authentication status: {'complete' if state.auth['complete'] else 'incomplete'}")
     if state.auth.get("mount_required"):
@@ -8500,7 +9592,6 @@ def _wizard_print_setup_summary(state: WizardSetupState, method: str) -> None:
         print(f"  Docker host: {CONTAINER_FIREFOX_HOSTS[state.auth['host_os']][0]}")
     if state.auth.get("browser"):
         print(f"  Browser: {browser_label(state.auth['browser'])}")
-    print(f"  Polling interval: {state.config_values['SPOTIFY_CHECK_INTERVAL']} seconds")
     print(f"  Email: {'enabled' if state.enabled_notifications else 'disabled'}")
     print(f"  Email notifications: {', '.join(state.enabled_notifications) if state.enabled_notifications else 'none'}")
     print(f"  Webhook: {'enabled' if state.enabled_webhooks else 'disabled'}")
@@ -8512,15 +9603,15 @@ def _wizard_print_setup_summary(state: WizardSetupState, method: str) -> None:
 
 # Opens one selected setup section then returns to the summary
 def _wizard_edit_setup_section(state: WizardSetupState, method: str) -> None:
-    section = _wizard_ask_choice("Which setup section should be changed?", [("Target and persistence", "Change the Spotify profile and whether it is saved."), ("Authentication", "Choose cookie or advanced client authentication again."), ("Polling interval", "Change how often Spotify is checked."), ("Email notifications", "Change SMTP details and email events."), ("Webhook alerts", "Change Discord or ntfy details and events."), ("File destinations", "Change the configuration or dotenv output path."), ("Return to summary", "Keep every current answer.")])
+    section = _wizard_ask_choice("Which setup section should be changed?", [("Target and persistence", "Change the Spotify profile and whether it is saved."), ("Polling interval", "Change how often Spotify is checked."), ("Authentication", "Choose cookie or advanced client authentication again."), ("Email notifications", "Change SMTP details and email events."), ("Webhook alerts", "Change Discord or ntfy details and events."), ("File destinations", "Change the configuration or dotenv output path."), ("Return to summary", "Keep every current answer.")])
     if section == 0:
         print()
         _wizard_collect_target_section(state, state.target)
     elif section == 1:
-        _wizard_collect_auth_section(state, method)
-    elif section == 2:
         print()
         _wizard_collect_polling_section(state)
+    elif section == 2:
+        _wizard_collect_auth_section(state, method)
     elif section == 3:
         print()
         _wizard_collect_email_section(state)
@@ -8659,7 +9750,7 @@ def _wizard_collect_scrobble_health_destination_section(state: ScrobbleHealthSet
 
 # Prints the current editable scrobble health answers without exposing secrets
 def _wizard_print_scrobble_health_setup_summary(state: ScrobbleHealthSetupState, method: str) -> None:
-    print("\nSetup summary\n")
+    print(colorize('header', "\nSetup summary\n"))
     print(f"  Last.fm user: {state.username}")
     print(f"  Missing-play threshold: {state.config_values['SCROBBLE_HEALTH_MIN_UNMATCHED']}")
     print(f"  Dead period: {_wizard_format_duration(int(state.config_values['SCROBBLE_HEALTH_DEAD_PERIOD']))}")
@@ -8738,9 +9829,10 @@ def _wizard_welcome() -> None:
     setup_suffix = "   (or just answer Y below)" if interactive else ""
     _wizard_print_command("Easiest start (guided setup wizard):", f"{prefix} --setup", setup_suffix)
     _wizard_print_command("Check setup before monitoring:", f"{prefix} --doctor <spotify_target>")
-    print(f"Full options: {prefix} --help")
+    print(f"Full options: {colorize('section', prefix + ' --help')}")
     print(f"\nGuide:        {QUICK_START_GUIDE_URL}\n")
     if interactive and _wizard_ask_yes_no("Run the guided setup wizard now?", default=True):
+        print()
         run_setup_wizard()
 
 
@@ -8757,7 +9849,7 @@ def run_setup_wizard(initial_target: Optional[str] = None, config_file=None, env
     except ValueError as exc:
         print(f"Setup cannot start: {exc}")
         raise SystemExit(1) from None
-    print("\nSetup Wizard\n")
+    print(colorize('header', "Setup Wizard\n"))
     print("This asks a few questions and writes a ready-to-run configuration.")
     _wizard_print_default_guidance()
     print("Secrets go to the dotenv file. Non-secret settings go to the config file.")
@@ -8773,9 +9865,8 @@ def run_setup_wizard(initial_target: Optional[str] = None, config_file=None, env
     config_values["DOTENV_FILE"] = str(env_path)
     state = WizardSetupState(config_path, env_path, baseline_values, config_values, {}, "", True, initial_auth, [], [])
     _wizard_collect_target_section(state, initial_target)
-    _wizard_collect_auth_section(state, method)
-    print()
     _wizard_collect_polling_section(state)
+    _wizard_collect_auth_section(state, method)
     print()
     _wizard_collect_email_section(state)
     print()
@@ -8796,7 +9887,7 @@ def run_setup_wizard(initial_target: Optional[str] = None, config_file=None, env
     except Exception:
         print(f"Setup could not write configuration file '{config_path}'. No dotenv changes were attempted.")
         raise SystemExit(1) from None
-    print("\nSaved files\n")
+    print(colorize('header', "\nSaved files\n"))
     print(f"  Configuration: {write_status['path']}")
     if write_status["backup_path"]:
         print(f"  Backup:        {write_status['backup_path']}")
@@ -8818,14 +9909,16 @@ def run_setup_wizard(initial_target: Optional[str] = None, config_file=None, env
             if follow_status in ("already_followed", "followed"):
                 auth["validated"] = True
         else:
-            print("\nFollowing check\n")
+            print(colorize('header', "\nFollowing check\n"))
             print("Follow status could not be checked because the saved setup could not be loaded.")
     doctor_failed = False
     doctor_ran = False
-    print()
+    if auth["complete"]:
+        print()
     if auth["complete"] and _wizard_ask_yes_no("Run doctor now? It writes no files and offers real delivery tests only with separate approval.", default=True):
         doctor_ran = True
         if _wizard_load_effective_setup(config_path, env_path):
+            render_doctor_notice()
             try:
                 report = build_doctor_report(target, str(config_path), str(env_path), progress=_doctor_progress)
             finally:
@@ -8843,7 +9936,7 @@ def run_setup_wizard(initial_target: Optional[str] = None, config_file=None, env
     doctor_command = _wizard_action_command(method, "--doctor", config_path, env_path, doctor_target, host_os=host_os)
     monitor_target = None if persist_target else target
     monitor_command = _wizard_action_command(method, "", config_path, env_path, monitor_target, host_os=host_os)
-    print("\nNext steps\n")
+    print(colorize('header', "\nNext steps\n"))
     if not auth["complete"]:
         print("Setup was saved. Authentication still needs to be completed.\n")
         if config_values["TOKEN_SOURCE"] == "cookie" and method in ("docker", "compose") and auth.get("browser") and host_os:
@@ -8875,7 +9968,7 @@ def run_setup_wizard(initial_target: Optional[str] = None, config_file=None, env
             print("docker compose up --no-log-prefix requires a persisted target. Use this direct command instead:")
         else:
             print(start_label)
-        print(f"    {monitor_command}\n")
+        print(f"    {colorize('section', monitor_command)}\n")
     print(f"Guide: {QUICK_START_GUIDE_URL}\n")
     local_ready = method in ("manual", "pip") and auth["complete"] and not doctor_failed and (auth["validated"] or doctor_ran)
     if local_ready and _wizard_ask_yes_no("Start monitoring now? Monitoring will continue until Ctrl+C.", default=True):
@@ -8941,7 +10034,7 @@ def run_scrobble_health_setup_wizard(config_file=None, env_file=None) -> None:
     except ValueError as exc:
         print(f"Setup cannot start: {exc}")
         raise SystemExit(1) from None
-    print("\nSpotify-to-Last.fm Scrobble Health Setup\n")
+    print("Spotify-to-Last.fm Scrobble Health Setup\n")
     print("This mode compares completed plays from your Spotify account with your public Last.fm recent tracks.")
     _wizard_print_default_guidance()
     print("Five consecutive missing plays and a 20 minute dead period are the default alert threshold.")
@@ -8982,7 +10075,7 @@ def run_scrobble_health_setup_wizard(config_file=None, env_file=None) -> None:
     except Exception:
         print(f"Setup could not write configuration file '{config_path}'. No dotenv changes were attempted.")
         raise SystemExit(1) from None
-    print("\nSaved files\n")
+    print(colorize('header', "\nSaved files\n"))
     print(f"  Configuration: {write_status['path']}")
     if write_status["backup_path"]:
         print(f"  Backup: {write_status['backup_path']}")
@@ -9007,7 +10100,7 @@ def run_scrobble_health_setup_wizard(config_file=None, env_file=None) -> None:
     authorize_command = _wizard_action_command(method, "--authorize-scrobble-health", config_path, env_path)
     doctor_command = _wizard_action_command(method, "--monitor-mode scrobble_health --doctor", config_path, env_path)
     monitor_command = _wizard_action_command(method, "--monitor-mode scrobble_health", config_path, env_path)
-    print("\nNext steps\n")
+    print(colorize('header', "\nNext steps\n"))
     if not auth["complete"]:
         print("Setup was saved. Spotify recent-play authorization still needs to be completed.\n")
         _wizard_print_command("Authorize the user-owned Spotify app:", authorize_command)
@@ -9133,13 +10226,12 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
     # Start loop
     while True:
+        retry_pending_activity_notifications()
         debug_print(f"Loop tick: token_source={TOKEN_SOURCE}, check_interval={SPOTIFY_CHECK_INTERVAL}, error_interval={SPOTIFY_ERROR_INTERVAL}")
 
         # Sometimes Spotify network functions halt even though we specified the timeout
         # To overcome this we use alarm signal functionality to kill it inevitably, not available on Windows
-        if platform.system() != 'Windows':
-            signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(ALARM_TIMEOUT)
+        alarm_state = _start_timeout_alarm(ALARM_TIMEOUT)
         try:
             if TOKEN_SOURCE == "client":
                 sp_accessToken = spotify_get_access_token_from_client_auto(DEVICE_ID, SYSTEM_ID, USER_URI_ID, REFRESH_TOKEN)
@@ -9152,25 +10244,22 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
             debug_print(f"Friend lookup result: found={sp_found}")
             email_sent = False
             webhook_sent = False
-            if platform.system() != 'Windows':
-                signal.alarm(0)
+            _restore_timeout_alarm(alarm_state)
         except TimeoutException:
-            if platform.system() != 'Windows':
-                signal.alarm(0)
+            _restore_timeout_alarm(alarm_state)
             print_monitor_recovery(TimeoutException(f"Spotify request timed out after {display_time(ALARM_TIMEOUT)}"), "runtime", recovery_hint_tracker, f"* Error, retrying in {display_time(ALARM_RETRY)}: ")
             print_cur_ts("Timestamp:\t\t\t")
             time.sleep(ALARM_RETRY)
             continue
         except Exception as e:
-            if platform.system() != 'Windows':
-                signal.alarm(0)
+            _restore_timeout_alarm(alarm_state)
 
             debug_print(f"Main monitor loop error: {e}")
 
             auth_context = "client_auth" if TOKEN_SOURCE == "client" else "cookie_auth"
             advice = print_monitor_recovery(e, auth_context, recovery_hint_tracker, f"* Error, retrying in {display_time(SPOTIFY_ERROR_INTERVAL)}: ")
 
-            if TOKEN_SOURCE == 'cookie' and advice.code in ("auth.cookie_invalid", "auth.rejected"):
+            if advice.code in ("auth.cookie_invalid", "auth.client_invalid", "auth.rejected"):
                 SP_CACHED_ACCESS_TOKEN = None
 
             if TOKEN_SOURCE == 'client' and advice.code == "auth.client_invalid":
@@ -9179,9 +10268,9 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                     m_subject = f"spotify_monitor: client or refresh token may be invalid or expired! (uri: {user_uri_id})"
                     m_body = f"Client or refresh token may be invalid or expired!\n{safe_error}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                     m_body_html = f"<html><head></head><body>Client or refresh token may be invalid or expired!<br>{escape(safe_error)}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
-                    email_attempted, webhook_attempted = send_notification_channels("error", m_subject, m_body, m_body_html, ERROR_NOTIFICATION and not email_sent, webhook_event_enabled("error") and not webhook_sent)
-                    email_sent = email_sent or email_attempted
-                    webhook_sent = webhook_sent or webhook_attempted
+                    email_succeeded, webhook_succeeded = send_notification_channels("error", m_subject, m_body, m_body_html, ERROR_NOTIFICATION and not email_sent, webhook_event_enabled("error") and not webhook_sent)
+                    email_sent = email_sent or email_succeeded
+                    webhook_sent = webhook_sent or webhook_succeeded
 
             elif TOKEN_SOURCE == 'cookie' and advice.code == "auth.cookie_invalid":
                 if (ERROR_NOTIFICATION and not email_sent) or (webhook_event_enabled("error") and not webhook_sent):
@@ -9189,9 +10278,9 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                     m_subject = f"spotify_monitor: sp_dc may be invalid/expired or Spotify has broken sth again! (uri: {user_uri_id})"
                     m_body = f"sp_dc may be invalid/expired or Spotify has broken sth again!\n{safe_error}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                     m_body_html = f"<html><head></head><body>sp_dc may be invalid/expired or Spotify has broken sth again!<br>{escape(safe_error)}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
-                    email_attempted, webhook_attempted = send_notification_channels("error", m_subject, m_body, m_body_html, ERROR_NOTIFICATION and not email_sent, webhook_event_enabled("error") and not webhook_sent)
-                    email_sent = email_sent or email_attempted
-                    webhook_sent = webhook_sent or webhook_attempted
+                    email_succeeded, webhook_succeeded = send_notification_channels("error", m_subject, m_body, m_body_html, ERROR_NOTIFICATION and not email_sent, webhook_event_enabled("error") and not webhook_sent)
+                    email_sent = email_sent or email_succeeded
+                    webhook_sent = webhook_sent or webhook_succeeded
 
             print_cur_ts("Timestamp:\t\t\t")
             time.sleep(SPOTIFY_ERROR_INTERVAL)
@@ -9213,10 +10302,8 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
             sp_track_uri = sp_data["sp_track_uri"]
             sp_track_uri_id = sp_data["sp_track_uri_id"]
-            sp_album_uri = sp_data["sp_album_uri"]
             sp_playlist_uri = sp_data["sp_playlist_uri"]
 
-            # sp_playlist_data = {}
             try:
                 sp_track_data = spotify_get_track_info(sp_accessToken, sp_track_uri)
                 sp_album_image_url = sp_track_data.get("sp_album_image_url", "")
@@ -9266,7 +10353,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
             if is_playlist:
                 sp_playlist_url = spotify_convert_uri_to_url(sp_playlist_uri)
                 playlist_m_body = f"\nPlaylist: {sp_playlist}{playlist_suffix}"
-                playlist_m_body_html = f"<br>Playlist: <a href=\"{sp_playlist_url}\">{escape(sp_playlist)}{playlist_suffix}</a>"
+                playlist_m_body_html = f"<br>Playlist: <a href=\"{escape_html_attr(sp_playlist_url)}\">{escape(sp_playlist)}{playlist_suffix}</a>"
 
                 if JMK_MODE:
                     hasTrack = (sp_playlist_owner == "Spotify") or (search_playlist(sp_accessToken, sp_playlist, sp_playlist_uri, sp_track_uri_id, sp_track, sp_artist, False))
@@ -9413,21 +10500,24 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
             print(f"Album:\t\t\t\t{sp_album}")
 
+            context_m_body = ""
+            context_m_body_html = ""
+
             if JMK_MODE:
                 if 'spotify:album:' in sp_playlist_uri and sp_playlist == sp_album:
                     print(f"\nContext (Album):\t\t{sp_playlist}")
                     context_m_body += f"\nContext (Album): {sp_playlist}"
-                    context_m_body_html += f"<br>Context (Album): <a href=\"{spotify_convert_uri_to_url(sp_playlist_uri)}\">{escape(sp_playlist)}</a>"
+                    context_m_body_html += f"<br>Context (Album): <a href=\"{escape_html_attr(spotify_convert_uri_to_url(sp_playlist_uri))}\">{escape(sp_playlist)}</a>"
             else:
                 if 'spotify:album:' in sp_playlist_uri and sp_playlist != sp_album:
                     print(f"\nContext (Album):\t\t{sp_playlist}")
                     context_m_body += f"\nContext (Album): {sp_playlist}"
-                    context_m_body_html += f"<br>Context (Album): <a href=\"{spotify_convert_uri_to_url(sp_playlist_uri)}\">{escape(sp_playlist)}</a>"
+                    context_m_body_html += f"<br>Context (Album): <a href=\"{escape_html_attr(spotify_convert_uri_to_url(sp_playlist_uri))}\">{escape(sp_playlist)}</a>"
 
             if 'spotify:artist:' in sp_playlist_uri:
                 print(f"\nContext (Artist):\t\t{sp_playlist}")
                 context_m_body += f"\nContext (Artist): {sp_playlist}"
-                context_m_body_html += f"<br>Context (Artist): <a href=\"{spotify_convert_uri_to_url(sp_playlist_uri)}\">{escape(sp_playlist)}</a>"
+                context_m_body_html += f"<br>Context (Artist): <a href=\"{escape_html_attr(spotify_convert_uri_to_url(sp_playlist_uri))}\">{escape(sp_playlist)}</a>"
 
             print(f"\nTrack URL:\t\t\t{sp_track_url}")
             if is_playlist:
@@ -9508,7 +10598,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                     m_subject = f"Spotify user {sp_username} is active: '{sp_artist} - {sp_track}'"
                     m_subject_short = f"{sp_username} is now active"
                     m_body = f"Last played: {sp_artist} - {sp_track}\nDuration: {display_time(sp_track_duration)}{playlist_m_body}\nAlbum: {sp_album}{context_m_body}{music_section_text}{lyrics_section_text}Songs played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})\n\nLast activity: {get_date_from_ts(sp_ts)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-                    m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{sp_artist_url}\">{escape(sp_artist)}</a> - <a href=\"{sp_track_url}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{playlist_m_body_html}<br>Album: <a href=\"{sp_album_url}\">{escape(sp_album)}</a>{context_m_body_html}{music_section_html}{lyrics_section_html}Songs played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})<br><br>Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
+                    m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{escape_html_attr(sp_artist_url)}\">{escape(sp_artist)}</a> - <a href=\"{escape_html_attr(sp_track_url)}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{playlist_m_body_html}<br>Album: <a href=\"{escape_html_attr(sp_album_url)}\">{escape(sp_album)}</a>{context_m_body_html}{music_section_html}{lyrics_section_html}Songs played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})<br><br>Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
                     m_body_short = build_short_ntfy_body(sp_track, sp_artist, sp_album, sp_playlist if is_playlist else "", playlist_suffix)
                     if JMK_MODE:
                         update_spreadsheet_row(SPREADSHEET_DIVIDER_TEXT, False)
@@ -9613,9 +10703,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                 while True:
                     # Sometimes Spotify network functions halt even though we specified the timeout
                     # To overcome this we use alarm signal functionality to kill it inevitably, not available on Windows
-                    if platform.system() != 'Windows':
-                        signal.signal(signal.SIGALRM, timeout_handler)
-                        signal.alarm(ALARM_TIMEOUT)
+                    alarm_state = _start_timeout_alarm(ALARM_TIMEOUT)
                     try:
                         if TOKEN_SOURCE == "client":
                             sp_accessToken = spotify_get_access_token_from_client_auto(DEVICE_ID, SYSTEM_ID, USER_URI_ID, REFRESH_TOKEN)
@@ -9630,18 +10718,15 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                         recovery_hint_tracker.reset()
                         email_sent = False
                         webhook_sent = False
-                        if platform.system() != 'Windows':
-                            signal.alarm(0)
+                        _restore_timeout_alarm(alarm_state)
                         break
                     except TimeoutException:
-                        if platform.system() != 'Windows':
-                            signal.alarm(0)
+                        _restore_timeout_alarm(alarm_state)
                         print_monitor_recovery(TimeoutException(f"Spotify request timed out after {display_time(ALARM_TIMEOUT)}"), "runtime", recovery_hint_tracker, f"* Error, retrying in {display_time(ALARM_RETRY)}: ")
                         print_cur_ts("Timestamp:\t\t\t")
                         time.sleep(ALARM_RETRY)
                     except Exception as e:
-                        if platform.system() != 'Windows':
-                            signal.alarm(0)
+                        _restore_timeout_alarm(alarm_state)
 
                         auth_context = "client_auth" if TOKEN_SOURCE == "client" else "cookie_auth"
                         advice = classify_recovery_error(e, auth_context)
@@ -9650,7 +10735,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                             verbose_print(f"{advice.summary}. Automatic retries are active")
                             transient_request_failure_active = True
 
-                        if TOKEN_SOURCE == 'cookie' and advice.code in ("auth.cookie_invalid", "auth.rejected"):
+                        if advice.code in ("auth.cookie_invalid", "auth.client_invalid", "auth.rejected"):
                             SP_CACHED_ACCESS_TOKEN = None
 
                         if advice.code == "spotify.unavailable":
@@ -9688,9 +10773,9 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                                     m_subject = f"spotify_monitor: client or refresh token may be invalid or expired! (uri: {user_uri_id})"
                                     m_body = f"Client or refresh token may be invalid or expired!\n{safe_error}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                                     m_body_html = f"<html><head></head><body>Client or refresh token may be invalid or expired!<br>{escape(safe_error)}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
-                                    email_attempted, webhook_attempted = send_notification_channels("error", m_subject, m_body, m_body_html, ERROR_NOTIFICATION and not email_sent, webhook_event_enabled("error") and not webhook_sent)
-                                    email_sent = email_sent or email_attempted
-                                    webhook_sent = webhook_sent or webhook_attempted
+                                    email_succeeded, webhook_succeeded = send_notification_channels("error", m_subject, m_body, m_body_html, ERROR_NOTIFICATION and not email_sent, webhook_event_enabled("error") and not webhook_sent)
+                                    email_sent = email_sent or email_succeeded
+                                    webhook_sent = webhook_sent or webhook_succeeded
 
                             elif TOKEN_SOURCE == 'cookie' and advice.code == "auth.cookie_invalid":
                                 if (ERROR_NOTIFICATION and not email_sent) or (webhook_event_enabled("error") and not webhook_sent):
@@ -9698,9 +10783,9 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                                     m_subject = f"spotify_monitor: sp_dc may be invalid/expired or Spotify has broken sth again! (uri: {user_uri_id})"
                                     m_body = f"sp_dc may be invalid/expired or Spotify has broken sth again!\n{safe_error}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                                     m_body_html = f"<html><head></head><body>sp_dc may be invalid/expired or Spotify has broken sth again!<br>{escape(safe_error)}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
-                                    email_attempted, webhook_attempted = send_notification_channels("error", m_subject, m_body, m_body_html, ERROR_NOTIFICATION and not email_sent, webhook_event_enabled("error") and not webhook_sent)
-                                    email_sent = email_sent or email_attempted
-                                    webhook_sent = webhook_sent or webhook_attempted
+                                    email_succeeded, webhook_succeeded = send_notification_channels("error", m_subject, m_body, m_body_html, ERROR_NOTIFICATION and not email_sent, webhook_event_enabled("error") and not webhook_sent)
+                                    email_sent = email_sent or email_succeeded
+                                    webhook_sent = webhook_sent or webhook_succeeded
 
                             print_cur_ts("Timestamp:\t\t\t")
                         time.sleep(SPOTIFY_ERROR_INTERVAL)
@@ -9723,7 +10808,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                             if ERROR_NOTIFICATION or webhook_event_enabled("error"):
                                 m_subject = f"Spotify user {user_uri_id} ({sp_username}) was probably removed!"
                                 m_body = f"Spotify user {user_uri_id} ({sp_username}) was probably removed\nRetrying in {display_time(SPOTIFY_DISAPPEARED_CHECK_INTERVAL)} intervals{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                                m_body_html = f"<html><head></head><body>Spotify user {user_uri_id} (<b>{sp_username}</b>) was probably removed<br>Retrying in <b>{display_time(SPOTIFY_DISAPPEARED_CHECK_INTERVAL)}</b> intervals{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
+                                m_body_html = f"<html><head></head><body>Spotify user {escape(user_uri_id)} (<b>{escape(sp_username)}</b>) was probably removed<br>Retrying in <b>{display_time(SPOTIFY_DISAPPEARED_CHECK_INTERVAL)}</b> intervals{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
                                 send_notification_channels("error", m_subject, m_body, m_body_html, ERROR_NOTIFICATION)
                         else:
                             print(f"Spotify user '{user_uri_id}' ({sp_username}) has disappeared - make sure your friend is followed and has activity sharing enabled. Retrying in {display_time(SPOTIFY_DISAPPEARED_CHECK_INTERVAL)} intervals")
@@ -9734,7 +10819,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                                 m_subject = f"Spotify user {user_uri_id} ({sp_username}) has disappeared!"
                                 profile_url = spotify_user_profile_url(user_uri_id)
                                 m_body = f"Spotify user {user_uri_id} ({sp_username}) has disappeared - make sure your friend is followed and has activity sharing enabled\nProfile: {profile_url}\nRetrying in {display_time(SPOTIFY_DISAPPEARED_CHECK_INTERVAL)} intervals{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                                m_body_html = f"<html><head></head><body>Spotify user {user_uri_id} (<b>{sp_username}</b>) has disappeared - make sure your friend is followed and has activity sharing enabled<br>Profile: <a href=\"{escape(profile_url, quote=True)}\">{escape(profile_url)}</a><br>Retrying in <b>{display_time(SPOTIFY_DISAPPEARED_CHECK_INTERVAL)}</b> intervals{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
+                                m_body_html = f"<html><head></head><body>Spotify user {escape(user_uri_id)} (<b>{escape(sp_username)}</b>) has disappeared - make sure your friend is followed and has activity sharing enabled<br>Profile: <a href=\"{escape_html_attr(profile_url)}\">{escape(profile_url)}</a><br>Retrying in <b>{display_time(SPOTIFY_DISAPPEARED_CHECK_INTERVAL)}</b> intervals{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
                                 send_notification_channels("error", m_subject, m_body, m_body_html, ERROR_NOTIFICATION)
                         print_cur_ts("Timestamp:\t\t\t")
                         user_not_found = True
@@ -9752,7 +10837,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                         if ERROR_NOTIFICATION or webhook_event_enabled("error"):
                             m_subject = f"Spotify user {user_uri_id} ({sp_username}) has reappeared!"
                             m_body = f"Spotify user {user_uri_id} ({sp_username}) has reappeared!{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                            m_body_html = f"<html><head></head><body>Spotify user {user_uri_id} (<b>{sp_username}</b>) has reappeared!{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
+                            m_body_html = f"<html><head></head><body>Spotify user {escape(user_uri_id)} (<b>{escape(sp_username)}</b>) has reappeared!{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
                             send_notification_channels("error", m_subject, m_body, m_body_html, ERROR_NOTIFICATION)
                         print_cur_ts("Timestamp:\t\t\t")
 
@@ -9771,7 +10856,6 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                             sp_playlist = "Discovery Zone"
                     sp_track_uri = sp_data["sp_track_uri"]
                     sp_track_uri_id = sp_data["sp_track_uri_id"]
-                    sp_album_uri = sp_data["sp_album_uri"]
                     sp_playlist_uri = sp_data["sp_playlist_uri"]
                     try:
                         sp_track_data = spotify_get_track_info(sp_accessToken, sp_track_uri)
@@ -9851,7 +10935,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                     if is_playlist:
                         sp_playlist_url = spotify_convert_uri_to_url(sp_playlist_uri)
                         playlist_m_body = f"\nPlaylist: {sp_playlist}{playlist_suffix}"
-                        playlist_m_body_html = f"<br>Playlist: <a href=\"{sp_playlist_url}\">{escape(sp_playlist)}{playlist_suffix}</a>"
+                        playlist_m_body_html = f"<br>Playlist: <a href=\"{escape_html_attr(sp_playlist_url)}\">{escape(sp_playlist)}{playlist_suffix}</a>"
                     else:
                         playlist_m_body = ""
                         playlist_m_body_html = ""
@@ -10144,12 +11228,12 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                     if 'spotify:album:' in sp_playlist_uri and sp_playlist == sp_album:
                         print(f"\nContext (Album):\t\t{sp_playlist}")
                         context_m_body += f"\nContext (Album): {sp_playlist}"
-                        context_m_body_html += f"<br>Context (Album): <a href=\"{spotify_convert_uri_to_url(sp_playlist_uri)}\">{escape(sp_playlist)}</a>"
+                        context_m_body_html += f"<br>Context (Album): <a href=\"{escape_html_attr(spotify_convert_uri_to_url(sp_playlist_uri))}\">{escape(sp_playlist)}</a>"
 
                     if 'spotify:artist:' in sp_playlist_uri:
                         print(f"\nContext (Artist):\t\t{sp_playlist}")
                         context_m_body += f"\nContext (Artist): {sp_playlist}"
-                        context_m_body_html += f"<br>Context (Artist): <a href=\"{spotify_convert_uri_to_url(sp_playlist_uri)}\">{escape(sp_playlist)}</a>"
+                        context_m_body_html += f"<br>Context (Artist): <a href=\"{escape_html_attr(spotify_convert_uri_to_url(sp_playlist_uri))}\">{escape(sp_playlist)}</a>"
 
                     print(f"Last activity:\t\t\t{get_date_from_ts(sp_ts)}")
 
@@ -10324,7 +11408,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                                 lyrics_section_text = ""
                                 lyrics_section_html = ""
                         m_body = f"Last played: {sp_artist} - {sp_track}\nDuration: {display_time(sp_track_duration)}{played_for_m_body}{playlist_m_body}\nAlbum: {sp_album}{context_m_body}{music_section_text}{lyrics_section_text}{friend_active_m_body}\n\nSongs played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})\n\nLast activity: {get_date_from_ts(sp_ts)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-                        m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{sp_artist_url}\">{escape(sp_artist)}</a> - <a href=\"{sp_track_url}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{played_for_m_body_html}{playlist_m_body_html}<br>Album: <a href=\"{sp_album_url}\">{escape(sp_album)}</a>{context_m_body_html}{music_section_html}{lyrics_section_html}{friend_active_m_body_html}<br><br>Songs played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})<br><br>Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
+                        m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{escape_html_attr(sp_artist_url)}\">{escape(sp_artist)}</a> - <a href=\"{escape_html_attr(sp_track_url)}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{played_for_m_body_html}{playlist_m_body_html}<br>Album: <a href=\"{escape_html_attr(sp_album_url)}\">{escape(sp_album)}</a>{context_m_body_html}{music_section_html}{lyrics_section_html}{friend_active_m_body_html}<br><br>Songs played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})<br><br>Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
                         m_body_short = build_short_ntfy_body(sp_track, sp_artist, sp_album, sp_playlist if is_playlist else "", playlist_suffix)
 
                         active_ever = True
@@ -10336,9 +11420,9 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                                 update_spreadsheet_row(SPREADSHEET_DIVIDER_TEXT, False)
                                 send_email(f"{GMAIL_TAG}---------------------------------", "  ", "  ", SMTP_SSL)
                                 send_email(f"{GMAIL_TAG}[{time_diff_str()}] {timestring()} {songstring()}", m_body, m_body_html, SMTP_SSL)
-                            email_attempted, webhook_attempted = send_notification_channels("active", m_subject, m_body, m_body_html, ACTIVE_NOTIFICATION, image_url=sp_playlist_image_url or sp_album_image_url, subject_short=m_subject_short, body_short=m_body_short)
-                            email_sent = email_sent or email_attempted
-                            webhook_sent = webhook_sent or webhook_attempted
+                            email_succeeded, webhook_succeeded = send_notification_channels("active", m_subject, m_body, m_body_html, ACTIVE_NOTIFICATION, image_url=sp_playlist_image_url or sp_album_image_url, subject_short=m_subject_short, body_short=m_body_short)
+                            email_sent = email_sent or email_succeeded
+                            webhook_sent = webhook_sent or webhook_succeeded
 
                     on_the_list = False
                     if sp_track.upper() in tracks_upper or sp_playlist.upper() in tracks_upper or sp_album.upper() in tracks_upper:
@@ -10370,11 +11454,11 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                         m_subject = f"Spotify user {sp_username} plays song on loop: '{sp_artist} - {sp_track}'"
                         m_subject_short = f"{sp_username} looped a song {song_on_loop} times"
                         m_body = f"Last played: {sp_artist} - {sp_track}\nDuration: {display_time(sp_track_duration)}{played_for_m_body}{playlist_m_body}\nAlbum: {sp_album}{context_m_body}{music_section_text}{lyrics_section_text}User plays song on LOOP ({song_on_loop} times)\n\nSongs played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})\n\nLast activity: {get_date_from_ts(sp_ts)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-                        m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{sp_artist_url}\">{escape(sp_artist)}</a> - <a href=\"{sp_track_url}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{played_for_m_body_html}{playlist_m_body_html}<br>Album: <a href=\"{sp_album_url}\">{escape(sp_album)}</a>{context_m_body_html}{music_section_html}{lyrics_section_html}User plays song on LOOP (<b>{song_on_loop}</b> times)<br><br>Songs played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})<br><br>Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
+                        m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{escape_html_attr(sp_artist_url)}\">{escape(sp_artist)}</a> - <a href=\"{escape_html_attr(sp_track_url)}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{played_for_m_body_html}{playlist_m_body_html}<br>Album: <a href=\"{escape_html_attr(sp_album_url)}\">{escape(sp_album)}</a>{context_m_body_html}{music_section_html}{lyrics_section_html}User plays song on LOOP (<b>{song_on_loop}</b> times)<br><br>Songs played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})<br><br>Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
                         m_body_short = build_short_ntfy_body(sp_track, sp_artist, sp_album, sp_playlist if is_playlist else "", playlist_suffix)
-                        email_attempted, webhook_attempted = send_notification_channels("loop", m_subject, m_body, m_body_html, SONG_ON_LOOP_NOTIFICATION and not email_sent, webhook_event_enabled("loop") and not webhook_sent, image_url=sp_album_image_url, subject_short=m_subject_short, body_short=m_body_short)
-                        email_sent = email_sent or email_attempted
-                        webhook_sent = webhook_sent or webhook_attempted
+                        email_succeeded, webhook_succeeded = send_notification_channels("loop", m_subject, m_body, m_body_html, SONG_ON_LOOP_NOTIFICATION and not email_sent, webhook_event_enabled("loop") and not webhook_sent, image_url=sp_album_image_url, subject_short=m_subject_short, body_short=m_body_short)
+                        email_sent = email_sent or email_succeeded
+                        webhook_sent = webhook_sent or webhook_succeeded
 
                     email_song_enabled = ((TRACK_NOTIFICATION and on_the_list) or SONG_NOTIFICATION) and not email_sent
                     webhook_song_enabled = ((webhook_event_enabled("track") and on_the_list) or webhook_event_enabled("song")) and not webhook_sent
@@ -10404,7 +11488,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                         m_subject = f"Spotify user {sp_username}: '{sp_artist} - {sp_track}'"
                         m_subject_short = build_short_ntfy_session_subject(sp_username, calculate_timespan(int(sp_ts), int(sp_active_ts_start), show_seconds=False, short=True), listened_songs)
                         m_body = f"Last played: {sp_artist} - {sp_track}\nDuration: {display_time(sp_track_duration)}{played_for_m_body}{playlist_m_body}\nAlbum: {sp_album}{context_m_body}{music_section_text}{lyrics_section_text}Songs played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})\n\nLast activity: {get_date_from_ts(sp_ts)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-                        m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{sp_artist_url}\">{escape(sp_artist)}</a> - <a href=\"{sp_track_url}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{played_for_m_body_html}{playlist_m_body_html}<br>Album: <a href=\"{sp_album_url}\">{escape(sp_album)}</a>{context_m_body_html}{music_section_html}{lyrics_section_html}Songs played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})<br><br>Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
+                        m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{escape_html_attr(sp_artist_url)}\">{escape(sp_artist)}</a> - <a href=\"{escape_html_attr(sp_track_url)}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{played_for_m_body_html}{playlist_m_body_html}<br>Album: <a href=\"{escape_html_attr(sp_album_url)}\">{escape(sp_album)}</a>{context_m_body_html}{music_section_html}{lyrics_section_html}Songs played: {listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})<br><br>Last activity: {get_date_from_ts(sp_ts)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
                         m_body_short = build_short_ntfy_body(sp_track, sp_artist, sp_album, sp_playlist if is_playlist else "", playlist_suffix)
                         notification_type = "track" if on_the_list and ((TRACK_NOTIFICATION and email_song_enabled) or webhook_event_enabled("track")) else "song"
                         if JMK_MODE:
@@ -10412,10 +11496,9 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                             # m_body += song_footer_txt
                             # m_body_html = m_body_html.replace("</body></html>", song_footer_html + "</body></html>")
                             send_email(f"{GMAIL_TAG}[{time_diff_str()}] {timestring()} {songstring()}", m_body, m_body_html, SMTP_SSL)
-                        email_attempted, webhook_attempted = send_notification_channels(notification_type, m_subject, m_body, m_body_html, email_song_enabled, webhook_song_enabled, image_url=sp_album_image_url, subject_short=m_subject_short, body_short=m_body_short)
-                        email_sent = email_sent or email_attempted
-                        webhook_sent = webhook_sent or webhook_attempted
-
+						email_succeeded, webhook_succeeded = send_notification_channels(notification_type, m_subject, m_body, m_body_html, email_song_enabled, webhook_song_enabled, image_url=sp_album_image_url, subject_short=m_subject_short, body_short=m_body_short)
+                        email_sent = email_sent or email_succeeded
+                        webhook_sent = webhook_sent or webhook_succeeded
                     try:
                         if csv_file_name:
                             write_csv_entry(csv_file_name, datetime.fromtimestamp(int(cur_ts)), sp_artist, sp_track, sp_playlist, sp_album, datetime.fromtimestamp(int(sp_ts)))
@@ -10544,13 +11627,13 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                             m_subject = f"Spotify user {sp_username} is inactive: '{sp_artist} - {sp_track}' (after {calculate_timespan(int(sp_active_ts_stop), int(sp_active_ts_start), show_seconds=False)}: {get_range_of_dates_from_tss(sp_active_ts_start, sp_active_ts_stop, short=True)})"
                             m_subject_short = build_short_ntfy_session_subject(sp_username, calculate_timespan(int(sp_active_ts_stop), int(sp_active_ts_start), show_seconds=False, short=True), listened_songs, inactive=True)
                             m_body = f"Last played: {sp_artist} - {sp_track}\nDuration: {display_time(sp_track_duration)}{played_for_m_body}{playlist_m_body}\nAlbum: {sp_album}{context_m_body}{music_section_text}{lyrics_section_text}Friend got inactive after listening to music for {calculate_timespan(int(sp_active_ts_stop), int(sp_active_ts_start))}\nFriend played music from {get_range_of_dates_from_tss(sp_active_ts_start, sp_active_ts_stop, short=True, between_sep=' to ')}{listened_songs_mbody}{recent_songs_mbody}\n\nLast activity: {get_date_from_ts(sp_active_ts_stop)}\nInactivity timer: {display_time(SPOTIFY_INACTIVITY_CHECK)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
-                            m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{sp_artist_url}\">{escape(sp_artist)}</a> - <a href=\"{sp_track_url}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{played_for_m_body_html}{playlist_m_body_html}<br>Album: <a href=\"{sp_album_url}\">{escape(sp_album)}</a>{context_m_body_html}{music_section_html}{lyrics_section_html}Friend got inactive after listening to music for <b>{calculate_timespan(int(sp_active_ts_stop), int(sp_active_ts_start))}</b><br>Friend played music from <b>{get_range_of_dates_from_tss(sp_active_ts_start, sp_active_ts_stop, short=True, between_sep='</b> to <b>')}</b>{listened_songs_mbody_html}{recent_songs_mbody_html}<br><br>Last activity: <b>{get_date_from_ts(sp_active_ts_stop)}</b><br>Inactivity timer: {display_time(SPOTIFY_INACTIVITY_CHECK)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
+                            m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{escape_html_attr(sp_artist_url)}\">{escape(sp_artist)}</a> - <a href=\"{escape_html_attr(sp_track_url)}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{played_for_m_body_html}{playlist_m_body_html}<br>Album: <a href=\"{escape_html_attr(sp_album_url)}\">{escape(sp_album)}</a>{context_m_body_html}{music_section_html}{lyrics_section_html}Friend got inactive after listening to music for <b>{calculate_timespan(int(sp_active_ts_stop), int(sp_active_ts_start))}</b><br>Friend played music from <b>{get_range_of_dates_from_tss(sp_active_ts_start, sp_active_ts_stop, short=True, between_sep='</b> to <b>')}</b>{listened_songs_mbody_html}{recent_songs_mbody_html}<br><br>Last activity: <b>{get_date_from_ts(sp_active_ts_stop)}</b><br>Inactivity timer: {display_time(SPOTIFY_INACTIVITY_CHECK)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
                             m_body_short = build_short_ntfy_body(sp_track, sp_artist, sp_album, sp_playlist if is_playlist else "", playlist_suffix)
                             if not JMK_MODE:
                                 # jmk on 8/22/2026 JMK_MODE skip to remove duplicate alerts since my code sends this alert
-                                email_attempted, webhook_attempted = send_notification_channels("inactive", m_subject, m_body, m_body_html, INACTIVE_NOTIFICATION, image_url=sp_playlist_image_url or sp_album_image_url, subject_short=m_subject_short, body_short=m_body_short)
-                                email_sent = email_sent or email_attempted
-                                webhook_sent = webhook_sent or webhook_attempted
+                            	email_succeeded, webhook_succeeded = send_notification_channels("inactive", m_subject, m_body, m_body_html, INACTIVE_NOTIFICATION, image_url=sp_playlist_image_url or sp_album_image_url, subject_short=m_subject_short, body_short=m_body_short)
+                            	email_sent = email_sent or email_succeeded
+                            	webhook_sent = webhook_sent or webhook_succeeded
                         sp_active_ts_start_old = sp_active_ts_start
                         sp_active_ts_start = 0
                         listened_songs_old = listened_songs
@@ -10643,7 +11726,7 @@ def apply_webhook_cli_overrides(args: argparse.Namespace, parser: argparse.Argum
         configured_provider = normalized_webhook_provider()
         if detected_provider and detected_provider != configured_provider:
             WEBHOOK_PROVIDER = detected_provider
-            print(f"* Warning: Configured webhook provider did not match the URL. Using {detected_provider}.")
+            print(f"* Warning: Configured webhook provider did not match the URL. Using {webhook_provider_display_name(detected_provider)}.")
 
 
 # Resolves one monitoring mode from config plus an optional command-line selection
@@ -10654,9 +11737,18 @@ def select_monitor_mode(configured_mode: str, cli_mode: Optional[str] = None) ->
     return selected_mode
 
 
+# Applies diagnostic flags both before config error reporting and after config precedence resolution
+def apply_diagnostic_cli_overrides(args: argparse.Namespace) -> None:
+    global DEBUG_MODE, VERBOSE_MODE
+    if args.debug_mode is not None:
+        DEBUG_MODE = args.debug_mode
+    if args.verbose_mode is not None:
+        VERBOSE_MODE = args.verbose_mode
+
+
 # Parses command-line options then starts the selected command or monitoring mode
 def main():
-    global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_CHECK_COUNTER, LOGIN_REQUEST_BODY_FILE, CLIENTTOKEN_REQUEST_BODY_FILE, REFRESH_TOKEN, LOGIN_URL, USER_AGENT, DEVICE_ID, SYSTEM_ID, USER_URI_ID, SP_DC_COOKIE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, DEBUG_MODE, VERBOSE_MODE, SP_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, ERROR_NOTIFICATION, SCROBBLE_HEALTH_NOTIFICATION, WEBHOOK_ENABLED, WEBHOOK_URL, WEBHOOK_ACTIVE_NOTIFICATION, WEBHOOK_INACTIVE_NOTIFICATION, WEBHOOK_TRACK_NOTIFICATION, WEBHOOK_SONG_NOTIFICATION, WEBHOOK_SONG_ON_LOOP_NOTIFICATION, WEBHOOK_ERROR_NOTIFICATION, WEBHOOK_SCROBBLE_HEALTH_NOTIFICATION, SPOTIFY_CHECK_INTERVAL, SPOTIFY_INACTIVITY_CHECK, SPOTIFY_ERROR_INTERVAL, SPOTIFY_DISAPPEARED_CHECK_INTERVAL, MONITOR_MODE, LASTFM_USERNAME, LASTFM_API_KEY, SPOTIFY_SCROBBLE_CLIENT_ID, SPOTIFY_SCROBBLE_REDIRECT_URI, SPOTIFY_SCROBBLE_REFRESH_TOKEN, SCROBBLE_HEALTH_CHECK_INTERVAL, SCROBBLE_HEALTH_DEAD_PERIOD, SCROBBLE_HEALTH_MIN_UNMATCHED, SCROBBLE_HEALTH_MATCH_WINDOW, SCROBBLE_HEALTH_LOOKBACK, SCROBBLE_HEALTH_REPEAT_INTERVAL, SCROBBLE_HEALTH_STATE_FILE, TRACK_SONGS, SMTP_PASSWORD, stdout_bck, APP_VERSION, CPU_ARCH, OS_BUILD, PLATFORM, OS_MAJOR, OS_MINOR, CLIENT_MODEL, TOKEN_SOURCE, ALARM_TIMEOUT, pyotp, USER_AGENT, FLAG_FILE, TRUNCATE_CHARS, SP_APP_TOKENS_FILE, SP_APP_CLIENT_ID, SP_APP_CLIENT_SECRET, NTFY_IMAGES, NTFY_SHORT
+    global CLI_CONFIG_PATH, DOTENV_FILE, LIVENESS_CHECK_COUNTER, LOGIN_REQUEST_BODY_FILE, CLIENTTOKEN_REQUEST_BODY_FILE, REFRESH_TOKEN, LOGIN_URL, USER_AGENT, DEVICE_ID, SYSTEM_ID, USER_URI_ID, SP_DC_COOKIE, CSV_FILE, MONITOR_LIST_FILE, FILE_SUFFIX, DISABLE_LOGGING, DEBUG_MODE, VERBOSE_MODE, SP_LOGFILE, ACTIVE_NOTIFICATION, INACTIVE_NOTIFICATION, TRACK_NOTIFICATION, SONG_NOTIFICATION, SONG_ON_LOOP_NOTIFICATION, ERROR_NOTIFICATION, SCROBBLE_HEALTH_NOTIFICATION, WEBHOOK_ENABLED, WEBHOOK_URL, WEBHOOK_ACTIVE_NOTIFICATION, WEBHOOK_INACTIVE_NOTIFICATION, WEBHOOK_TRACK_NOTIFICATION, WEBHOOK_SONG_NOTIFICATION, WEBHOOK_SONG_ON_LOOP_NOTIFICATION, WEBHOOK_ERROR_NOTIFICATION, WEBHOOK_SCROBBLE_HEALTH_NOTIFICATION, SPOTIFY_CHECK_INTERVAL, SPOTIFY_INACTIVITY_CHECK, SPOTIFY_ERROR_INTERVAL, SPOTIFY_DISAPPEARED_CHECK_INTERVAL, MONITOR_MODE, LASTFM_USERNAME, LASTFM_API_KEY, SPOTIFY_SCROBBLE_CLIENT_ID, SPOTIFY_SCROBBLE_REDIRECT_URI, SPOTIFY_SCROBBLE_REFRESH_TOKEN, SCROBBLE_HEALTH_CHECK_INTERVAL, SCROBBLE_HEALTH_DEAD_PERIOD, SCROBBLE_HEALTH_MIN_UNMATCHED, SCROBBLE_HEALTH_MATCH_WINDOW, SCROBBLE_HEALTH_LOOKBACK, SCROBBLE_HEALTH_REPEAT_INTERVAL, SCROBBLE_HEALTH_STATE_FILE, TRACK_SONGS, SMTP_PASSWORD, stdout_bck, APP_VERSION, CPU_ARCH, OS_BUILD, PLATFORM, OS_MAJOR, OS_MINOR, CLIENT_MODEL, TOKEN_SOURCE, pyotp, USER_AGENT, FLAG_FILE, TRUNCATE_CHARS, SP_APP_TOKENS_FILE, SP_APP_CLIENT_ID, SP_APP_CLIENT_SECRET, NTFY_IMAGES, NTFY_SHORT, COLORED_OUTPUT, COLOR_THEME
     global ALT_VIEW, JMK_MODE, INITIAL_STARTUP, GMAIL_TAG, ERR_CODE, SEND_NOTIFY, DZ_ALERTS, ORIG_EMAILS, USER_ID, ALT_COOKIE, ADD_PLAYLISTS_TO_MONITOR, DEBUG_JMK, UPDATE_SPREADSHEET
     global FINAL_LOG_PATH, log_logger
 
@@ -10691,6 +11783,20 @@ def main():
         sys.exit(0)
 
     stdout_bck = sys.stdout
+
+    # The screen clear and the startup banner both run before arguments are parsed, so the few config
+    # settings that decide them are read here too. Otherwise COLORED_OUTPUT = False in a config file
+    # would still colour the banner
+    apply_early_output_config()
+
+    # Initialise colour handling based on CLI args (early check) and terminal capabilities
+    if "--no-color" in sys.argv:
+        globals()["COLORED_OUTPUT"] = False
+
+    init_color_output(stdout_bck)
+
+    if not isinstance(sys.stdout, TerminalStream):
+        sys.stdout = TerminalStream(sys.stdout)
 
     keep_cli_history = any(flag in sys.argv for flag in ("--import-browser-cookie", "--set-sp-dc", "--set-lastfm-credentials", "--authorize-scrobble-health", "--doctor"))
     clear_screen(CLEAR_SCREEN and sys.stdout.isatty() and not keep_cli_history)
@@ -11169,6 +12275,13 @@ def main():
         help="Disable logging to spotify_monitor_<user_uri_id/file_suffix>.log"
     )
     opts.add_argument(
+        "--no-color",
+        dest="no_color",
+        action="store_true",
+        default=None,
+        help="Disable coloured output in the terminal"
+    )
+    opts.add_argument(
         "--debug",
         dest="debug_mode",
         action="store_true",
@@ -11198,6 +12311,8 @@ def main():
     )
 
     args = parser.parse_args()
+
+    apply_diagnostic_cli_overrides(args)
 
     if args.set_lastfm_credentials:
         conflicts = []
@@ -11501,12 +12616,18 @@ def main():
 
     if cfg_path:
         config_errors = []
-        if not load_config_file(cfg_path, error_out=config_errors, report_errors=not args.doctor):
+        config_retired = []
+        if not load_config_file(cfg_path, error_out=config_errors, report_errors=not args.doctor, retired_out=config_retired):
             if args.doctor:
                 for advice in config_errors:
                     doctor_startup_checks.append(make_doctor_check("Configuration", "FAIL", advice.summary, advice.detail, advice))
             else:
                 sys.exit(1)
+        elif config_retired and args.doctor:
+            doctor_startup_checks.append(make_doctor_check("Configuration", "WARN", "Configuration file contains removed settings", describe_retired_settings(config_retired, cfg_path)))
+
+    # Config loading can replace these globals, so reapply explicit flags to preserve CLI precedence
+    apply_diagnostic_cli_overrides(args)
 
     try:
         requested_monitor_mode = "scrobble_health" if args.authorize_scrobble_health else args.monitor_mode
@@ -11555,12 +12676,6 @@ def main():
                 print_recovery_error(exc, "target_invalid")
                 sys.exit(1)
 
-    if args.debug_mode is not None:
-        DEBUG_MODE = args.debug_mode
-
-    if args.verbose_mode is not None:
-        VERBOSE_MODE = args.verbose_mode
-
     if args.env_file:
         DOTENV_FILE = os.path.expanduser(args.env_file)
     else:
@@ -11572,8 +12687,7 @@ def main():
         env_path = None
     else:
         try:
-            from dotenv import find_dotenv, load_dotenv
-            from dotenv.parser import parse_stream
+            from dotenv import find_dotenv
 
             if DOTENV_FILE:
                 env_path = DOTENV_FILE
@@ -11585,24 +12699,12 @@ def main():
                         print(f"* Warning: dotenv file '{env_path}' does not exist\n")
                     env_path = None
                 else:
-                    with open(env_path, "r", encoding="utf-8") as dotenv_file:
-                        bindings = list(parse_stream(dotenv_file))
-                    malformed = [binding for binding in bindings if binding.error]
-                    if malformed:
-                        line_number = malformed[0].original.line
-                        raise ValueError(f"Dotenv syntax error near line {line_number}")
-                    load_dotenv(env_path, override=True, interpolate=False)
+                    apply_dotenv_mapping(read_dotenv_mapping(env_path), initialize_base=True)
             else:
                 default_dotenv_filename = SCROBBLE_HEALTH_DOTENV_FILENAME if scrobble_health_mode else DEFAULT_DOTENV_FILENAME
                 env_path = find_dotenv(filename=default_dotenv_filename) or None
                 if env_path:
-                    with open(env_path, "r", encoding="utf-8") as dotenv_file:
-                        bindings = list(parse_stream(dotenv_file))
-                    malformed = [binding for binding in bindings if binding.error]
-                    if malformed:
-                        line_number = malformed[0].original.line
-                        raise ValueError(f"Dotenv syntax error near line {line_number}")
-                    load_dotenv(env_path, override=True, interpolate=False)
+                    apply_dotenv_mapping(read_dotenv_mapping(env_path), initialize_base=True)
                     DOTENV_FILE = env_path
         except ImportError as exc:
             env_path = DOTENV_FILE if DOTENV_FILE else None
@@ -11624,14 +12726,17 @@ def main():
         if val is not None:
             globals()[environment_key] = val
 
+    if args.no_color is True:
+        COLORED_OUTPUT = False
+
+    # Re-initialise colour output to pick up COLORED_OUTPUT and any COLOR_THEME changes from the config file
+    init_color_output(stdout_bck)
+
     if args.token_source:
         TOKEN_SOURCE = args.token_source
 
     if not TOKEN_SOURCE:
         TOKEN_SOURCE = "cookie"
-
-    if TOKEN_SOURCE == "cookie":
-        ALARM_TIMEOUT = int((TOKEN_MAX_RETRIES * TOKEN_RETRY_TIMEOUT) + 5)
 
     if args.user_agent:
         USER_AGENT = args.user_agent
@@ -11676,7 +12781,7 @@ def main():
         SPOTIFY_INACTIVITY_CHECK = args.offline_timer
     if args.disappeared_timer is not None:
         SPOTIFY_DISAPPEARED_CHECK_INTERVAL = args.disappeared_timer
-    for value, option in ((args.scrobble_check_interval, "--scrobble-check-interval"), (args.scrobble_dead_period, "--scrobble-dead-period"), (args.scrobble_min_unmatched, "--scrobble-min-unmatched"), (args.scrobble_match_window, "--scrobble-match-window"), (args.scrobble_lookback, "--scrobble-lookback")):
+    for value, option in ((args.check_interval, "--check-interval"), (args.offline_timer, "--offline-timer"), (args.disappeared_timer, "--disappeared-timer"), (args.scrobble_check_interval, "--scrobble-check-interval"), (args.scrobble_dead_period, "--scrobble-dead-period"), (args.scrobble_min_unmatched, "--scrobble-min-unmatched"), (args.scrobble_match_window, "--scrobble-match-window"), (args.scrobble_lookback, "--scrobble-lookback")):
         if value is not None and value <= 0:
             parser.error(f"{option} must be greater than zero")
     if args.scrobble_repeat_interval is not None and args.scrobble_repeat_interval < 0:
@@ -11703,8 +12808,15 @@ def main():
         CSV_FILE = os.path.expanduser(args.csv_file)
     elif CSV_FILE:
         CSV_FILE = os.path.expanduser(CSV_FILE)
+    try:
+        ascii_log_separators_enabled()
+    except ValueError as e:
+        print(f"* Error: {e}")
+        sys.exit(1)
     if args.disable_logging is True:
         DISABLE_LOGGING = True
+    if args.file_suffix:
+        FILE_SUFFIX = str(args.file_suffix)
     if args.notify_active is True:
         ACTIVE_NOTIFICATION = True
     if args.notify_inactive is True:
@@ -11720,6 +12832,15 @@ def main():
     apply_webhook_cli_overrides(args, parser)
     if args.track_in_spotify is True:
         TRACK_SONGS = True
+
+    numeric_errors = runtime_configuration_errors()
+    if numeric_errors and not args.doctor:
+        print("* Error: Invalid numeric settings")
+        for numeric_error in numeric_errors:
+            print(f"* {numeric_error}")
+        print("To fix: Use the documented positive interval and count values then retry.")
+        print(f"Guide: {INTERVALS_GUIDE_URL}")
+        sys.exit(1)
 
     if args.authorize_scrobble_health:
         try:
@@ -11746,6 +12867,8 @@ def main():
                 target_is_saved = args.user_id is None and bool(TARGET_USER_URI_ID)
                 _wizard_print_monitor_after_doctor(command_config, command_env, command_target, target_is_saved=target_is_saved)
         sys.exit(doctor_exit)
+
+    LIVENESS_CHECK_COUNTER = LIVENESS_CHECK_INTERVAL / SPOTIFY_CHECK_INTERVAL if LIVENESS_CHECK_INTERVAL else 0
 
     if args.send_test_webhook:
         print("* Sending a test webhook ...\n")
@@ -11794,11 +12917,19 @@ def main():
 
     if args.flag_file:
         FLAG_FILE = os.path.expanduser(args.flag_file)
-        flag_file_delete()
     else:
         if FLAG_FILE:
             FLAG_FILE = os.path.expanduser(FLAG_FILE)
-            flag_file_delete()
+    if FLAG_FILE and not flag_file_delete():
+        sys.exit(1)
+
+    # Honor a config file or dotenv VERIFY_SSL by suppressing insecure-request warnings before any request
+    # (the import-time guard only sees the built-in default)
+    if not VERIFY_SSL:
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+    if not check_internet():
+        sys.exit(1)
 
     if args.send_test_email:
         print("* Sending test email notification ...\n")
@@ -11807,16 +12938,6 @@ def main():
         else:
             sys.exit(1)
         sys.exit(0)
-
-    if args.check_interval:
-        SPOTIFY_CHECK_INTERVAL = args.check_interval
-        LIVENESS_CHECK_COUNTER = LIVENESS_CHECK_INTERVAL / SPOTIFY_CHECK_INTERVAL
-
-    if args.offline_timer:
-        SPOTIFY_INACTIVITY_CHECK = args.offline_timer
-
-    if args.disappeared_timer:
-        SPOTIFY_DISAPPEARED_CHECK_INTERVAL = args.disappeared_timer
 
     if scrobble_health_mode:
         if is_missing_or_placeholder(LASTFM_API_KEY):
@@ -12006,15 +13127,8 @@ def main():
             print_recovery_error(e, "file_write", detail=f"CSV destination '{CSV_FILE}' cannot be opened for writing: {e}")
             sys.exit(1)
 
-    if args.file_suffix:
-        FILE_SUFFIX = str(args.file_suffix)
-    else:
-        if not FILE_SUFFIX:
-            if scrobble_health_mode:
-                safe_lastfm_suffix = re.sub(r"[^A-Za-z0-9._-]+", "_", scrobble_health_username).strip("._")
-                FILE_SUFFIX = f"lastfm_{safe_lastfm_suffix or 'scrobble_health'}"
-            else:
-                FILE_SUFFIX = str(target_user_id)
+    if not FILE_SUFFIX:
+        FILE_SUFFIX = resolve_log_file_suffix(target_user_id, scrobble_health_username if scrobble_health_mode else None)
 
     if args.disable_logging is True:
         DISABLE_LOGGING = True
@@ -12027,13 +13141,7 @@ def main():
 
     if not DISABLE_LOGGING:
         try:
-            log_path = Path(os.path.expanduser(SP_LOGFILE))
-            if log_path.parent != Path('.'):
-                if log_path.suffix == "":
-                    log_path = log_path.parent / f"{log_path.name}_{FILE_SUFFIX}.log"
-            else:
-                if log_path.suffix == "":
-                    log_path = Path(f"{log_path.name}_{FILE_SUFFIX}.log")
+            log_path = build_log_path(SP_LOGFILE, FILE_SUFFIX)
             log_path.parent.mkdir(parents=True, exist_ok=True)
             FINAL_LOG_PATH = str(log_path)
             sys.stdout = Logger(FINAL_LOG_PATH)
@@ -12106,13 +13214,19 @@ def main():
     if playback_warning is not None:
         print(f"* Warning: {playback_warning}\n")
 
-    if NTFY_IMAGES and not NTFY_IMAGES_AVAILABLE:
-        print("*" * HORIZONTAL_LINE)
-        print("* WARNING: ntfy images are enabled but Pillow is not installed")
-        print("* To fix this, install the project dependencies or run: python -m pip install Pillow")
-        print("* Disabling images in ntfy alerts...")
-        print("*" * HORIZONTAL_LINE + "\n")
+    if NTFY_IMAGES and not NOTIFICATION_IMAGES_AVAILABLE:
         NTFY_IMAGES = False
+        if WEBHOOK_ENABLED and normalized_webhook_provider() == "ntfy":
+            install_command = notification_images_install_command()
+            print("*" * HORIZONTAL_LINE)
+            print("* WARNING: ntfy artwork is enabled but the optional Pillow package is not installed")
+            if install_command:
+                print(f"* To attach artwork, install it with: {install_command}")
+            else:
+                print("* To attach artwork, use a published Docker image or add Pillow to your own image build")
+            print("* To stop this warning, set NTFY_IMAGES to False in the configuration file")
+            print("* Sending ntfy alerts as text only...")
+            print("*" * HORIZONTAL_LINE + "\n")
 
     # We define signal handlers only for Linux, Unix & MacOS since Windows has limited number of signals supported
     if platform.system() != 'Windows':

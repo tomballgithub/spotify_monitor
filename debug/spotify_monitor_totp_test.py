@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v2.4
+v2.5
 
 Debug code to test the fetching of a Spotify access token using a Web Player sp_dc cookie and TOTP parameters
 https://misiektoja.github.io/spotify_monitor/debugging/
@@ -28,6 +28,10 @@ options:
 ---------------
 
 Change log:
+
+v2.5 (13 Aug 26):
+- Restricted token validity checks to Spotify API hosts and disabled redirects
+- Returned nonzero exit status when requested work or token validation fails
 
 v2.4 (22 Jul 26):
 - Updated --fetch-secrets with static extraction from inline secret object literals in current Spotify web-player bundles
@@ -96,6 +100,7 @@ import pyotp
 import requests
 import json
 import sys
+from urllib.parse import urlsplit
 from dateutil import tz
 
 
@@ -332,13 +337,11 @@ def fetch_and_update_secrets():
             print(f"v{v}: '{decoded}'")
         print()
 
-        updated = False
         for ver, secret in secrets.items():
             byte_array = list(secret)
 
             if ver not in SECRET_CIPHER_DICT or SECRET_CIPHER_DICT[ver] != byte_array:
                 SECRET_CIPHER_DICT[ver] = byte_array
-                updated = True
                 _LOGGER.debug(f"Updated secret for version {ver}")
             else:
                 _LOGGER.debug(f"Secret for version {ver} is unchanged")
@@ -575,7 +578,7 @@ def check_token_validity(access_token: str, client_id: str = "", user_agent: str
         })
 
     try:
-        response = requests.get(TOKEN_VALIDITY_URL, headers=headers, timeout=5)
+        response = requests.get(TOKEN_VALIDITY_URL, headers=headers, timeout=5, allow_redirects=False)
         valid = response.status_code == 200
     except Exception:
         valid = False
@@ -585,9 +588,24 @@ def check_token_validity(access_token: str, client_id: str = "", user_agent: str
     return valid
 
 
+# Accepts only HTTPS Spotify API destinations for bearer-token validation
+def validate_token_validity_url(value: str) -> str:
+    try:
+        parsed = urlsplit(value)
+        hostname = parsed.hostname or ""
+        port = parsed.port
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f"invalid URL: {error}") from error
+    allowed_host = hostname in {"api.spotify.com", "spclient.wg.spotify.com"} or re.fullmatch(r"[a-z0-9-]+-spclient\.spotify\.com", hostname) is not None
+    if parsed.scheme != "https" or not allowed_host or parsed.username or parsed.password or port not in (None, 443) or parsed.fragment:
+        raise argparse.ArgumentTypeError("must be an HTTPS Spotify API URL without credentials or a fragment")
+    return value
+
+
 # Parses command options and runs the token test workflow
-def main():
+def main() -> int:
     global USER_AGENT, TOTP_VER, TOKEN_VALIDITY_URL
+    auxiliary_failure = False
 
     logging.basicConfig(
         level=logging.DEBUG,
@@ -598,7 +616,7 @@ def main():
     parser = argparse.ArgumentParser(description="Fetch Spotify access token using a Web Player sp_dc cookie and TOTP parameters")
     parser.add_argument("--sp-dc", help="Value of sp_dc cookie", default=None)
     parser.add_argument("--totp-ver", help="Identifier of the secret key when generating a TOTP token (TOTP_VER)", default=None)
-    parser.add_argument("--token-validity-url", help="URL used for token validity check", default=None)
+    parser.add_argument("--token-validity-url", help="Spotify API URL used for token validity check", default=None, type=validate_token_validity_url)
     parser.add_argument("--fetch-secrets", action="store_true", help="Additionally fetch and update secret keys used for TOTP generation (extraction via headless web browser, requires playwright)")
     parser.add_argument("--download-secrets", action="store_true", help="Additionally download and update secret keys used for TOTP generation (from remote or local URL)")
     args = parser.parse_args()
@@ -613,16 +631,18 @@ def main():
                 _LOGGER.debug("No secrets captured, using existing SECRET_CIPHER_DICT")
         except ImportError as e:
             _LOGGER.error("Error: %s", e)
-            return
+            auxiliary_failure = True
         except Exception as e:
             _LOGGER.error("Failed to fetch secrets: %s", e)
             _LOGGER.debug("Reverting to existing SECRET_CIPHER_DICT")
+            auxiliary_failure = True
 
     if args.download_secrets:
         _LOGGER.debug("Downloading secret keys used for TOTP generation ...")
         _LOGGER.debug("URL: %s", SECRET_CIPHER_DICT_URL)
         if not fetch_and_update_secrets():
             _LOGGER.error("Failed to download secrets")
+            auxiliary_failure = True
 
     if args.totp_ver:
         try:
@@ -631,6 +651,7 @@ def main():
         except Exception as e:
             _LOGGER.error("Failed to set TOTP_VER from parameter: %s", e)
             _LOGGER.debug("Reverting to existing TOTP_VER")
+            auxiliary_failure = True
 
     if args.token_validity_url:
         _LOGGER.debug(f"Setting TOKEN_VALIDITY_URL to {args.token_validity_url}")
@@ -641,7 +662,7 @@ def main():
         parser.print_help(sys.stderr)
         print()
         _LOGGER.error("sp_dc must be provided via --sp-dc or set in the script")
-        return
+        return 2
 
     if not USER_AGENT:
         USER_AGENT = get_random_user_agent()
@@ -658,9 +679,11 @@ def main():
 
         valid = check_token_validity(token, client_id, USER_AGENT)
         print("✅ Token is valid." if valid else "❌ Token is not valid.")
+        return 0 if valid and not auxiliary_failure else 1
     except Exception:
         _LOGGER.exception("Failed to refresh token")
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

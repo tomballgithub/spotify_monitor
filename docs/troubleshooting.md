@@ -23,7 +23,7 @@ The report shows only sections relevant to the checks it performed. It uses `[PA
 * Notifications
 * Summary
 
-Doctor loads the same settings as a normal run. It checks the Spotify login, connection and selected target. If complete legacy OAuth credentials are present, it requests a temporary token and checks track metadata. A failed legacy check becomes a warning when the web-player fallback works. Doctor also checks configured email and webhook settings without sending a message. It does not create logs, CSV files, flag files or OAuth caches. Friend Activity Doctor does not change configuration or `.env` files. Focused scrobble health Doctor may atomically update `SPOTIFY_SCROBBLE_REFRESH_TOKEN` if Spotify rotates it while access is checked.
+Doctor loads the same settings as a normal run. It checks the Spotify login, connection and selected target. If complete legacy OAuth credentials are present, it requests a temporary token and checks track metadata. A failed legacy check becomes a warning when the web-player fallback works. Doctor names the configuration file and the dotenv file it loaded, then lists which secrets are in effect and whether each one came from the dotenv file, an environment variable or the configuration file. Secret names are listed, never their values. Doctor also checks configured email and webhook settings without sending a message. It does not create logs, CSV files, flag files or OAuth caches. Friend Activity Doctor does not change configuration or `.env` files. Focused scrobble health Doctor may atomically update `SPOTIFY_SCROBBLE_REFRESH_TOKEN` if Spotify rotates it while access is checked.
 
 In an interactive terminal, Doctor can offer one real delivery test for each notification channel that passes its checks. Each prompt defaults to No. Answering Yes to the email prompt sends one test email. Answering Yes to the webhook prompt sends one Discord or ntfy message. Doctor does not offer delivery tests when it runs without an interactive terminal.
 
@@ -31,15 +31,15 @@ Warnings do not make the command fail. Doctor returns a nonzero exit status if a
 
 ```sh
 spotify_monitor --doctor
-spotify_monitor --doctor <spotify_user_uri_id>
+spotify_monitor --doctor <spotify_target>
 ```
 
 Doctor accepts the normal configuration options:
 
 ```sh
-spotify_monitor --doctor <spotify_user_uri_id> --config-file spotify_monitor.conf
-spotify_monitor --doctor <spotify_user_uri_id> --env-file /path/.env-spotify_monitor
-spotify_monitor --doctor <spotify_user_uri_id> --token-source client
+spotify_monitor --doctor <spotify_target> --config-file spotify_monitor.conf
+spotify_monitor --doctor <spotify_target> --env-file /path/.env-spotify_monitor
+spotify_monitor --doctor <spotify_target> --token-source client
 ```
 
 For scrobble health, focused Doctor shows live progress while it checks the environment, configuration, Spotify recent plays, Last.fm scrobbles and notifications. Its final report includes how many recent plays each service returned plus the current comparison status. Add `--verbose` to list up to ten recent Spotify plays with match markers, their matched Last.fm timestamps and the recent Last.fm scrobbles used for comparison:
@@ -69,6 +69,17 @@ spotify_monitor --import-browser-cookie --browser firefox
 Inside Docker or Docker Compose, the suggested fix shows the read-only Firefox host profile import first. If manual extraction is needed, it shows the recommended `--set-sp-dc` command because its hidden prompt is the most secure entry method. See [Import Firefox into Container Authentication](usage.md#import-firefox-into-container-authentication) for Linux, Snap, Flatpak and macOS commands.
 
 For advanced client-mode failures, repeat the [Spotify Desktop Client](configuration.md#spotify-desktop-client) export steps. Add `--debug` to Doctor or a normal run for sanitized technical detail. Use `--verbose` for a complete startup summary plus occasional state changes without output for every poll. Cookies, tokens, authorization headers, email passwords and webhook URLs remain hidden.
+
+<a id="terminal-colours-look-wrong"></a>
+## Terminal Colours Look Wrong
+
+If escape sequences such as `[36m` appear as literal text, the terminal does not understand ANSI colour. Start the tool with `--no-color`, or set `COLORED_OUTPUT = False` in the configuration file. On Windows, `pip install colorama` fixes the classic Command Prompt.
+
+If colour is missing where you expect it, check in this order: `--no-color` on the command line, `COLORED_OUTPUT` in the configuration file, a `NO_COLOR` environment variable, and whether output is redirected or piped. Colour is switched off in all of those cases, and also when `TERM` is unset or set to `dumb`.
+
+Log files never contain colour by design. To colour a saved log while reading it, see [Coloring Log Output with GRC](usage.md#coloring-log-output-with-grc).
+
+To change which colours are used, see [Terminal Colours](configuration.md#terminal-colours).
 
 <a id="choosing-the-right-logging-level"></a>
 ## Choosing the Right Logging Level

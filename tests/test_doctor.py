@@ -87,9 +87,35 @@ def test_report_markers_and_sections(monkeypatch):
     for section in ("Environment", "Configuration", "Authentication", "Metadata", "Connectivity", "Target", "Notifications", "Summary"):
         assert section in rendered
     assert "[PASS]" in rendered
-    assert "0 failure(s)" in rendered
-    assert "run only after approval" in rendered
+    assert "All checks passed. You are good to go!" in rendered
     assert f"Guide: {monitor.DOCTOR_GUIDE_URL}" in rendered
+    assert "ASCII_LOG_SEPARATORS resolves" not in rendered
+
+
+# Verifies the preflight notice reaches the user before any check runs rather than inside the report
+def test_preflight_notice_precedes_the_report(monkeypatch, capsys):
+    configure_valid_doctor(monkeypatch)
+    monkeypatch.setattr(monitor, "build_doctor_report", lambda *args, **kwargs: monitor.DoctorReport([monitor.make_doctor_check("Environment", "PASS", "ok")]))
+    monitor.run_doctor()
+    output = capsys.readouterr().out
+    assert "Running preflight checks. No files will be written. Interactive email and webhook tests run only after separate approval." in output
+    assert output.index("Running preflight checks.") < output.index("Doctor\n")
+
+
+# Verifies scrobble health mode names the one file Doctor may update
+def test_preflight_notice_names_the_scrobble_health_write(monkeypatch, capsys):
+    monkeypatch.setattr(monitor, "MONITOR_MODE", "scrobble_health")
+    monitor.render_doctor_notice()
+    assert "A rotated Spotify recent-play refresh token may be updated in the selected dotenv file." in capsys.readouterr().out
+
+
+# Verifies Doctor visually attaches explanatory details to their check rows
+def test_report_indents_check_details():
+    report = monitor.DoctorReport([monitor.make_doctor_check("Configuration", "PASS", "Log destination appears writable", "Path: spotify_monitor")])
+
+    rendered = monitor.render_doctor_report(report)
+
+    assert "[PASS] Log destination appears writable\n  Path: spotify_monitor" in rendered
 
 
 # Verifies reports omit sections that have no checks
@@ -106,7 +132,7 @@ def test_zero_failures_returns_success(monkeypatch, capsys):
     configure_valid_doctor(monkeypatch)
     monkeypatch.setattr(monitor, "build_doctor_report", lambda *args, **kwargs: monitor.DoctorReport([monitor.make_doctor_check("Environment", "PASS", "ok")]))
     assert monitor.run_doctor() == 0
-    assert "0 failure(s)" in capsys.readouterr().out
+    assert "All checks passed. You are good to go!" in capsys.readouterr().out
 
 
 # Verifies interactive doctor progress is transient while the final report still renders
@@ -118,19 +144,19 @@ def test_doctor_interactive_progress(monkeypatch):
         kwargs["progress"]("notifications")
         return monitor.DoctorReport([monitor.make_doctor_check("Notifications", "PASS", "ok")])
 
-    monkeypatch.setattr(monitor.sys, "stdout", stream)
+    monkeypatch.setattr(monitor.sys, "stdout", monitor.TerminalStream(stream))
     monkeypatch.setattr(monitor, "build_doctor_report", build_report)
     assert monitor.run_doctor() == 0
     output = stream.getvalue()
     assert "* Checking notifications ..." in output
     assert "Doctor\n" in output
-    assert "0 failure(s)" in output
+    assert "All checks passed. You are good to go!" in output
 
 
 # Verifies doctor progress stops at the visible message instead of padding to a fixed terminal column
 def test_doctor_progress_uses_visible_message_width(monkeypatch):
     stream = TTYBuffer()
-    monkeypatch.setattr(monitor.sys, "stdout", stream)
+    monkeypatch.setattr(monitor.sys, "stdout", monitor.TerminalStream(stream))
     monitor._doctor_progress("authentication")
     line = "* Checking authentication ..."
     assert stream.getvalue() == "\r" + line
@@ -156,7 +182,7 @@ def test_any_failure_returns_nonzero(monkeypatch):
 
 # Verifies interactive doctor delivery tests require separate default-no approvals
 def test_doctor_delivery_tests_can_be_declined_independently(monkeypatch):
-    report = monitor.DoctorReport([monitor.make_doctor_check("Notifications", "PASS", "SMTP connection and login succeeded"), monitor.make_doctor_check("Notifications", "PASS", "Webhook URL and alert choices look valid")])
+    report = monitor.DoctorReport([monitor.make_doctor_check("Notifications", "PASS", monitor.SMTP_READY_CHECK_LABEL), monitor.make_doctor_check("Notifications", "PASS", monitor.WEBHOOK_READY_CHECK_LABEL)])
     consent = Mock(side_effect=[False, False])
     email = Mock(side_effect=AssertionError("email sent without approval"))
     webhook = Mock(side_effect=AssertionError("webhook sent without approval"))
@@ -185,7 +211,7 @@ def test_doctor_delivery_consent_defaults_to_no(monkeypatch):
 
 # Verifies separately approved doctor tests deliver one email and one webhook
 def test_doctor_delivery_tests_send_approved_messages(monkeypatch):
-    report = monitor.DoctorReport([monitor.make_doctor_check("Notifications", "PASS", "SMTP connection and login succeeded"), monitor.make_doctor_check("Notifications", "PASS", "Webhook URL and alert choices look valid")])
+    report = monitor.DoctorReport([monitor.make_doctor_check("Notifications", "PASS", monitor.SMTP_READY_CHECK_LABEL), monitor.make_doctor_check("Notifications", "PASS", monitor.WEBHOOK_READY_CHECK_LABEL)])
     consent = Mock(side_effect=[True, True])
     email = Mock(return_value=0)
     webhook = Mock(return_value=0)
@@ -200,12 +226,29 @@ def test_doctor_delivery_tests_send_approved_messages(monkeypatch):
     assert [check.status for check in results] == ["PASS", "PASS"]
     email.assert_called_once_with("spotify_monitor: doctor test email", "This test email was sent after approval in --doctor. Your SMTP delivery settings work.", "", monitor.SMTP_SSL, smtp_timeout=5)
     webhook.assert_called_once_with("Spotify Monitor doctor test", "This test notification was sent after approval in --doctor. Your webhook delivery settings work.", "song", force=True)
-    assert "Delivery test summary: 0 failure(s)" in stream.getvalue()
+    assert "[PASS] Doctor test webhook delivered" in stream.getvalue()
+
+
+# Verifies the delivery-test gate still recognizes the readiness check once its label names the provider
+def test_delivery_gate_matches_the_provider_named_label(monkeypatch):
+    monkeypatch.setattr(monitor, "WEBHOOK_PROVIDER", "discord")
+    label = f"{monitor.WEBHOOK_READY_CHECK_LABEL} for {monitor.webhook_provider_display_name()}"
+    assert label.endswith("for Discord")
+    report = monitor.DoctorReport([monitor.make_doctor_check("Notifications", "PASS", label)])
+    consent = Mock(return_value=False)
+    monkeypatch.setattr(monitor.sys, "stdin", Mock(isatty=lambda: True))
+    monkeypatch.setattr(monitor.sys, "stdout", Mock(isatty=lambda: True, write=lambda *args: None, flush=lambda: None))
+    monkeypatch.setattr(monitor, "_doctor_ask_yes_no", consent)
+
+    monitor._doctor_offer_notification_tests(report)
+
+    assert consent.call_count == 1
+    assert "Send one test webhook through Discord now?" in consent.call_args[0][0]
 
 
 # Verifies noninteractive doctor runs never offer or send delivery tests
 def test_noninteractive_doctor_never_offers_delivery_tests(monkeypatch):
-    report = monitor.DoctorReport([monitor.make_doctor_check("Notifications", "PASS", "SMTP connection and login succeeded"), monitor.make_doctor_check("Notifications", "PASS", "Webhook URL and alert choices look valid")])
+    report = monitor.DoctorReport([monitor.make_doctor_check("Notifications", "PASS", monitor.SMTP_READY_CHECK_LABEL), monitor.make_doctor_check("Notifications", "PASS", monitor.WEBHOOK_READY_CHECK_LABEL)])
     monkeypatch.setattr(monitor.sys, "stdin", Mock(isatty=lambda: True))
     monkeypatch.setattr(monitor.sys, "stdout", Mock(isatty=lambda: False))
     monkeypatch.setattr(monitor, "_doctor_ask_yes_no", Mock(side_effect=AssertionError("consent prompt attempted")))
@@ -255,11 +298,20 @@ def test_python_version_check():
 
 # Verifies missing optional dependencies are warnings that do not affect normal monitoring
 def test_optional_dependency_reporting():
-    checks = monitor.doctor_check_environment((3, 9, 0), lambda name: None if name in ("spotipy", "pycookiecheat") else object())
+    checks = monitor.doctor_check_environment((3, 9, 0), lambda name: None if name in ("spotipy", "pycookiecheat", "PIL") else object())
     optional = [check for check in checks if "Optional dependency" in check.label]
-    assert len(optional) == 2
+    assert len(optional) == 3
     assert all(check.status == "WARN" for check in optional)
     assert all("Normal monitoring is unaffected" in check.detail for check in optional)
+
+
+# Verifies Chromium dependency guidance explicitly preserves Firefox import support
+def test_installed_browser_dependency_explains_firefox_support():
+    checks = monitor.doctor_check_environment((3, 9, 0), all_dependencies_present)
+    check = next(item for item in checks if "pycookiecheat" in item.label)
+
+    assert check.status == "PASS"
+    assert check.detail == "Used only for importing cookies from Chromium-based browsers. Firefox cookie import does not need it"
 
 
 # Verifies requested container playback is a warning rather than a failure
@@ -373,6 +425,37 @@ def test_valid_totp_config_passes(monkeypatch):
     checks = monitor.doctor_check_configuration()
     totp_check = next(check for check in checks if "TOTP" in check.label)
     assert totp_check.status == "PASS"
+
+
+# Verifies Doctor checks the final target-specific log filename
+def test_doctor_configuration_uses_final_target_log_path(monkeypatch):
+    configure_valid_doctor(monkeypatch)
+    monkeypatch.setattr(monitor, "DISABLE_LOGGING", False)
+    monkeypatch.setattr(monitor, "SP_LOGFILE", "spotify_monitor")
+    monkeypatch.setattr(monitor, "FILE_SUFFIX", "")
+
+    checks = monitor.doctor_check_configuration(target_value="spotify:user:sq58")
+    check = next(item for item in checks if item.label == "Log destination appears writable")
+
+    assert check.detail == "Path: spotify_monitor_sq58.log"
+
+
+# Verifies custom and scrobble-health suffixes use the runtime naming rules
+def test_doctor_configuration_uses_effective_log_suffix(monkeypatch):
+    configure_valid_doctor(monkeypatch)
+    monkeypatch.setattr(monitor, "DISABLE_LOGGING", False)
+    monkeypatch.setattr(monitor, "SP_LOGFILE", "logs/spotify")
+    monkeypatch.setattr(monitor, "FILE_SUFFIX", "friends")
+
+    custom_checks = monitor.doctor_check_configuration(target_value="sq58")
+    custom_check = next(item for item in custom_checks if item.label == "Log destination appears writable")
+    monkeypatch.setattr(monitor, "FILE_SUFFIX", "")
+    scrobble_checks = monitor.doctor_check_configuration(lastfm_username="Last.fm User")
+    scrobble_check = next(item for item in scrobble_checks if item.label == "Log destination appears writable")
+
+    assert custom_check.detail == "Path: logs/spotify_friends.log"
+    assert scrobble_check.detail == "Path: logs/spotify_lastfm_Last.fm_User.log"
+    assert monitor.build_log_path("logs/fixed.log", "sq58") == Path("logs/fixed.log")
 
 
 # Configures the minimum valid client-mode values
@@ -668,3 +751,56 @@ def test_contradictory_action_flags_are_rejected(flag):
     result = run_cli(["--doctor", flag])
     assert result.returncode == 2
     assert "cannot be combined" in result.stderr
+
+
+# Verifies missing artwork support names the current NTFY_IMAGES setting and the install command
+def test_optional_artwork_dependency_explains_ntfy_images(monkeypatch):
+    monkeypatch.setattr(monitor, "NTFY_IMAGES", True)
+    monkeypatch.setattr(monitor, "_wizard_install_method", lambda: "pip")
+    checks = monitor.doctor_check_environment((3, 10, 0), lambda name: None if name == "PIL" else object())
+    check = next(item for item in checks if "Pillow" in item.label)
+
+    assert check.status == "WARN"
+    assert "NTFY_IMAGES is enabled" in check.detail
+    assert "spotify_monitor[notification-images]" in check.detail
+
+
+# Verifies artwork guidance inside a container points at the published images instead of pip
+def test_optional_artwork_dependency_guides_container_users(monkeypatch):
+    monkeypatch.setattr(monitor, "NTFY_IMAGES", False)
+    monkeypatch.setattr(monitor, "_wizard_install_method", lambda: "docker")
+    checks = monitor.doctor_check_environment((3, 13, 0), lambda name: None if name == "PIL" else object())
+    check = next(item for item in checks if "Pillow" in item.label)
+
+    assert "currently disabled" in check.detail
+    assert "Docker images" in check.detail
+    assert "pip install" not in check.detail
+
+
+# Exported secrets are a documented alternative to a dotenv file, so they must apply when no file is loaded
+def test_environment_secrets_apply_without_a_dotenv_file(monkeypatch):
+    monkeypatch.setattr(monitor.sys, "argv", ["spotify_monitor", "--doctor", "--env-file", "none"])
+    monkeypatch.setattr(monitor, "run_doctor", lambda *args, **kwargs: 0)
+    monkeypatch.setattr(monitor, "NTFY_ACCESS_TOKEN", "", raising=False)
+    monkeypatch.setenv("NTFY_ACCESS_TOKEN", "tk_from_environment")
+
+    with pytest.raises(SystemExit):
+        monitor.main()
+
+    assert monitor.NTFY_ACCESS_TOKEN == "tk_from_environment"
+
+
+# Each secret is attributed to the source it actually came from, so the report can name the dotenv path
+def test_secret_sources_split_by_origin(monkeypatch, tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("SMTP_PASSWORD=from-file\n", encoding="utf-8")
+    monkeypatch.setattr(monitor, "SMTP_PASSWORD", "from-file", raising=False)
+    monkeypatch.setattr(monitor, "WEBHOOK_URL", "https://ntfy.sh/topic", raising=False)
+    monkeypatch.setattr(monitor, "SP_DC_COOKIE", "your_sp_dc_cookie_value", raising=False)
+    monkeypatch.setenv("WEBHOOK_URL", "https://ntfy.sh/topic")
+
+    from_file, from_environment, from_settings = monitor.doctor_secret_sources(str(env_file))
+
+    assert "SMTP_PASSWORD" in from_file
+    assert "WEBHOOK_URL" in from_environment
+    assert "SP_DC_COOKIE" not in from_file + from_environment + from_settings

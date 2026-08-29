@@ -186,11 +186,12 @@ class SpotifyWebBackendTests(unittest.TestCase):
         spotipy_module = types.ModuleType("spotipy")
         oauth_module = types.ModuleType("spotipy.oauth2")
         cache_module = types.ModuleType("spotipy.cache_handler")
-        setattr(oauth_module, "SpotifyClientCredentials", credentials_factory)
-        setattr(cache_module, "CacheFileHandler", Mock())
-        setattr(cache_module, "MemoryCacheHandler", Mock())
-        setattr(spotipy_module, "oauth2", oauth_module)
-        setattr(spotipy_module, "cache_handler", cache_module)
+        # A synthetic module cannot declare these attributes, so setattr keeps the type checker quiet
+        setattr(oauth_module, "SpotifyClientCredentials", credentials_factory)  # noqa: B010
+        setattr(cache_module, "CacheFileHandler", Mock())  # noqa: B010
+        setattr(cache_module, "MemoryCacheHandler", Mock())  # noqa: B010
+        setattr(spotipy_module, "oauth2", oauth_module)  # noqa: B010
+        setattr(spotipy_module, "cache_handler", cache_module)  # noqa: B010
         modules = {"spotipy": spotipy_module, "spotipy.oauth2": oauth_module, "spotipy.cache_handler": cache_module}
         with patch.object(monitor, "SP_APP_TOKENS_FILE", ""), patch.dict(sys.modules, modules):
             result = monitor.spotify_get_access_token_from_oauth_app("legacy-client", "legacy-secret")
@@ -209,11 +210,12 @@ class SpotifyWebBackendTests(unittest.TestCase):
         spotipy_module = types.ModuleType("spotipy")
         oauth_module = types.ModuleType("spotipy.oauth2")
         cache_module = types.ModuleType("spotipy.cache_handler")
-        setattr(oauth_module, "SpotifyClientCredentials", credentials_factory)
-        setattr(cache_module, "CacheFileHandler", file_cache_factory)
-        setattr(cache_module, "MemoryCacheHandler", memory_cache_factory)
-        setattr(spotipy_module, "oauth2", oauth_module)
-        setattr(spotipy_module, "cache_handler", cache_module)
+        # A synthetic module cannot declare these attributes, so setattr keeps the type checker quiet
+        setattr(oauth_module, "SpotifyClientCredentials", credentials_factory)  # noqa: B010
+        setattr(cache_module, "CacheFileHandler", file_cache_factory)  # noqa: B010
+        setattr(cache_module, "MemoryCacheHandler", memory_cache_factory)  # noqa: B010
+        setattr(spotipy_module, "oauth2", oauth_module)  # noqa: B010
+        setattr(spotipy_module, "cache_handler", cache_module)  # noqa: B010
         modules = {"spotipy": spotipy_module, "spotipy.oauth2": oauth_module, "spotipy.cache_handler": cache_module}
         with patch.object(monitor, "SP_APP_TOKENS_FILE", ".spotify-monitor-oauth-app.json"), patch.dict(sys.modules, modules):
             result = monitor.spotify_get_access_token_from_oauth_app("legacy-client", "legacy-secret", use_file_cache=False)
@@ -233,7 +235,7 @@ class SpotifyWebBackendTests(unittest.TestCase):
     def test_version_is_offline(self):
         result = run_cli("--version")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("spotify_monitor.py v3.2", result.stdout)
+        self.assertIn(f"spotify_monitor.py v{monitor.VERSION}", result.stdout)
 
     # Verifies config generation emits valid Python without network access or Spotipy
     def test_generate_config_is_offline(self):
@@ -376,7 +378,7 @@ class SpotifyWebBackendTests(unittest.TestCase):
     # Verifies repeated non-restricted legacy playlist failures latch the web backend after the threshold
     def test_playlist_non_restricted_failures_latch_after_threshold(self):
         normalized = monitor.spotify_normalize_web_playlist(web_playlist_fixture())
-        with patch.object(monitor, "_spotify_get_playlist_owner_and_image_api", side_effect=make_http_error(401)) as legacy, patch.object(monitor, "spotify_get_playlist_info_web", return_value=normalized) as web, redirect_stdout(io.StringIO()):
+        with patch.object(monitor, "_spotify_get_playlist_owner_and_image_api", side_effect=make_http_error(401)) as legacy, patch.object(monitor, "spotify_get_playlist_info_web", return_value=normalized), redirect_stdout(io.StringIO()):
             for _ in range(monitor.METADATA_API_FAILURE_LATCH_THRESHOLD - 1):
                 monitor.spotify_get_playlist_owner_and_image("legacy-token", PLAYLIST_URI, oauth_app=True)
             self.assertFalse(monitor.SP_WEB_PLAYLIST_BACKEND_PREFERRED)
@@ -466,8 +468,9 @@ class SpotifyWebBackendTests(unittest.TestCase):
     # Verifies the idempotent web-player GraphQL POST is retried while other POSTs are not
     def test_web_player_adapter_retries_post(self):
         self.assertIs(monitor.SESSION.get_adapter(monitor.WEB_PLAYER_QUERY_URL), monitor.web_player_adapter)
-        web_player_methods = getattr(monitor.SESSION.get_adapter(monitor.WEB_PLAYER_QUERY_URL), "max_retries").allowed_methods
-        default_methods = getattr(monitor.SESSION.get_adapter("https://api.spotify.com/v1/tracks/abc"), "max_retries").allowed_methods
+        # get_adapter is typed as returning BaseAdapter, which does not declare max_retries
+        web_player_methods = getattr(monitor.SESSION.get_adapter(monitor.WEB_PLAYER_QUERY_URL), "max_retries").allowed_methods  # noqa: B009
+        default_methods = getattr(monitor.SESSION.get_adapter("https://api.spotify.com/v1/tracks/abc"), "max_retries").allowed_methods  # noqa: B009
         self.assertIn("POST", web_player_methods)
         self.assertNotIn("POST", default_methods)
 

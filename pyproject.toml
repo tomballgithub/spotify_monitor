@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spotify_monitor"
-version = "3.2"
+version = "3.3.1"
 description = "Track Spotify friends' music activity in real time with auto-playback, skipped tracks detection and instant notifications"
 readme = "README.md"
 license = "GPL-3.0-or-later"
@@ -18,7 +18,6 @@ dependencies = [
   "pyotp>=2.9.0",
   "python-dotenv>=0.19",
   "wcwidth>=0.2.7",
-  "Pillow>=10.0",
 ]
 classifiers = [
   "Programming Language :: Python :: 3",
@@ -36,7 +35,11 @@ classifiers = [
 keywords = ["spotify", "monitoring", "tracking", "real-time", "friend-activity",  "osint"]
 
 [project.optional-dependencies]
-test = ["build>=1.2", "coverage>=7.10", "hypothesis>=6.100", "pyright>=1.1.400", "pytest>=7.0", "setuptools>=61.0", "wheel"]
+test = ["build>=1.2", "coverage>=7.10", "hypothesis>=6.100", "Pillow>=11.3.0,<12; python_version < '3.10'", "Pillow>=12.0.0; python_version >= '3.10'", "pyright>=1.1.400", "pytest>=7.0", "pyyaml>=6.0", "setuptools>=61.0", "wheel"]
+# Pinned so a new ruff release cannot fail CI on a rule that did not exist when the change was written
+lint = ["ruff==0.16.4"]
+# Pillow 12 dropped Python 3.9, so 3.9 keeps the last release that supports it while 3.10 and newer get the current one
+notification-images = ["Pillow>=11.3.0,<12; python_version < '3.10'", "Pillow>=12.0.0; python_version >= '3.10'"]
 legacy-oauth = ["spotipy>=2.24.0"]
 browser = ["pycookiecheat>=0.8"]
 
@@ -58,6 +61,16 @@ include-package-data = true
 [tool.setuptools.packages.find]
 include = ["debug*"]
 namespaces = true
+
+[tool.ruff]
+target-version = "py39"
+
+[tool.ruff.lint]
+# Defect rules only: syntax errors, pyflakes and bugbear. Formatting and import order are left
+# to the surrounding code, which keeps each function definition on one physical line
+select = ["E9", "F", "B"]
+# Both are style preferences that would rewrite hundreds of existing lines without fixing a defect
+ignore = ["F541", "B904"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

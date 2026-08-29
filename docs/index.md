@@ -1,14 +1,13 @@
 # spotify_monitor
 
-<p align="left">
-  <img src="https://img.shields.io/github/v/release/misiektoja/spotify_monitor?style=flat-square&color=blue" alt="GitHub Release" />
-  <img src="https://img.shields.io/pypi/v/spotify_monitor?style=flat-square&color=teal" alt="PyPI Version" />
-  <img src="https://img.shields.io/github/stars/misiektoja/spotify_monitor?style=flat-square&color=magenta" alt="GitHub Stars" />
-  <img src="https://img.shields.io/badge/python-3.9+-blueviolet?style=flat-square" alt="Python Versions" />
-  <img src="https://img.shields.io/github/license/misiektoja/spotify_monitor?style=flat-square&color=blue" alt="License" />
-  <img src="https://img.shields.io/github/last-commit/misiektoja/spotify_monitor?style=flat-square&color=green" alt="Last Commit" />
-  <img src="https://img.shields.io/badge/maintenance-active-brightgreen?style=flat-square" alt="Maintenance" />
-</p>
+[![GitHub Release](https://img.shields.io/github/v/release/misiektoja/spotify_monitor?style=flat-square&color=blue)](https://github.com/misiektoja/spotify_monitor/releases)
+[![PyPI Version](https://img.shields.io/pypi/v/spotify_monitor?style=flat-square&color=teal)](https://pypi.org/project/spotify-monitor/)
+[![GitHub Stars](https://img.shields.io/github/stars/misiektoja/spotify_monitor?style=flat-square&color=magenta)](https://github.com/misiektoja/spotify_monitor)
+[![Python Versions](https://img.shields.io/badge/python-3.9+-blueviolet?style=flat-square)](https://pypi.org/project/spotify-monitor/)
+[![License](https://img.shields.io/github/license/misiektoja/spotify_monitor?style=flat-square&color=blue)](https://github.com/misiektoja/spotify_monitor/blob/main/LICENSE)
+[![OpenSSF Scorecard](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.scorecard.dev%2Fprojects%2Fgithub.com%2Fmisiektoja%2Fspotify_monitor&query=%24.score&label=openssf%20scorecard&style=flat-square)](https://scorecard.dev/viewer/?uri=github.com/misiektoja/spotify_monitor)
+[![Last Commit](https://img.shields.io/github/last-commit/misiektoja/spotify_monitor?style=flat-square&color=green)](https://github.com/misiektoja/spotify_monitor/commits/main)
+[![Maintenance](https://img.shields.io/badge/maintenance-active-brightgreen?style=flat-square)](https://github.com/misiektoja/spotify_monitor)
 
 Powerful real-time tracker for Spotify friend music activity: monitor listening habits, auto-sync playback to your local Spotify client, detect skipped tracks and receive instant notifications for every beat your friends play.
 
@@ -19,11 +18,6 @@ Powerful real-time tracker for Spotify friend music activity: monitor listening 
 <a id="-quick-install-run"></a>
 ### 🚀 Quick Install & Run
 
-Spotify Monitor has two independent modes:
-
-- **Friend Activity** monitors a Spotify friend's completed plays, activity status and listening sessions.
-- **Last.fm Scrobble Health** checks whether plays from your Spotify account reach your Last.fm profile and alerts you when scrobbles stop showing up.
-
 #### Python from PyPI
 
 New to Python or unsure what is installed? Follow the [Python install walkthrough](https://misiektoja.github.io/spotify_monitor/installation/#new-to-python-install-everything) first.
@@ -32,20 +26,20 @@ New to Python or unsure what is installed? Follow the [Python install walkthroug
 pip install spotify_monitor
 ```
 
-Run setup for friend activity mode:
+Run setup for **friend activity mode** (Spotify friend's completed plays, activity status and listening session):
 
 ```sh
 spotify_monitor --setup
 ```
 
-Or for Last.fm Scrobble Health:
+Or for **Last.fm scrobble health mode** (checks whether plays from your Spotify account reach your Last.fm profile):
 ```sh
 spotify_monitor --setup-scrobble-health
 ```
 
 #### Docker image - fastest container setup
 
-The Docker commands below run Friend Activity setup. For Last.fm Scrobble Health, replace the final `--setup` with `--setup-scrobble-health`.
+The Docker commands below run Friend Activity setup. For Last.fm scrobble health, replace the final `--setup` with `--setup-scrobble-health`.
 
 ##### macOS or Windows
 
@@ -108,6 +102,7 @@ For the manual single-file method, optional extras and upgrade commands for ever
 - **Track Context**: View **playlist, artist** and **album info** with clickable URLs.
 - **Skip Detection**: Identify exactly when and how long a song was played.
 - **Global Search**: Instant links to **Spotify, YouTube Music, Apple Music, Tidal, lyrics** and more.
+- **Coloured Output**: Readable terminal colours with a **customizable theme**, while log files stay plain text.
 
 ### 🔔 Smart Notifications
 - **Multi-Channel**: Instant alerts via **Email** and **Webhooks** (**Discord**, **ntfy** etc.).

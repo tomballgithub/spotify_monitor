@@ -14,9 +14,11 @@ Choose either the Python path or the container path.
 **Python path**:
 
 - [Python](https://www.python.org/downloads/) 3.9 or higher
-- Core libraries: `requests`, `python-dateutil`, `urllib3`, `pyotp`, `python-dotenv`, `wcwidth`, `Pillow`
+- Core libraries: `requests`, `python-dateutil`, `urllib3`, `pyotp`, `python-dotenv`, `wcwidth`
 - [spotipy](https://github.com/spotipy-dev/spotipy) is optional and is needed only for legacy OAuth metadata access
 - [pycookiecheat](https://github.com/n8henrie/pycookiecheat) is optional and is needed only to import cookies from Chrome, Brave or Chromium
+- [Pillow](https://github.com/python-pillow/Pillow) is optional and is needed only to attach playlist and album artwork to ntfy alerts
+- [colorama](https://github.com/tartley/colorama) is optional and improves coloured output in the classic Windows Command Prompt
 
 **Container path** (Python is included in the image):
 
@@ -190,6 +192,14 @@ pip install "spotify_monitor[browser]"
 
 This installs Spotify Monitor and the optional `pycookiecheat` dependency.
 
+Artwork in ntfy alerts is optional. Install the artwork extra to attach playlist and album covers to ntfy notifications:
+
+```sh
+pip install "spotify_monitor[notification-images]"
+```
+
+This installs Spotify Monitor and the optional Pillow dependency. Python 3.10 and newer get the current Pillow, while Python 3.9 gets the last release that still supports it. After installing, set `NTFY_IMAGES` to `True` in the configuration file. The Docker images already include this dependency.
+
 Spotipy is optional. Install the legacy OAuth extra only if you already have working [Spotify OAuth App](configuration.md#spotify-oauth-app) credentials and want to enable the optional legacy Web API metadata path. The automatic web-player backend works without this extra:
 
 ```sh
@@ -198,10 +208,10 @@ pip install "spotify_monitor[legacy-oauth]"
 
 This installs Spotify Monitor and the optional Spotipy dependency. It also includes the base package, so this single command is sufficient.
 
-Both extras can be installed together:
+Extras can be installed together:
 
 ```sh
-pip install "spotify_monitor[browser,legacy-oauth]"
+pip install "spotify_monitor[browser,legacy-oauth,notification-images]"
 ```
 
 <a id="manual-installation"></a>
@@ -225,7 +235,7 @@ pip install -r requirements.txt
 You can install the core dependencies directly if you downloaded only the script:
 
 ```sh
-pip install requests python-dateutil urllib3 pyotp python-dotenv wcwidth Pillow
+pip install requests python-dateutil urllib3 pyotp python-dotenv wcwidth
 ```
 
 For optional legacy OAuth support install `spotipy`:
@@ -238,6 +248,24 @@ For optional Chrome, Brave or Chromium import on macOS or Linux install `pycooki
 
 ```sh
 pip install "pycookiecheat>=0.8"
+```
+
+For optional artwork in ntfy alerts install `Pillow`, then set `NTFY_IMAGES` to `True` in the configuration file:
+
+```sh
+pip install "Pillow>=12.0.0"
+```
+
+On Python 3.9 install the last release that supports it instead:
+
+```sh
+pip install "Pillow>=11.3.0,<12"
+```
+
+On the classic Windows Command Prompt, install `colorama` for better coloured output:
+
+```sh
+pip install colorama
 ```
 
 Verify the script:

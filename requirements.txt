@@ -4,9 +4,15 @@ urllib3
 pyotp
 python-dotenv
 wcwidth
-gspread #jmk
-google-auth-oauthlib #jmk
-Pillow>=10.0
+
+# Google Sheets Support #jmk
+gspread
+google-auth-oauthlib
+
+# Optional for ntfy artwork attachments (NTFY_IMAGES)
+# Pillow 12 dropped Python 3.9, so 3.9 keeps the last release that supports it
+# Pillow>=12.0.0; python_version >= "3.10"
+# Pillow>=11.3.0,<12; python_version < "3.10"
 
 # Optional for configured legacy OAuth app credentials
 # spotipy>=2.24.0

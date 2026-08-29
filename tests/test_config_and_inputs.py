@@ -153,6 +153,7 @@ def test_format_config_value_supports_required_types():
 def test_rendered_config_compiles_and_uses_current_non_secret_values(monkeypatch):
     monkeypatch.setattr(monitor, "TARGET_USER_URI_ID", 'path\\with"quote#hash')
     monkeypatch.setattr(monitor, "SPOTIFY_CHECK_INTERVAL", 123)
+    monkeypatch.setattr(monitor, "NTFY_IMAGES", True)
     rendered = monitor.generate_config_with_current_values()
     namespace = {}
     exec(compile(rendered, "<rendered-config>", "exec"), namespace)
@@ -220,6 +221,8 @@ def test_safe_config_writer_backs_up_existing_file():
         assert backup_path.match("spotify_monitor.conf.*.bak")
         assert backup_path.read_text(encoding="utf-8") == 'TARGET_USER_URI_ID = "old-user"\n'
         assert destination.read_text(encoding="utf-8") == 'TARGET_USER_URI_ID = "new-user"\n'
+        if os.name == "posix":
+            assert backup_path.stat().st_mode & 0o777 == 0o600
 
 
 # Verifies invalid config content leaves an existing destination untouched
@@ -378,3 +381,126 @@ def test_successful_config_load_updates_namespace():
         assert monitor.load_config_file(config_path, namespace) is True
     assert namespace["TARGET_USER_URI_ID"] == "configured-user"
     assert namespace["SPOTIFY_CHECK_INTERVAL"] == 45
+
+
+# Verifies config loading rejects executable expressions without invoking them
+def test_config_loader_rejects_executable_content(monkeypatch, capsys):
+    system_call = patch.object(monitor.os, "system")
+    with make_temp_directory() as directory_name, system_call as system_mock:
+        config_path = Path(directory_name) / "malicious.conf"
+        config_path.write_text('TARGET_USER_URI_ID = __import__("os").system("unexpected")\n', encoding="utf-8")
+        assert monitor.load_config_file(config_path, {}) is False
+    system_mock.assert_not_called()
+    output = capsys.readouterr().out
+    assert "only documented NAME = literal assignments" in output
+
+
+# Verifies config loading rejects undocumented names and control-flow statements
+@pytest.mark.parametrize("content", ['UNSUPPORTED_SETTING = 1\n', 'if True:\n    TARGET_USER_URI_ID = "user"\n'])
+def test_config_loader_rejects_unsupported_statements(content, capsys):
+    with make_temp_directory() as directory_name:
+        config_path = Path(directory_name) / "unsupported.conf"
+        config_path.write_text(content, encoding="utf-8")
+        assert monitor.load_config_file(config_path, {}) is False
+    assert "unsupported content" in capsys.readouterr().out
+
+
+# Verifies a configuration written by an older version still loads when it carries retired settings
+def test_config_loader_ignores_retired_settings(capsys):
+    with make_temp_directory() as directory_name:
+        config_path = Path(directory_name) / "legacy.conf"
+        config_path.write_text('TOTP_VER = 0\nSECRET_CIPHER_DICT = {"12": [1, 2]}\nSECRET_CIPHER_DICT_URL = "https://example.invalid/secrets.json"\nSPOTIFY_CHECK_INTERVAL = 45\n', encoding="utf-8")
+        namespace = {}
+        assert monitor.load_config_file(config_path, namespace) is True
+    assert namespace["SPOTIFY_CHECK_INTERVAL"] == 45
+    for retired_setting in monitor.RETIRED_CONFIG_SETTINGS:
+        assert retired_setting not in namespace
+    output = capsys.readouterr().out
+    assert "TOTP_VER" in output
+    assert "are ignored" in output
+
+
+# Verifies retired settings are reported to the caller so Doctor can surface them without printing
+def test_config_loader_reports_retired_settings_to_caller():
+    with make_temp_directory() as directory_name:
+        config_path = Path(directory_name) / "legacy.conf"
+        config_path.write_text("TOTP_VER = 0\nSPOTIFY_CHECK_INTERVAL = 45\n", encoding="utf-8")
+        retired = []
+        assert monitor.load_config_file(config_path, {}, report_errors=False, retired_out=retired) is True
+    assert retired == ["TOTP_VER"]
+
+
+# Verifies ignoring retired names does not weaken rejection of any other unknown setting
+def test_retired_allowance_does_not_accept_other_unknown_names():
+    assert monitor.RETIRED_CONFIG_SETTINGS.isdisjoint(monitor._config_allowed_names())
+    with pytest.raises(ValueError, match="unsupported configuration setting"):
+        monitor.parse_config_content("TOTP_VERSION_TYPO = 1\n")
+
+
+# Verifies invalid Friend Activity timing flags fail during argument validation
+@pytest.mark.parametrize("option", ["--check-interval", "--offline-timer", "--disappeared-timer"])
+def test_nonpositive_friend_activity_timing_flags_are_rejected(option):
+    result = run_cli([option, "0", "--doctor", "--env-file", "none"])
+    assert result.returncode == 2
+    assert f"{option} must be greater than zero" in result.stderr
+
+
+# Verifies invalid configured timing values stop startup before network access
+def test_invalid_configured_timing_stops_before_network_access():
+    with make_temp_directory() as directory_name:
+        config_path = Path(directory_name) / "invalid-timing.conf"
+        config_path.write_text('TARGET_USER_URI_ID = "configured-user"\nSPOTIFY_CHECK_INTERVAL = 0\nDOTENV_FILE = "none"\n', encoding="utf-8")
+        result = run_cli(["--config-file", str(config_path)])
+    assert result.returncode == 1
+    assert "SPOTIFY_CHECK_INTERVAL must be a number greater than zero" in result.stdout
+    assert "network request attempted" not in result.stderr
+
+
+# Verifies activity flag failures are visible and disable the integration
+def test_flag_file_failure_is_visible_and_disables_integration(monkeypatch, capsys):
+    with make_temp_directory() as directory_name:
+        monkeypatch.setattr(monitor, "FLAG_FILE", directory_name)
+        assert monitor.flag_file_delete() is False
+    assert monitor.FLAG_FILE == ""
+    assert "Activity flag integration was disabled" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("uri,expected", [
+    ("spotify:user:MiXeD", "https://open.spotify.com/user/MiXeD?si=1"),
+    ("spotify:playlist:37i9dQZF1DX", "https://open.spotify.com/playlist/37i9dQZF1DX?si=1"),
+    ("  spotify:track:abc  ", "https://open.spotify.com/track/abc?si=1"),
+    ("SPOTIFY:TRACK:abc", "https://open.spotify.com/track/abc?si=1"),
+])
+# Verifies a valid URI converts with its identifier case preserved, since Spotify IDs are case sensitive
+def test_convert_uri_to_url_accepts_valid_references(uri, expected):
+    assert monitor.spotify_convert_uri_to_url(uri) == expected
+
+
+@pytest.mark.parametrize("uri", [
+    "spotify:playlist:idspotify:user:evil",
+    "spotify:episode:abc",
+    "spotify:user:",
+    "spotify:user:abc:extra",
+    "::37i9dQZF1DX",
+    "spotify:user",
+    "https://open.spotify.com/user/abc",
+    "",
+    "   ",
+    None,
+    42,
+])
+# Verifies an unsupported or malformed reference yields an empty string instead of a wrong or partial link
+def test_convert_uri_to_url_rejects_unparseable_references(uri):
+    assert monitor.spotify_convert_uri_to_url(uri) == ""
+
+
+# Verifies the object type is matched as a whole part, so an ID containing another type cannot redirect the link
+def test_convert_uri_to_url_matches_whole_parts():
+    assert monitor.spotify_convert_uri_to_url("spotify:album:trackfulID") == "https://open.spotify.com/album/trackfulID?si=1"
+    assert monitor.spotify_convert_uri_to_url("spotify:playlist:userlike") == "https://open.spotify.com/playlist/userlike?si=1"
+
+
+# Verifies ntfy artwork ships disabled and the generated config explains the optional install
+def test_ntfy_images_ships_disabled_and_documents_optional_dependency():
+    assert "NTFY_IMAGES = False" in monitor.CONFIG_BLOCK
+    assert 'pip install "spotify_monitor[notification-images]"' in monitor.CONFIG_BLOCK

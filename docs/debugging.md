@@ -31,6 +31,8 @@ The command prints the access token response. Example output:
    <img src="https://raw.githubusercontent.com/misiektoja/spotify_monitor/refs/heads/main/assets/spotify_monitor_totp_test.png" alt="spotify_monitor_totp_test" width="100%"/>
 </p>
 
+The optional `--token-validity-url` accepts only HTTPS Spotify API hosts. Redirects are rejected so the bearer token cannot be forwarded to a different destination. The utility returns a nonzero exit status when token retrieval, requested secret updates or token validation fails.
+
 > **If the included TOTP values stop working:** `--fetch-secrets` opens Spotify Web Player in a headless Playwright browser and extracts current values. `--download-secrets` reads `SECRET_CIPHER_DICT_URL` from an HTTP URL or local `file:` URL. Its default source is [xyloflake/spot-secrets-go](https://github.com/xyloflake/spot-secrets-go). These options affect only this test utility. The main Spotify Monitor tool uses `TOTP_VERSION` and `TOTP_SECRET_CIPHER_BYTES` instead.
 
 ```sh
@@ -47,6 +49,8 @@ python3 spotify_monitor_totp_test.py --sp-dc "your_sp_dc_cookie_value" --downloa
 The [spotify_monitor_secret_grabber](https://github.com/misiektoja/spotify_monitor/blob/main/debug/spotify_monitor_secret_grabber.py) reads TOTP keys from Spotify Web Player JavaScript bundles. It scans the loaded source first and keeps the older runtime hook as a fallback.
 
 The extractor can return v59, v60 and v61 from the current web-player bundle even when the older runtime hook finds nothing.
+
+The extractor returns a nonzero exit status when it finds no usable secrets, extraction fails or `--all` cannot write every requested output file.
 
 > **Recommended:** Use the [Docker method](#secret-key-extraction-via-docker) if you do not already have Playwright and its browser files installed.
 
@@ -117,6 +121,10 @@ A prebuilt multi-architecture image is available on Docker Hub: [`misiektoja/spo
 
 The examples use the `latest` tag. `--pull=always` in direct commands and `pull_policy: always` in Compose make Docker check for a newer image before each run. To stay on one release, add a version such as `:1.3` to the image name.
 
+Image tags follow the extractor's own version, so `:1.4` is the image built from `spotify_monitor_secret_grabber.py` v1.4. The image is published whenever the extractor or its container files change, and rebuilt weekly so a published tag keeps picking up Debian and Chromium security updates. `latest` always points at the newest build.
+
+The image runs as a non-root user with UID and GID 1000 by default. This prevents root-owned output on typical native Linux hosts.
+
 This image works on:
 
 - macOS (Intel & Apple Silicon)
@@ -146,6 +154,12 @@ Generate all three output files at once:
 docker run --rm --pull=always -v .:/work -w /work misiektoja/spotify-secrets-grabber --all
 ```
 
+On native Linux hosts whose user does not use UID and GID 1000, map the direct container to the current account and give its browser a writable home directory:
+
+```sh
+docker run --rm --pull=always --user "$(id -u):$(id -g)" -e HOME=/tmp -v .:/work -w /work misiektoja/spotify-secrets-grabber --all
+```
+
 *For SELinux hosts (Fedora/RHEL), use `-v .:/work:Z`.*
 
 <a id="optional-use-docker-compose-one-command-for-all-oss"></a>
@@ -156,6 +170,12 @@ docker compose run --rm spotify-secrets-grabber --all
 ```
 
 Run the command from the directory that contains `compose.yaml`. The `.:/work` mount saves generated files in that host directory.
+
+On native Linux hosts whose user does not use UID and GID 1000, map Compose to the current account:
+
+```sh
+SPOTIFY_SECRET_GRABBER_UID="$(id -u)" SPOTIFY_SECRET_GRABBER_GID="$(id -g)" docker compose run --rm spotify-secrets-grabber --all
+```
 
 ---
 

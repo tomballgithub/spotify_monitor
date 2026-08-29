@@ -14,7 +14,6 @@ import spotify_monitor as monitor
 
 USER_ID_ALPHABET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
 SAFE_TEXT = st.text(alphabet=st.characters(blacklist_categories=("Cs",), blacklist_characters="\x00"), max_size=200)
-BMP_TEXT = st.text(alphabet=st.characters(max_codepoint=0xFFFF, blacklist_categories=("Cs",), blacklist_characters="\x00"), max_size=200)
 
 
 # Verifies every supported target representation normalizes to the same user ID
@@ -34,7 +33,7 @@ def test_target_controls_are_rejected(prefix: str, forbidden: str):
 
 
 # Verifies generated Python config literals preserve supported string values
-@given(BMP_TEXT, st.booleans())
+@given(SAFE_TEXT, st.booleans())
 def test_config_string_format_round_trip(value: str, prefer_double_quotes: bool):
     namespace: dict[str, object] = {}
     literal = monitor._format_config_value(value, prefer_double_quotes)
@@ -42,8 +41,7 @@ def test_config_string_format_round_trip(value: str, prefer_double_quotes: bool)
     assert namespace["VALUE"] == value
 
 
-# Records the deferred supplementary-Unicode config serialization limitation
-@pytest.mark.xfail(reason="Main config serialization needs a release change for supplementary Unicode", strict=True)
+# Verifies double-quoted config values preserve supplementary Unicode code points
 def test_config_double_quote_supplementary_unicode_round_trip():
     value = "\U00010000"
     namespace: dict[str, object] = {}

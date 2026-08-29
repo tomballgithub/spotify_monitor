@@ -22,8 +22,51 @@ updates:
       docker:
         patterns: ["*"]
     ignore:
-      # Keep the production base image on Python 3.9 until a deliberate upgrade
+      # Digest and patch refreshes only, so a Python major or minor move stays a deliberate upgrade
       - dependency-name: "python"
-        versions: [">= 3.10"]
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
     commit-message:
       prefix: "build"
+
+  # Base image in the debug secret grabber Dockerfile
+  - package-ecosystem: "docker"
+    directory: "/debug/spotify_monitor_secret_grabber_docker"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    groups:
+      docker-debug:
+        patterns: ["*"]
+    ignore:
+      # Digest and patch refreshes only, so a Python major or minor move stays a deliberate upgrade
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+    commit-message:
+      prefix: "build"
+
+  # Python runtime and test dependencies declared in pyproject.toml
+  - package-ecosystem: "pip"
+    directory: "/"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      python-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "build"
+
+  # Documentation site build dependencies
+  - package-ecosystem: "pip"
+    directory: "/docs"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    groups:
+      docs:
+        patterns: ["*"]
+    commit-message:
+      prefix: "docs"

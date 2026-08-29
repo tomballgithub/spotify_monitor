@@ -1,0 +1,24 @@
+# Citation metadata for this repository: https://citation-file-format.github.io
+# GitHub reads this file to build the "Cite this repository" widget.
+cff-version: 1.2.0
+message: "If you use spotify_monitor in your work, please cite it as below."
+title: spotify_monitor
+abstract: "Real-time OSINT tool for monitoring Spotify friends' music activity, with auto-playback, skipped track detection and instant notifications."
+type: software
+authors:
+  - family-names: Szymanski
+    given-names: Michal
+    alias: misiektoja
+    email: misiektoja-github@rm-rf.ninja
+version: "3.3.1"
+date-released: 2026-08-28
+license: GPL-3.0-or-later
+repository-code: "https://github.com/misiektoja/spotify_monitor"
+url: "https://misiektoja.github.io/spotify_monitor/"
+keywords:
+  - spotify
+  - monitoring
+  - tracking
+  - real-time
+  - friend-activity
+  - osint

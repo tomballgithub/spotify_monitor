@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM python:3.9-slim-bookworm
+FROM python:3.13-slim-trixie@sha256:7e3a6aca9d74f93cca21a91d86a8dad8c34749afd5b4a98ee481c9c47b9f5ed4
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -10,8 +10,13 @@ ENV SPOTIFY_MONITOR_DOCKER=1
 
 WORKDIR /opt/spotify_monitor
 
+# The base image lags behind Debian security updates between its own rebuilds, so they are applied here
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt ./requirements.txt
-RUN /usr/local/bin/python -m pip install --no-cache-dir -r requirements.txt
+# Pillow is optional for source installs but is preinstalled here because the runtime image ships without pip, so NTFY_IMAGES can be turned on without rebuilding
+# pip is only needed to install the requirements, so it is removed from the runtime image
+RUN /usr/local/bin/python -m pip install --no-cache-dir -r requirements.txt "Pillow>=12.0.0" && /usr/local/bin/python -m pip uninstall --yes pip
 
 RUN groupadd --system --gid 10001 spotify && useradd --system --uid 10001 --gid spotify --create-home --home-dir /home/spotify --shell /usr/sbin/nologin spotify
 

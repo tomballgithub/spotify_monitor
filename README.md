@@ -1,14 +1,14 @@
 # spotify_monitor
 
-<p align="left">
-  <img src="https://img.shields.io/github/v/release/misiektoja/spotify_monitor?style=flat-square&color=blue" alt="GitHub Release" />
-  <img src="https://img.shields.io/pypi/v/spotify_monitor?style=flat-square&color=teal" alt="PyPI Version" />
-  <img src="https://img.shields.io/github/stars/misiektoja/spotify_monitor?style=flat-square&color=magenta" alt="GitHub Stars" />
-  <img src="https://img.shields.io/badge/python-3.9+-blueviolet?style=flat-square" alt="Python Versions" />
-  <img src="https://img.shields.io/github/license/misiektoja/spotify_monitor?style=flat-square&color=blue" alt="License" />
-  <img src="https://img.shields.io/github/last-commit/misiektoja/spotify_monitor?style=flat-square&color=green" alt="Last Commit" />
-  <img src="https://img.shields.io/badge/maintenance-active-brightgreen?style=flat-square" alt="Maintenance" />
-</p>
+[![GitHub Release](https://img.shields.io/github/v/release/misiektoja/spotify_monitor?style=flat-square&color=blue)](https://github.com/misiektoja/spotify_monitor/releases)
+[![PyPI Version](https://img.shields.io/pypi/v/spotify_monitor?style=flat-square&color=teal)](https://pypi.org/project/spotify-monitor/)
+[![GitHub Stars](https://img.shields.io/github/stars/misiektoja/spotify_monitor?style=flat-square&color=magenta)](https://github.com/misiektoja/spotify_monitor)
+[![Python Versions](https://img.shields.io/badge/python-3.9+-blueviolet?style=flat-square)](https://pypi.org/project/spotify-monitor/)
+[![Docker Pulls](https://img.shields.io/docker/pulls/misiektoja/spotify-monitor?style=flat-square&logo=docker)](https://hub.docker.com/r/misiektoja/spotify-monitor)
+[![License](https://img.shields.io/github/license/misiektoja/spotify_monitor?style=flat-square&color=blue)](https://github.com/misiektoja/spotify_monitor/blob/main/LICENSE)
+[![OpenSSF Scorecard](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.scorecard.dev%2Fprojects%2Fgithub.com%2Fmisiektoja%2Fspotify_monitor&query=%24.score&label=openssf%20scorecard&style=flat-square)](https://scorecard.dev/viewer/?uri=github.com/misiektoja/spotify_monitor)
+[![Last Commit](https://img.shields.io/github/last-commit/misiektoja/spotify_monitor?style=flat-square&color=green)](https://github.com/misiektoja/spotify_monitor/commits/main)
+[![Maintenance](https://img.shields.io/badge/maintenance-active-brightgreen?style=flat-square)](https://github.com/misiektoja/spotify_monitor)
 
 Powerful real-time tracker for Spotify friend music activity: monitor listening habits, auto-sync playback to your local Spotify client, detect skipped tracks and receive instant notifications for every beat your friends play.
 
@@ -19,11 +19,6 @@ Powerful real-time tracker for Spotify friend music activity: monitor listening 
 <a id="-quick-install-run"></a>
 ### 🚀 Quick Install & Run
 
-Spotify Monitor has two independent modes:
-
-- **Friend Activity** monitors a Spotify friend's completed plays, activity status and listening sessions.
-- **Last.fm Scrobble Health** checks whether plays from your Spotify account reach your Last.fm profile and alerts you when scrobbles stop showing up.
-
 #### Python from PyPI
 
 New to Python or unsure what is installed? Follow the [Python install walkthrough](https://misiektoja.github.io/spotify_monitor/installation/#new-to-python-install-everything) first.
@@ -32,20 +27,20 @@ New to Python or unsure what is installed? Follow the [Python install walkthroug
 pip install spotify_monitor
 ```
 
-Run setup for friend activity mode:
+Run setup for **friend activity mode** (Spotify friend's completed plays, activity status and listening session):
 
 ```sh
 spotify_monitor --setup
 ```
 
-Or for Last.fm Scrobble Health:
+Or for **Last.fm scrobble health mode** (checks whether plays from your Spotify account reach your Last.fm profile):
 ```sh
 spotify_monitor --setup-scrobble-health
 ```
 
 #### Docker image - fastest container setup
 
-The Docker commands below run Friend Activity setup. For Last.fm Scrobble Health, replace the final `--setup` with `--setup-scrobble-health`.
+The Docker commands below run Friend Activity setup. For Last.fm scrobble health, replace the final `--setup` with `--setup-scrobble-health`.
 
 ##### macOS or Windows
 
@@ -108,6 +103,7 @@ For the manual single-file method, optional extras and upgrade commands for ever
 - **Track Context**: View **playlist, artist** and **album info** with clickable URLs.
 - **Skip Detection**: Identify exactly when and how long a song was played.
 - **Global Search**: Instant links to **Spotify, YouTube Music, Apple Music, Tidal, lyrics** and more.
+- **Coloured Output**: Readable terminal colours with a **customizable theme**, while log files stay plain text.
 
 ### 🔔 Smart Notifications
 - **Multi-Channel**: Instant alerts via **Email** and **Webhooks** (**Discord**, **ntfy** etc.).
@@ -149,7 +145,7 @@ Use [Quick Install & Run](#-quick-install-run) above for first-time setup. The t
 
 | I want to... | Run this |
 | --- | --- |
-| Start monitoring with existing authentication | `spotify_monitor TARGET`, where `TARGET` is a raw ID, `spotify:user:` URI or profile URL |
+| Start monitoring with existing authentication | `spotify_monitor TARGET`, where `TARGET` is a complete profile URL, `spotify:user:` URI or user ID |
 | Check authentication, connectivity and one target | `spotify_monitor --doctor TARGET` |
 | List Spotify friends visible to the configured account | `spotify_monitor --list-friends` |
 | Import a Spotify login from Firefox | Open [Spotify Web Player](https://open.spotify.com/) in Firefox, sign in then run `spotify_monitor --import-browser-cookie --browser firefox` |
@@ -182,6 +178,16 @@ Full documentation is available at **[misiektoja.github.io/spotify_monitor](http
 
 See [RELEASE_NOTES.md](https://github.com/misiektoja/spotify_monitor/blob/main/RELEASE_NOTES.md) for details.
 
+<a id="contributing"></a>
+## Contributing
+
+Bug reports, documentation fixes and code contributions are welcome. See [CONTRIBUTING.md](https://github.com/misiektoja/spotify_monitor/blob/main/CONTRIBUTING.md) for the development setup, the checks CI enforces and what a change needs before it is merged. Participation is covered by the [Code of Conduct](https://github.com/misiektoja/spotify_monitor/blob/main/CODE_OF_CONDUCT.md).
+
+<a id="security"></a>
+## Security
+
+Report a suspected vulnerability privately through [GitHub security advisories](https://github.com/misiektoja/spotify_monitor/security/advisories/new), never as a public issue. [SECURITY.md](https://github.com/misiektoja/spotify_monitor/blob/main/SECURITY.md) covers the reporting process, the supported versions and the security posture of stored secrets, configuration loading and local playback.
+
 <a id="maintainers"></a>
 ## Maintainers
 
@@ -191,4 +197,9 @@ See [RELEASE_NOTES.md](https://github.com/misiektoja/spotify_monitor/blob/main/R
 <a id="license"></a>
 ## License
 
-Licensed under GPLv3. See [LICENSE](https://github.com/misiektoja/spotify_monitor/blob/main/LICENSE).
+Licensed under GPLv3. See [LICENSE](https://github.com/misiektoja/spotify_monitor/blob/main/LICENSE). Dependency licenses are listed in [THIRD_PARTY_NOTICES.md](https://github.com/misiektoja/spotify_monitor/blob/main/THIRD_PARTY_NOTICES.md).
+
+<a id="support"></a>
+## Support
+
+If the project is useful to you, you can support its development through [GitHub Sponsors](https://github.com/sponsors/misiektoja) or [Buy Me a Coffee](https://buymeacoffee.com/misiektoja).
