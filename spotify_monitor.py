@@ -112,6 +112,9 @@ VERSION = "3.2"
 # 2025/07/13: Removed configcat
 # 2025/07/13: Added printing of JMK added items in configuration items at startup`
 # 2025/07/15: '*** Start notification' message via NTFY is now before the 00 minute notification
+# 2025/08/23: Added Privacy substitutions
+# 2025/08/23: Switched to embedded NTFY webhooks instead of my own scheme
+# 2025/08/24: Removed duplicate NTFY updates (active) and added 'time since active' to 'started streaming' alerts.
 
 # Bugs & To-do
 # --------------------------------------
