@@ -3355,12 +3355,76 @@ def apply_color_to_text(text):
 
 # Returns the underlying terminal behind any number of sanitizing stream wrappers
 def unwrap_terminal_stream(stream):
-    while isinstance(stream, TerminalStream):
+    while isinstance(stream, (TerminalStream, Logger)):
         stream = stream.terminal
     return stream
 
 
-def print_de
+# Logger class to output messages to stdout and log file
+class Logger(object):
+    def __init__(self, filename, mode="both"):
+        # The early sanitizing stream is unwrapped so sanitizing and colouring happen exactly once.
+        # Writing through it would colourise every line twice, and the second pass no longer sees the
+        # label it already coloured, so it would recolour the value with the generic rules
+        self.terminal = unwrap_terminal_stream(sys.stdout)
+        self.logfile = open(filename, "a", buffering=1, encoding="utf-8")
+        self.mode = mode
+
+    def write(self, message):
+        message = sanitize_terminal_text(message)
+        if self.mode in ["both", "log"]:
+            # Expand tabs for file output and strip colour codes so the log file stays plain text
+            self.logfile.write(normalize_log_separators(ANSI_ESCAPE_RE.sub("", message).expandtabs(8)))
+            self.logfile.flush()
+        if self.mode in ["both", "screen"]:
+            # Truncate before colouring so escape sequences never count toward the displayed width
+            if (TRUNCATE_CHARS):
+                message = truncate_string_per_line(message, TRUNCATE_CHARS)
+            self.terminal.write(apply_color_to_text(message))
+            self.terminal.flush()
+
+    def terminal_only(self, message):
+        message = sanitize_terminal_text(message)
+        if TRUNCATE_CHARS:
+            message = truncate_string_per_line(message, TRUNCATE_CHARS)
+        self.terminal.write(apply_color_to_text(message))
+        self.terminal.flush()
+
+    def log_only(self, message):
+        self.logfile.write(normalize_log_separators(ANSI_ESCAPE_RE.sub("", sanitize_terminal_text(message)).expandtabs(8)))
+        self.logfile.flush()
+
+    def flush(self):
+        self.terminal.flush()
+        self.logfile.flush()
+        
+# Helper functions using persistent loggers
+def print_to_log(message):
+    """Prints only to the log file."""
+    log_logger.log_only(message)
+    
+def print_to_both(message):
+    """Prints to both the log file and screen."""
+    log_logger.log_only(message + "\n")
+    log_logger.terminal_only(message + "\n")
+    
+# DEBUG_JMK: 0 = disabled, 1 = also log, 2 = also log (legacy alias), 3 = screen only (no log)
+def print_to_screen(message):
+    """Prints to the screen unconditionally; additionally writes to the log file when DEBUG_JMK is 1 or 2."""
+    if DEBUG_JMK in (1, 2):
+        log_logger.log_only(message + "\n")
+    log_logger.terminal_only(message + "\n")    
+  
+# DEBUG_JMK: 0 = disabled, 1 = log only, 2 = screen & log, 3 = screen only
+def print_debug(message):
+    """Prints to the log file and/or screen, depending on configuration."""
+    if DEBUG_JMK:
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        message = f"[DEBUG {timestamp}] {message}\n"
+        if DEBUG_JMK in (1, 2):
+            log_logger.log_only(message)
+        if DEBUG_JMK in (2, 3):
+            log_logger.terminal_only(message)
 
 def timestring():
     now = datetime.now()
