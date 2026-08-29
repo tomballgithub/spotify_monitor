@@ -115,6 +115,7 @@ VERSION = "3.3.1"
 # 2025/08/23: Added Privacy substitutions
 # 2025/08/23: Switched to embedded NTFY webhooks instead of my own scheme
 # 2025/08/24: Removed duplicate NTFY updates (active) and added 'time since active' to 'started streaming' alerts.
+# 2025/08/24: New code base. Refactored logging helpers
 
 # Bugs & To-do
 # --------------------------------------
