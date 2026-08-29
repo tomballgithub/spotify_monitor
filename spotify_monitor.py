@@ -768,8 +768,16 @@ SPOTIFY_SUFFIX = ""
 # example: [ {'uri': 'spotify:playlist:0AyBQ5uEhJgdh2NFcMe6wb', 'owner_name': 'uwacwfv5hr23atg1v3dez1sxs', 'owner_uri': 'spotify:user:uwacwfv5hr23atg1v3dez1sxs'} ]
 #
 
-LOAD_TRACKS_FREQUENCY = 3600 # 1 hour
 ADD_PLAYLISTS_TO_MONITOR = []
+
+# Configuration Settings
+LOAD_TRACKS_FREQUENCY = 0
+OVERRIDE_PLAYLIST_AT_START = False
+NOTIFY_PLAYLIST_DETECTED   = False
+ICON_SONG_MISSING_FROM_PLAYLIST = "*"
+
+# If playlist varies by more that this during refresh, assume there was an error
+MAX_PLAYLIST_DIFFERENTIAL  = 0
 
 # ----------------------------
 # Advanced Cookie Token Settings
@@ -1083,7 +1091,28 @@ DZ_ALERTS     = False
 ORIG_EMAILS   = False
 SP_DC_COOKIE2 = ""
 LOGIN_REQUEST_BODY_FILE2 = ""
-LOAD_TRACKS_FREQUENCY = 3600 # 1 hour
+# to prevent RUFF errors:
+GMAIL_TAG2    = ""
+ERR_CODE2     = ""
+SEND_NOTIFY2  = False
+DZ_ALERTS2    = False
+ORIG_EMAILS2  = False
+USER_ID2      = ""
+DEBUG_JMK2    = 0
+CSV_FILE2     = ""
+FLAG_FILE2    = ""
+WEBHOOK_URL2  = ""
+UPDATE_SPREADSHEET2 = False
+
+# If playlist varies by more that this during refresh, assume there was an error
+MAX_PLAYLIST_DIFFERENTIAL  = 0
+LOAD_TRACKS_FREQUENCY      = 0
+OVERRIDE_PLAYLIST_AT_START = False
+NOTIFY_PLAYLIST_DETECTED   = False
+ICON_SONG_MISSING_FROM_PLAYLIST = "*"
+#ICON_SONG_MISSING_FROM_PLAYLIST = "\u23FA" # white circle
+#ICON_SONG_MISSING_FROM_PLAYLIST = "\u26A0" # warning symbol
+
 monitored_playlists_data = {}
 DEBUG_JMK = False
 count_overridden = False
@@ -1091,16 +1120,7 @@ NTFY_IMAGES = True
 PRIVACY_SUBSTITUTIONS = []
 PRIVACY_SUBSTITUTIONS_INVALID_WARNED = False
 
-# NTFY configuration
-NTFY_TOPIC_KEL = "jeoff_spotify_stream"
-NTFY_TOPIC_JMK = "jeoff_spotify_stream_jmk"
-
-from datetime import timezone
 import threading
-
-import logging
-from io import StringIO, BytesIO
-from PIL import Image
 
 exec(CONFIG_BLOCK, globals())
 
@@ -1308,7 +1328,10 @@ import secrets
 import unicodedata
 from typing import Any, Callable, List, Optional, Sequence, Tuple, Union, cast, TypeVar
 from email.utils import parseaddr, parsedate_to_datetime
-import sheets_helper #jmk
+try:
+    import sheets_helper #jmk
+except ImportError:
+    sheets_helper = None
 
 import urllib3
 if not VERIFY_SSL:
@@ -1319,7 +1342,6 @@ WEBHOOK_SESSION = req.Session()
 
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from bs4 import BeautifulSoup #jmk playlist images
 
 # Cap server-provided Retry-After to avoid long blocking sleeps on 429 responses
 MAX_RETRY_AFTER_SECONDS = 60
@@ -3494,31 +3516,24 @@ def deliver_jmk_ntfy(notification_type, message, image_url, track, artist, album
     emoji = ""
     
     if ERR_CODE == "KEL":
-        topic = NTFY_TOPIC_KEL
         priority        = priority_kel
         priority_start  = priority_kel_hi
         priority_stop   = priority_kel_lo
         priority_dz     = priority_kel_dz
         priority_dz_off = priority_kel_lo
-        priority_liked  = priority_kel_lo
     elif ERR_CODE == "JMK":
-        topic = NTFY_TOPIC_JMK
         priority        = priority_jmk
         priority_start  = priority_jmk_hi
         priority_stop   = priority_jmk_lo
         priority_dz     = priority_jmk_dz
         priority_dz_off = priority_jmk_lo
-        priority_liked  = priority_jmk_lo
     else:
         priority        = 1 # shouldn't happen, but just in case
         priority_start  = 1 # shouldn't happen, but just in case
         priority_stop   = 1 # shouldn't happen, but just in case
         priority_dz     = 1 # shouldn't happen, but just in case
         priority_dz_off = 1 # shouldn't happen, but just in case
-        priority_liked  = 1 # shouldn't happen, but just in case
     
-    icon      = "https://upload.wikimedia.org/wikipedia/commons/thumb/8/84/Spotify_icon.svg/250px-Spotify_icon.svg.png"
-    ICON_DZ   = "https://em-content.zobj.net/source/facebook/65/heavy-black-heart_2764.png"
     URL_DZ    = "https://mosaic.scdn.co/300/ab67616d00001e02176e29e598499208ff338ae1ab67616d00001e021daec881d1e9fd2fa7c2d009ab67616d00001e022519d01c0cca06f134eeadd8ab67616d00001e028cae5034066af45cdfbc4266"
     URL_LIKED = "https://image-cdn-ak.spotifycdn.com/image/ab67706c0000da8470d229cb865e8d81cdce0889"
 
@@ -3531,14 +3546,12 @@ def deliver_jmk_ntfy(notification_type, message, image_url, track, artist, album
             title = f"Playlist '{playlist}' Detected"
             body = f"{track}\n{artist}\n{album}\n[{playlist}]"
             image_url = URL_DZ
-            icon = ICON_DZ
             emoji = "heart"       
             priority = priority_dz # change priority from default
         elif "' Cleared" in message:
             title = f"Playlist '{playlist}' Cleared"
             body = f"{track}\n{artist}\n{album}"
             image_url = URL_DZ
-            icon = ICON_DZ
             emoji = "heart"       
             #priority = priority_dz_off # change priority from default
         print_debug(f"send_ntfy_url -> {image_url}")
@@ -3549,13 +3562,11 @@ def deliver_jmk_ntfy(notification_type, message, image_url, track, artist, album
             body = f"{track}\n{artist}\n{album}\n[{playlist}]"
             image_url = URL_LIKED
             emoji = "blue_heart"       
-            #priority = priority_liked # change priority from default
         elif "' Cleared" in message:
             title = f"Playlist '{playlist}' Cleared"
             body = f"{track}\n{artist}\n{album}"
             image_url = URL_LIKED
             emoji = "blue_heart"       
-            #priority = priority_liked # change priority from default
 
     elif (message[0:5] == "START"):
         # if start occurs when script launched, there is no elapsed time to display
@@ -7079,12 +7090,6 @@ def _format_startup_summary_row(row: StartupSummaryRow) -> str:
         return textwrap.fill(row.value, width=100, initial_indent=prefix, subsequent_indent=" " * len(prefix), break_long_words=False, break_on_hyphens=False) + "\n"
     return f"{prefix}{row.value}\n"
 
-def _format_startup_summary_row(row: StartupSummaryRow) -> str:
-    if row.label.startswith("---"):
-        return f"* {(row.label)}{row.value}\n"
-    else:
-        return f"* {(row.label + ':'):<27}{row.value}\n"
-
 
 # Routes concise or complete startup rows independently to terminal and log destinations
 def emit_startup_summary(rows: Sequence[StartupSummaryRow], show_full: bool, stream=None) -> None:
@@ -7598,74 +7603,6 @@ def spotify_get_track_info(access_token, track_uri, oauth_app=False):
             raise RuntimeError(f"Both Spotify track metadata backends failed for {track_uri}: Web API: {api_error}. Web player: {web_error}")
         raise
 
-
-def get_spotify_playlist_image(playlist_id: str) -> str:
-    url = f"https://open.spotify.com/playlist/{playlist_id}"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-    }
-
-    r = req.get(url, headers=headers, timeout=10)
-    r.raise_for_status()
-
-    soup = BeautifulSoup(r.text, "html.parser")
-
-    tag = soup.find("meta", {"property": "og:image"})
-    if not tag or not tag.get("content"):
-        return False
-
-    return tag["content"]
-
-
-# # Returns information for specific Spotify playlist URI
-# def spotify_get_playlist_info(access_token, playlist_uri, oauth_app=False):
-    # if not access_token:
-        # raise Exception("spotify_get_playlist_info(): access_token is empty")
-
-    # print_debug(f"spotify_get_playlist_info")
-    # print_debug(f"access_token: {access_token}")
-    # print_debug(f"oauth_app: {oauth_app}")
-    # # return False
-    
-    # playlist_id = playlist_uri.split(':', 2)[2]
-    
-    # url = f"https://api.spotify.com/v1/playlists/{playlist_id}?fields=name,owner,followers,external_urls,images"
-    # headers = {
-        # "Authorization": f"Bearer {access_token}",
-        # "User-Agent": USER_AGENT
-    # }
-
-    # if TOKEN_SOURCE == "cookie" and not oauth_app:
-        # headers.update({
-            # "Client-Id": SP_CACHED_CLIENT_ID
-        # })
-    # # add si parameter so link opens in native Spotify app after clicking
-    # si = "?si=1"
-
-    # try:
-        # response = SESSION.get(url, headers=headers, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL)
-        # print_debug(f"response: {response}")
-        # if response.status_code != 404:
-            # print_debug(f"json_response: {json_response}")
-        # if response.status_code == 404:
-            # sp_playlist_image_url = get_spotify_playlist_image(playlist_id)
-            # if not sp_playlist_image_url:
-                # return False
-            # sp_playlist_owner = "Spotify"
-        # else:
-            # response.raise_for_status()
-            # json_response = response.json()
-
-            # # sp_playlist_name = json_response.get("name")
-            # sp_playlist_owner = json_response["owner"].get("display_name", "")
-            # # sp_playlist_owner_url = json_response["owner"]["external_urls"].get("spotify")
-            # # sp_playlist_followers = int(json_response["followers"].get("total"))
-            # # sp_playlist_url = json_response["external_urls"].get("spotify") + si
-            # sp_playlist_image_url = json_response["images"][0].get("url", "")
-        # return {"sp_playlist_owner": sp_playlist_owner, "sp_playlist_image_url": sp_playlist_image_url}
-    # except Exception as e:
-        # print(e)
-        # raise
 
 # Checks if a Spotify user URI ID has been deleted
 def is_user_removed(access_token, user_uri_id, oauth_app=False):
@@ -10480,7 +10417,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                     new_playlist = True
                     print_debug(f"SPECIAL CASE: SONG IN ANOTHER MONITORED PLAYLIST, AT EXCEPTION LIMIT FOR CURRENT (1) - old: {last_found_playlist.get('name', 'A')} new: {found_playlist.get('name', 'A')}")
                     reset_playlist_counts() 
-                    ridden = False
+                    count_overridden = False
             # else it should be considered an exception
 #jmkfix can this case every happen. is it in log?
                 else:
@@ -11584,7 +11521,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                         print(f"Songs played:\t\t\t{listened_songs} ({calculate_timespan(int(sp_ts), int(sp_active_ts_start))})")
                     if ALT_VIEW:
                         icon_add = False
-                    hastrack = False
+                    hasTrack = False
                     
                     print_cur_ts("\nTimestamp:\t\t\t")
                     sp_ts_old = sp_ts
@@ -13295,6 +13232,10 @@ def main():
             print("* To stop this warning, set NTFY_IMAGES to False in the configuration file")
             print("* Sending ntfy alerts as text only...")
             print("*" * HORIZONTAL_LINE + "\n")
+
+    if UPDATE_SPREADSHEET and sheets_helper is None:
+        print(f"* Error: UPDATE_SPREADSHEET is enabled but the 'sheets_helper' module is not available; install it or disable UPDATE_SPREADSHEET")
+        sys.exit(1)
 
     # We define signal handlers only for Linux, Unix & MacOS since Windows has limited number of signals supported
     if platform.system() != 'Windows':
