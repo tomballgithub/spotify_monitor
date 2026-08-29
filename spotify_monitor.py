@@ -10298,7 +10298,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                             print_to_screen(f" ")
                             print_to_screen(f"----------------------")
                             print_to_both(f"{timestring()}: {ERR_CODE}, *** Start notification sent")
-                            send_notification("active", f"START: {songstring()}", sp_playlist_image_url if sp_playlist_image_url else sp_album_image_url, sp_track, sp_artist, sp_album, (sp_playlist+iconstring()) if is_playlist else '')
+                            send_notification("active", f"START: {songstring()}", sp_playlist_image_url if sp_playlist_image_url else sp_album_image_url, sp_track, sp_artist, sp_album, (sp_playlist+iconstring()) if is_playlist else '', timediffstr=timediffstrtmp)
                             #---
                             print_to_screen(f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}")
                             send_notification("song", f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}", sp_album_image_url, sp_track, sp_artist, sp_album, (sp_playlist+iconstring()) if is_playlist else '', time_diff_str(), listened_songs)
