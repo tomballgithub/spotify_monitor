@@ -2913,6 +2913,7 @@ TERMINAL_CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 def sanitize_terminal_text(message):
     if not isinstance(message, str) or not message:
         return message
+    message = apply_privacy_substitutions(message)
     parts = []
     position = 0
     for match in SGR_SEQUENCE_RE.finditer(message):
