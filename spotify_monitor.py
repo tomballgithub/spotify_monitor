@@ -2888,7 +2888,10 @@ def deliver_jmk_ntfy(notification_type, message, image_url, track, artist, album
             #priority = priority_liked # change priority from default
 
     elif (message[0:5] == "START"):
-        title = f'{ERR_CODE} started streaming'
+        # if start occurs when script launched, there is no elapsed time to display
+        print_debug(f'timediffstr: {timediffstr}')
+        title = f'{ERR_CODE} started ' + (f'(after {timediffstr})' if timediffstr else "streaming")
+        print_debug(f'title: {title}')
         if playlist == "unknown playlist":
             body = f"{track}\n{artist}\n{album}"
         else:
@@ -2897,7 +2900,9 @@ def deliver_jmk_ntfy(notification_type, message, image_url, track, artist, album
         priority = priority_start # change priority from default
 
     elif (message[0:3] == "END"):
-        title = f'{ERR_CODE} stopped @ {timediffstr} mins & {count} songs'
+        print_debug(f'timediffstr: {timediffstr}')
+        title = f'{ERR_CODE} stopped (after {timediffstr} & {count} songs)'
+        print_debug(f'title: {title}')
         if playlist == "unknown playlist":
             body = f"{track}\n{artist}\n{album}"
         else:
@@ -2906,6 +2911,8 @@ def deliver_jmk_ntfy(notification_type, message, image_url, track, artist, album
         priority = priority_stop # change priority from default
 
     else:
+        if (WEBHOOK_TRACK_NOTIFICATION) or (WEBHOOK_SONG_NOTIFICATION):
+            return # jmk on 8/22/2026 to remove duplicate alerts since this webhook supports NTFY now
         body = ""
         title = f'{ERR_CODE} @ {timediffstr} mins & {count} songs'
         if playlist == "unknown playlist":
@@ -9481,7 +9488,9 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                         # m_body += song_footer_txt
                         # m_body_html = m_body_html.replace("</body></html>", song_footer_html + "</body></html>")
                         send_email(f"{GMAIL_TAG}[{time_diff_str()}] {timestring()} {songstring()}", m_body, m_body_html, SMTP_SSL)
-                    send_notification_channels("active", m_subject, m_body, m_body_html, ACTIVE_NOTIFICATION, image_url=sp_playlist_image_url or sp_album_image_url, subject_short=m_subject_short, body_short=m_body_short)
+                    else:
+                        # jmk on 8/22/2026 to removed duplicate alerts since my code above sends this alert
+                        send_notification_channels("active", m_subject, m_body, m_body_html, ACTIVE_NOTIFICATION, image_url=sp_playlist_image_url or sp_album_image_url, subject_short=m_subject_short, body_short=m_body_short)
 
                 if TRACK_SONGS and sp_track_uri_id:
                     if platform.system() == 'Darwin':       # macOS
@@ -10163,6 +10172,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                             flag_file_create()
 
                         print(f"\n*** Friend got ACTIVE after being offline for {calculate_timespan(int(sp_active_ts_start), int(sp_active_ts_stop))} ({get_date_from_ts(sp_active_ts_stop)})")
+                        timediffstrtmp = f'{calculate_timespan(int(sp_active_ts_start), int(sp_active_ts_stop), show_seconds=False, short=True)}'
                         m_subject = f"Spotify user {sp_username} is active: '{sp_artist} - {sp_track}' (after {calculate_timespan(int(sp_active_ts_start), int(sp_active_ts_stop), show_seconds=False)} - {get_short_date_from_ts(sp_active_ts_stop)})"
                         m_subject_short = f"{sp_username} is active after {calculate_timespan(int(sp_active_ts_start), int(sp_active_ts_stop), show_seconds=False, short=True)}"
                         friend_active_m_body = f"Friend got active after being offline for {calculate_timespan(int(sp_active_ts_start), int(sp_active_ts_stop))}\nLast activity (before getting offline): {get_date_from_ts(sp_active_ts_stop)}"
@@ -10339,6 +10349,8 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
                     email_song_enabled = ((TRACK_NOTIFICATION and on_the_list) or SONG_NOTIFICATION) and not email_sent
                     webhook_song_enabled = ((webhook_event_enabled("track") and on_the_list) or webhook_event_enabled("song")) and not webhook_sent
+                    if time_diff_str() == 0:
+                        webhook_song_enabled = False # disable for first instance after becoming active to avoid duplicate
                     if email_song_enabled or webhook_song_enabled:
                         music_urls_text = format_music_urls_email_text(apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url)
                         music_urls_html = format_music_urls_email_html(apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url, sp_artist, sp_track)
@@ -10401,6 +10413,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                     # Friend got inactive
                     if (cur_ts - sp_ts) > SPOTIFY_INACTIVITY_CHECK and sp_active_ts_start > 0:
                         sp_active_ts_stop = sp_ts
+                        timediffstrtmp = f'{calculate_timespan(int(sp_active_ts_stop), int(sp_active_ts_start), show_seconds=False, short=True)}'
                         print(f"*** Friend got INACTIVE after listening to music for {calculate_timespan(int(sp_active_ts_stop), int(sp_active_ts_start))}")
                         print(f"*** Friend played music from {get_range_of_dates_from_tss(sp_active_ts_start, sp_active_ts_stop, short=True, between_sep=' to ')}")
 
@@ -10431,7 +10444,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
                         if JMK_MODE:
                             print_to_both(f"{timestring()}: {ERR_CODE}, *** End notification sent")
-                            send_notification("inactive", f"END: [{time_diff_str()}]: {songstring()}, Song Count: {listened_songs}", sp_playlist_image_url if sp_playlist_image_url else sp_album_image_url, sp_track, sp_artist, sp_album, (sp_playlist+iconstring()) if is_playlist else '', time_diff_str(), listened_songs)
+                            send_notification("inactive", f"END: [{time_diff_str()}]: {songstring()}, Song Count: {listened_songs}", sp_playlist_image_url if sp_playlist_image_url else sp_album_image_url, sp_track, sp_artist, sp_album, (sp_playlist+iconstring()) if is_playlist else '', timediffstrtmp, listened_songs)
 
                         print(listened_songs_text)
 
@@ -10504,9 +10517,11 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                             m_body = f"Last played: {sp_artist} - {sp_track}\nDuration: {display_time(sp_track_duration)}{played_for_m_body}{playlist_m_body}\nAlbum: {sp_album}{context_m_body}{music_section_text}{lyrics_section_text}Friend got inactive after listening to music for {calculate_timespan(int(sp_active_ts_stop), int(sp_active_ts_start))}\nFriend played music from {get_range_of_dates_from_tss(sp_active_ts_start, sp_active_ts_stop, short=True, between_sep=' to ')}{listened_songs_mbody}{recent_songs_mbody}\n\nLast activity: {get_date_from_ts(sp_active_ts_stop)}\nInactivity timer: {display_time(SPOTIFY_INACTIVITY_CHECK)}{get_cur_ts(nl_ch + 'Timestamp: ')}"
                             m_body_html = f"<html><head></head><body>Last played: <b><a href=\"{sp_artist_url}\">{escape(sp_artist)}</a> - <a href=\"{sp_track_url}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{played_for_m_body_html}{playlist_m_body_html}<br>Album: <a href=\"{sp_album_url}\">{escape(sp_album)}</a>{context_m_body_html}{music_section_html}{lyrics_section_html}Friend got inactive after listening to music for <b>{calculate_timespan(int(sp_active_ts_stop), int(sp_active_ts_start))}</b><br>Friend played music from <b>{get_range_of_dates_from_tss(sp_active_ts_start, sp_active_ts_stop, short=True, between_sep='</b> to <b>')}</b>{listened_songs_mbody_html}{recent_songs_mbody_html}<br><br>Last activity: <b>{get_date_from_ts(sp_active_ts_stop)}</b><br>Inactivity timer: {display_time(SPOTIFY_INACTIVITY_CHECK)}{get_cur_ts('<br>Timestamp: ')}</body></html>"
                             m_body_short = build_short_ntfy_body(sp_track, sp_artist, sp_album, sp_playlist if is_playlist else "", playlist_suffix)
-                            email_attempted, webhook_attempted = send_notification_channels("inactive", m_subject, m_body, m_body_html, INACTIVE_NOTIFICATION, image_url=sp_playlist_image_url or sp_album_image_url, subject_short=m_subject_short, body_short=m_body_short)
-                            email_sent = email_sent or email_attempted
-                            webhook_sent = webhook_sent or webhook_attempted
+                            if not JMK_MODE:
+                                # jmk on 8/22/2026 JMK_MODE skip to remove duplicate alerts since my code sends this alert
+                                email_attempted, webhook_attempted = send_notification_channels("inactive", m_subject, m_body, m_body_html, INACTIVE_NOTIFICATION, image_url=sp_playlist_image_url or sp_album_image_url, subject_short=m_subject_short, body_short=m_body_short)
+                                email_sent = email_sent or email_attempted
+                                webhook_sent = webhook_sent or webhook_attempted
                         sp_active_ts_start_old = sp_active_ts_start
                         sp_active_ts_start = 0
                         listened_songs_old = listened_songs
