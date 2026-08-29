@@ -11566,7 +11566,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                             # m_body += song_footer_txt
                             # m_body_html = m_body_html.replace("</body></html>", song_footer_html + "</body></html>")
                             send_email(f"{GMAIL_TAG}[{time_diff_str()}] {timestring()} {songstring()}", m_body, m_body_html, SMTP_SSL)
-						email_succeeded, webhook_succeeded = send_notification_channels(notification_type, m_subject, m_body, m_body_html, email_song_enabled, webhook_song_enabled, image_url=sp_album_image_url, subject_short=m_subject_short, body_short=m_body_short)
+                        email_succeeded, webhook_succeeded = send_notification_channels(notification_type, m_subject, m_body, m_body_html, email_song_enabled, webhook_song_enabled, image_url=sp_album_image_url, subject_short=m_subject_short, body_short=m_body_short)
                         email_sent = email_sent or email_succeeded
                         webhook_sent = webhook_sent or webhook_succeeded
                     try:
