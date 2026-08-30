@@ -178,7 +178,10 @@ def test_rendered_config_never_substitutes_secret_values(monkeypatch):
     exec(rendered, namespace)
     for key, value in secret_values.items():
         assert value not in rendered
-        assert namespace[key] != value
+        # Some secret keys (e.g. the secondary-account SP_DC_COOKIE2 / WEBHOOK_URL2) are loaded only
+        # from the environment or a dotenv file and are intentionally absent from the config template
+        if key in namespace:
+            assert namespace[key] != value
 
 
 # Verifies generated config never renders a potentially private custom header dictionary

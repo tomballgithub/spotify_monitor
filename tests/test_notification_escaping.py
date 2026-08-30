@@ -15,8 +15,10 @@ HOSTILE_ESCAPED = "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;"
 ALLOWED_UNESCAPED = frozenset({"listened_songs", "looped_songs", "song_on_loop", "played_for", "playlist_suffix"})
 
 # Helpers that emit their own markup or render only dates, durations and numbers. None of them can carry
-# Spotify-supplied text, so escaping their output would only mangle the timestamps users read
-SAFE_HELPERS = frozenset({"get_cur_ts", "display_time", "get_date_from_ts", "get_short_date_from_ts", "calculate_timespan", "get_range_of_dates_from_tss"})
+# Spotify-supplied text, so escaping their output would only mangle the timestamps users read.
+# iconstring() only concatenates the locally computed playlist_suffix with the ICON_SONG_MISSING_FROM_PLAYLIST
+# constant, so it is in the same category as playlist_suffix (already allowlisted below)
+SAFE_HELPERS = frozenset({"get_cur_ts", "display_time", "get_date_from_ts", "get_short_date_from_ts", "calculate_timespan", "get_range_of_dates_from_tss", "iconstring"})
 
 
 # Collects every HTML notification body the module builds, as (function, source line, expression) triples
