@@ -283,7 +283,10 @@ def test_webhook_summary_is_secret_safe(monkeypatch):
     output = emit_to_string(summary_rows(), show_full=True)
     assert "* Notifications (webhook):      On (active, errors)" in output
     assert "Webhook enabled" not in output
-    assert "Webhook provider" not in output
+    # The provider name is not sensitive and stays in the full summary; the URL is masked
+    provider_line = next(line for line in output.splitlines() if "* Webhook provider:" in line)
+    assert provider_line.index("discord") == 32
+    assert "* Webhook URL:                  <redacted>" in output
     assert "known-webhook-secret" not in output
 
 

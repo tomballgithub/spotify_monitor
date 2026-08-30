@@ -297,11 +297,14 @@ def test_generated_config_includes_advanced_webhook_settings(monkeypatch):
     assert "private-template" not in rendered
 
 
-# Verifies debug mode retains sanitized HTTP diagnostics for troubleshooting
-def test_debug_mode_keeps_http_diagnostics(monkeypatch, capsys):
+# Verifies debug mode drops noisy "HTTP ..." request lines but keeps other diagnostics
+def test_debug_mode_filters_http_lines_but_keeps_other_diagnostics(monkeypatch, capsys):
     monkeypatch.setattr(monitor, "DEBUG_MODE", True)
     monitor.debug_print("HTTP GET https://example.test/path -> 200")
-    assert "HTTP GET https://example.test/path -> 200" in capsys.readouterr().out
+    monitor.debug_print("token refresh succeeded")
+    captured = capsys.readouterr().out
+    assert "HTTP GET https://example.test/path -> 200" not in captured
+    assert "token refresh succeeded" in captured
 
 
 # Verifies one successful webhook uses the isolated session with no Spotify adapter calls
