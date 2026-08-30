@@ -1076,13 +1076,9 @@ UPDATE_SPREADSHEET = False
 SPREADSHEET_ID = ""
 GOOGLE_OAUTH_CLIENT_FILE = ""
 GOOGLE_OAUTH_TOKEN_FILE = ""
-#DZ_PLAYLIST_NAME = "Discovery Zone"
-#LIKED_PLAYLIST_NAME = "Liked Songs"
+DZ_PLAYLIST_NAME = ""
+LIKED_PLAYLIST_NAME = ""
 INITIAL_STARTUP = True
-#sp_tracks  = []
-#sp_tracks2 = []
-# sp_tracks_upper  = [] # Discovery Zone
-# sp_tracks2_upper = [] # Liked Songs
 USER_ID       = ""
 GMAIL_TAG     = ""
 ERR_CODE      = ""
@@ -1103,6 +1099,7 @@ CSV_FILE2     = ""
 FLAG_FILE2    = ""
 WEBHOOK_URL2  = ""
 UPDATE_SPREADSHEET2 = False
+ADD_PLAYLISTS_TO_MONITOR2 = []
 
 # If playlist varies by more that this during refresh, assume there was an error
 MAX_PLAYLIST_DIFFERENTIAL  = 0
@@ -3424,16 +3421,22 @@ class Logger(object):
 # Helper functions using persistent loggers
 def print_to_log(message):
     """Prints only to the log file."""
+    if log_logger is None:
+        raise RuntimeError("print_to_log() called before log_logger was initialized")
     log_logger.log_only(message)
     
 def print_to_both(message):
     """Prints to both the log file and screen."""
+    if log_logger is None:
+        raise RuntimeError("print_to_both() called before log_logger was initialized")
     log_logger.log_only(message + "\n")
     log_logger.terminal_only(message + "\n")
     
 # DEBUG_JMK: 0 = disabled, 1 = also log, 2 = also log (legacy alias), 3 = screen only (no log)
 def print_to_screen(message):
     """Prints to the screen unconditionally; additionally writes to the log file when DEBUG_JMK is 1 or 2."""
+    if log_logger is None:
+        raise RuntimeError("print_to_screen() called before log_logger was initialized")
     if DEBUG_JMK in (1, 2):
         log_logger.log_only(message + "\n")
     log_logger.terminal_only(message + "\n")    
@@ -3442,6 +3445,8 @@ def print_to_screen(message):
 def print_debug(message):
     """Prints to the log file and/or screen, depending on configuration."""
     if DEBUG_JMK:
+        if log_logger is None:
+            raise RuntimeError("print_debug() called before log_logger was initialized")
         timestamp = datetime.now().strftime("%H:%M:%S")
         message = f"[DEBUG {timestamp}] {message}\n"
         if DEBUG_JMK in (1, 2):
@@ -3520,19 +3525,16 @@ def deliver_jmk_ntfy(notification_type, message, image_url, track, artist, album
         priority_start  = priority_kel_hi
         priority_stop   = priority_kel_lo
         priority_dz     = priority_kel_dz
-        priority_dz_off = priority_kel_lo
     elif ERR_CODE == "JMK":
         priority        = priority_jmk
         priority_start  = priority_jmk_hi
         priority_stop   = priority_jmk_lo
         priority_dz     = priority_jmk_dz
-        priority_dz_off = priority_jmk_lo
     else:
         priority        = 1 # shouldn't happen, but just in case
         priority_start  = 1 # shouldn't happen, but just in case
         priority_stop   = 1 # shouldn't happen, but just in case
         priority_dz     = 1 # shouldn't happen, but just in case
-        priority_dz_off = 1 # shouldn't happen, but just in case
     
     URL_DZ    = "https://mosaic.scdn.co/300/ab67616d00001e02176e29e598499208ff338ae1ab67616d00001e021daec881d1e9fd2fa7c2d009ab67616d00001e022519d01c0cca06f134eeadd8ab67616d00001e028cae5034066af45cdfbc4266"
     URL_LIKED = "https://image-cdn-ak.spotifycdn.com/image/ab67706c0000da8470d229cb865e8d81cdce0889"
@@ -3541,6 +3543,12 @@ def deliver_jmk_ntfy(notification_type, message, image_url, track, artist, album
         playlist = "unknown playlist"
     print_debug(f"send_ntfy_msg -> {message}")
     print_debug(f"send_ntfy_url -> {image_url}")
+
+    # Defaults in case none of the branches below match (e.g. message doesn't contain
+    # "' Detected" or "' Cleared") - avoids UnboundLocalError at send_webhook() below
+    title = f'{ERR_CODE} @ {timediffstr} mins & {count} songs'
+    body = f"{track}\n{artist}\n{album}" if playlist == "unknown playlist" else f"{track}\n{artist}\n{album}\n[{playlist}]"
+
     if (message[0:3] == "***") and ("Discovery Zone" in message):
         if "' Detected" in message:
             title = f"Playlist '{playlist}' Detected"
@@ -3553,7 +3561,6 @@ def deliver_jmk_ntfy(notification_type, message, image_url, track, artist, album
             body = f"{track}\n{artist}\n{album}"
             image_url = URL_DZ
             emoji = "heart"       
-            #priority = priority_dz_off # change priority from default
         print_debug(f"send_ntfy_url -> {image_url}")
 
     elif (message[0:3] == "***") and ("Liked Songs" in message):
@@ -4243,7 +4250,12 @@ def send_spreadsheet_recovery_alert():
 # Drains any rows left queued by a previous run's write failures, before the main loop starts,
 # instead of waiting for the next real song/event to trigger a retry. Called once at startup.
 def drain_spreadsheet_queue_at_startup():
-    if not UPDATE_SPREADSHEET or not sheets_helper.queue_has_pending(ERR_CODE):
+    if not UPDATE_SPREADSHEET:
+        return
+    if sheets_helper is None:
+        raise RuntimeError("UPDATE_SPREADSHEET is enabled but sheets_helper is not available")
+
+    if not sheets_helper.queue_has_pending(ERR_CODE):
         return
 
     print(f"* Retrying queued Google Sheet rows for tab '{ERR_CODE}'...")
@@ -4257,6 +4269,8 @@ def drain_spreadsheet_queue_at_startup():
 def update_spreadsheet_row(col_b_text, want_footer):
     if not UPDATE_SPREADSHEET:
         return "", ""
+    if sheets_helper is None:
+        raise RuntimeError("UPDATE_SPREADSHEET is enabled but sheets_helper is not available")
 
     debug_print("Updating Google Sheet")
     # Date-only, matching the legacy Apps Script column (which stored msg.getDate() but the sheet
@@ -10172,6 +10186,10 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
     sp_playlist_owner = ""
     sp_playlist_image_url = ""
     playlist_suffix = ""
+    dz_message = ""
+    dz_msg_screen = ""
+    body_dz = ""
+    body_dz_html = ""
     
     def iconstring():
         nonlocal icon_add, playlist_suffix 
@@ -10700,7 +10718,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
             check_count = 0
             if ALT_VIEW:
                 icon_add = False
-            hastrack = False
+            hasTrack = False
             print_debug(f"LOOP B - PRIMARY LOOP")
 
             # Primary loop
@@ -11639,9 +11657,9 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                             m_body_short = build_short_ntfy_body(sp_track, sp_artist, sp_album, sp_playlist if is_playlist else "", playlist_suffix)
                             if not JMK_MODE:
                                 # jmk on 8/22/2026 JMK_MODE skip to remove duplicate alerts since my code sends this alert
-                            	email_succeeded, webhook_succeeded = send_notification_channels("inactive", m_subject, m_body, m_body_html, INACTIVE_NOTIFICATION, image_url=sp_playlist_image_url or sp_album_image_url, subject_short=m_subject_short, body_short=m_body_short)
-                            	email_sent = email_sent or email_succeeded
-                            	webhook_sent = webhook_sent or webhook_succeeded
+                                email_succeeded, webhook_succeeded = send_notification_channels("inactive", m_subject, m_body, m_body_html, INACTIVE_NOTIFICATION, image_url=sp_playlist_image_url or sp_album_image_url, subject_short=m_subject_short, body_short=m_body_short)
+                                email_sent = email_sent or email_succeeded
+                                webhook_sent = webhook_sent or webhook_succeeded
                         sp_active_ts_start_old = sp_active_ts_start
                         sp_active_ts_start = 0
                         listened_songs_old = listened_songs
@@ -13202,16 +13220,20 @@ def main():
     # write discover a dead/expired/revoked token and block unattended waiting on browser consent.
     # If reauth is needed, alert now (in case this run is unattended) and then do the interactive
     # consent flow right here, at a predictable moment tied to launching the script.
-    if UPDATE_SPREADSHEET and sheets_helper.credentials_need_reauth(GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE):
-        print(f"* Google Sheets authorization needed for tab '{ERR_CODE}' - opening browser for consent...")
-        if ERROR_NOTIFICATION:
-            reauth_subject = f"spotify_monitor: Google Sheets re-authorization needed (tab '{ERR_CODE}')"
-            reauth_body = f"The cached Google Sheets token for tab '{ERR_CODE}' is no longer valid and needs to be re-authorized. spotify_monitor is opening a browser consent window now on the machine it's running on and will wait there until it's completed.{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-            reauth_body_html = f"<html><head></head><body>The cached Google Sheets token for tab '{escape(ERR_CODE)}' is no longer valid and needs to be re-authorized. spotify_monitor is opening a browser consent window now on the machine it's running on and will wait there until it's completed.{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
-            send_email(reauth_subject, reauth_body, reauth_body_html, SMTP_SSL)
-            send_notification("sheet", f"spotify_monitor: Google Sheets re-authorization needed (tab '{ERR_CODE}') - complete the browser consent on the host machine")
-        sheets_helper.interactive_reauth(GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE)
-        print(f"* Google Sheets authorization complete")
+    if UPDATE_SPREADSHEET:
+        if sheets_helper is None:
+            print(f"* Error: UPDATE_SPREADSHEET is enabled but the 'sheets_helper' module is not available; install it or disable UPDATE_SPREADSHEET")
+            sys.exit(1)
+        if sheets_helper.credentials_need_reauth(GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE):
+            print(f"* Google Sheets authorization needed for tab '{ERR_CODE}' - opening browser for consent...")
+            if ERROR_NOTIFICATION:
+                reauth_subject = f"spotify_monitor: Google Sheets re-authorization needed (tab '{ERR_CODE}')"
+                reauth_body = f"The cached Google Sheets token for tab '{ERR_CODE}' is no longer valid and needs to be re-authorized. spotify_monitor is opening a browser consent window now on the machine it's running on and will wait there until it's completed.{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                reauth_body_html = f"<html><head></head><body>The cached Google Sheets token for tab '{escape(ERR_CODE)}' is no longer valid and needs to be re-authorized. spotify_monitor is opening a browser consent window now on the machine it's running on and will wait there until it's completed.{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
+                send_email(reauth_subject, reauth_body, reauth_body_html, SMTP_SSL)
+                send_notification("sheet", f"spotify_monitor: Google Sheets re-authorization needed (tab '{ERR_CODE}') - complete the browser consent on the host machine")
+            sheets_helper.interactive_reauth(GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE)
+            print(f"* Google Sheets authorization complete")
 
     drain_spreadsheet_queue_at_startup()
 
@@ -13232,10 +13254,6 @@ def main():
             print("* To stop this warning, set NTFY_IMAGES to False in the configuration file")
             print("* Sending ntfy alerts as text only...")
             print("*" * HORIZONTAL_LINE + "\n")
-
-    if UPDATE_SPREADSHEET and sheets_helper is None:
-        print(f"* Error: UPDATE_SPREADSHEET is enabled but the 'sheets_helper' module is not available; install it or disable UPDATE_SPREADSHEET")
-        sys.exit(1)
 
     # We define signal handlers only for Linux, Unix & MacOS since Windows has limited number of signals supported
     if platform.system() != 'Windows':
