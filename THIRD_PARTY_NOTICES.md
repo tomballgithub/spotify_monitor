@@ -17,6 +17,8 @@ The distributed package contains no vendored third-party source. It declares the
 | [Pillow](https://github.com/python-pillow/Pillow) | >=12.0.0 on Python 3.10 and newer, >=11.3.0,<12 on Python 3.9, `notification-images` extra | MIT-CMU | Artwork handling for ntfy image notifications |
 | [spotipy](https://github.com/spotipy-dev/spotipy) | >=2.24.0, `legacy-oauth` extra | MIT | Legacy Spotify Web API metadata backend |
 | [pycookiecheat](https://github.com/n8henrie/pycookiecheat) | >=0.8, `browser` extra | MIT | Importing Chrome, Brave and Chromium cookies on macOS and Linux |
+| [gspread](https://github.com/burnash/gspread) | `google-sheets` extra | MIT | Direct Google Sheets writes |
+| [google-auth-oauthlib](https://github.com/googleapis/google-auth-library-python-oauthlib) | `google-sheets` extra | Apache-2.0 | OAuth desktop consent flow for Google Sheets |
 
 ## Build, test and documentation dependencies
 

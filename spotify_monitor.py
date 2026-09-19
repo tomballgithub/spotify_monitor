@@ -1014,6 +1014,7 @@ SONG_NOTIFICATION = False
 SONG_ON_LOOP_NOTIFICATION = False
 ERROR_NOTIFICATION = False
 SCROBBLE_HEALTH_NOTIFICATION = False
+PRIVACY_SUBSTITUTIONS = []
 WEBHOOK_ENABLED = False
 WEBHOOK_PROVIDER = ""
 WEBHOOK_URL = ""
@@ -1104,6 +1105,14 @@ MONITORING_ACTIVE = False
 ENABLE_MUSIXMATCH_URL = False
 ENABLE_LYRICS_COM_URL = False
 SPOTIFY_SUFFIX = ""
+LOAD_TRACKS_FREQUENCY      = 0
+OVERRIDE_PLAYLIST_AT_START = False
+NOTIFY_PLAYLIST_DETECTED   = False
+ICON_SONG_MISSING_FROM_PLAYLIST = "*"
+#ICON_SONG_MISSING_FROM_PLAYLIST = "⏺" # white circle
+#ICON_SONG_MISSING_FROM_PLAYLIST = "⚠" # warning symbol
+# If playlist varies by more that this during refresh, assume there was an error
+MAX_PLAYLIST_DIFFERENTIAL  = 0
 TOKEN_MAX_RETRIES = 0
 TOKEN_RETRY_TIMEOUT = 0.0
 TOTP_VERSION = 0
@@ -1158,20 +1167,9 @@ WEBHOOK_URL2  = ""
 UPDATE_SPREADSHEET2 = False
 ADD_PLAYLISTS_TO_MONITOR2 = []
 
-# If playlist varies by more that this during refresh, assume there was an error
-MAX_PLAYLIST_DIFFERENTIAL  = 0
-LOAD_TRACKS_FREQUENCY      = 0
-OVERRIDE_PLAYLIST_AT_START = False
-NOTIFY_PLAYLIST_DETECTED   = False
-ICON_SONG_MISSING_FROM_PLAYLIST = "*"
-#ICON_SONG_MISSING_FROM_PLAYLIST = "\u23FA" # white circle
-#ICON_SONG_MISSING_FROM_PLAYLIST = "\u26A0" # warning symbol
-
 monitored_playlists_data = {}
 DEBUG_JMK = False
 count_overridden = False
-NTFY_IMAGES = True
-PRIVACY_SUBSTITUTIONS = []
 PRIVACY_SUBSTITUTIONS_INVALID_WARNED = False
 
 import threading
@@ -2342,9 +2340,10 @@ def parse_config_content(content: str, filename: str = "<config>", retired_out: 
         try:
             if isinstance(statement.value, ast.Name):
                 # it's a bare reference to another variable (allow assigning a name to another in .conf file #jmk)
-                parsed_values[name] = _normalized_config_value(name, ast.literal_eval(statement.value), template_defaults)
+                raw_value = parsed_values.get(statement.value.id, statement.value.id)
             else:
-                parsed_values[name] = ast.literal_eval(statement.value)
+                raw_value = ast.literal_eval(statement.value)
+            parsed_values[name] = _normalized_config_value(name, raw_value, template_defaults)
         except (ValueError, TypeError) as exc:
             raise ValueError(f"Line {statement.lineno}: {name} must use a literal value") from exc
     return parsed_values
@@ -4202,8 +4201,7 @@ class Logger(object):
             self.terminal.flush()
 
     def terminal_only(self, message):
-        # Expand tabs for file output and strip colour codes so the log file stays plain text
-        self.logfile.write(normalize_log_separators(ANSI_ESCAPE_RE.sub("", sanitize_terminal_text(message)).expandtabs(8)))
+        message = sanitize_terminal_text(message)
         # Truncate before colouring so escape sequences never count toward the displayed width
         message = self._truncate_terminal(message)
         self.terminal.write(apply_color_to_text(message))
@@ -4651,7 +4649,7 @@ def load_spotify_tracks_from_file(filename):
             if line.strip() and not line.strip().startswith("#")
         ]
     except Exception as e:
-        print(f"* Error: file with Spotify tracks cannot be opened - {e}")
+        print_recovery_error(e, "file_read", detail=f"File with Spotify tracks cannot be opened: {e}")
         sys.exit(1)
     return tracks
 
@@ -5043,14 +5041,15 @@ def format_diagnostic_line(operation, fields):
 def debug_print(_operation, **fields):
     if DEBUG_MODE:
         message = format_diagnostic_line(_operation, fields)
+        if message.startswith("HTTP "):
+            return
         timestamp = datetime.now().strftime("%H:%M:%S")
         # Every message is redacted by sanitize_error_text, which CodeQL does not model as a sanitizer. The one
         # reported flow carries OAUTH_APP_VALIDATION_TRACK_URI, a public track URI that the password name
         # heuristic matches only because the constant is spelled with oauth
 
         # codeql[py/clear-text-logging-sensitive-data]
-        if not message.startswith("HTTP "):
-            print(f"[DEBUG {timestamp}] {sanitize_error_text(message)}")
+        print(f"[DEBUG {timestamp}] {sanitize_error_text(message)}")
 
 
 # Redacts a secret value for diagnostic output
@@ -8703,7 +8702,7 @@ def _startup_webhook_detail_rows() -> List[StartupSummaryRow]:
     rows.append(StartupSummaryRow("Webhook provider", provider))
     # The ntfy attachment setting says nothing about a run that posts to Discord, which ignores it
     if normalized_webhook_provider() == "ntfy":
-        rows.append(StartupSummaryRow("Ntfy images", str(NTFY_IMAGES)))
+        rows.append(StartupSummaryRow("ntfy images", str(NTFY_IMAGES)))
     rows.append(StartupSummaryRow("Delivery confirmations", str(DELIVERY_CONFIRMATIONS)))
     return rows
 
@@ -8797,8 +8796,6 @@ def build_startup_summary(target: str, config_path, env_path, output_path) -> Li
     if UPDATE_SPREADSHEET and GOOGLE_OAUTH_TOKEN_FILE:
         rows.append(StartupSummaryRow("Google Sheets OAuth Token", GOOGLE_OAUTH_TOKEN_FILE, concise=True))
 
-    rows.append(StartupSummaryRow("More details", "use --verbose or --debug", concise=True, full=False))
-
     rows.extend([
         StartupSummaryRow("----------------------------", "----------------------------", True),
         StartupSummaryRow("Visual mode", str(f"Alternate" if ALT_VIEW else "Standard") + (f" (with DEBUG_JMK level {DEBUG_JMK})" if DEBUG_JMK else ""), concise=True),
@@ -8821,7 +8818,7 @@ def build_startup_summary(target: str, config_path, env_path, output_path) -> Li
 
 
 # Rows that detail the channel named right above them, indented so the block reads as one setting with its details
-_STARTUP_SUMMARY_NESTED_LABELS = ("Email transport", "Email recipient", "Email images", "Webhook provider", "Ntfy images", "Webhook URL")
+_STARTUP_SUMMARY_NESTED_LABELS = ("Email transport", "Email recipient", "Email images", "Webhook provider", "ntfy images", "Webhook URL")
 
 
 # Formats one startup summary row with aligned plain ASCII columns
@@ -9777,7 +9774,7 @@ def doctor_secret_is_set(value) -> bool:
 
 
 # Returns the diagnostic fields describing one secret, keeping the length out of the value so a line still splits on ", "
-def secret_fields(value, key=None) -> Dict[str, Any]:
+def secret_fields(value, key=None) -> dict[str, Any]:
     return {"value": "set" if doctor_secret_is_set(value) else "not set", "chars": len(str(value).strip()) if key in FIXED_LENGTH_SECRET_KEYS and doctor_secret_is_set(value) else None}
 
 
@@ -15908,7 +15905,7 @@ def main():
     # consent flow right here, at a predictable moment tied to launching the script.
     if UPDATE_SPREADSHEET:
         if sheets_helper is None:
-            print(f"* Error: UPDATE_SPREADSHEET is enabled but the 'sheets_helper' module is not available; install it or disable UPDATE_SPREADSHEET")
+            print_recovery_error(context="dependency", detail="sheets_helper is required because UPDATE_SPREADSHEET is enabled")
             sys.exit(1)
         if sheets_helper.credentials_need_reauth(GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE):
             print(f"* Google Sheets authorization needed for tab '{ERR_CODE}' - opening browser for consent...")

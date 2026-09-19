@@ -382,6 +382,7 @@ CLASSIFIER_EXEMPTIONS = {
     "Setup was saved": "a wizard result followed by the step that finishes the setup",
     "consecutive missing plays": "a line of setup guidance describing the shipped default",
     "Monitoring failure changed for": "a one-line note on a classified outage that already had its full report",
+    "row queued for retry": "a self-recovering status note; the row is retried automatically and a recovery alert fires once it drains",
 }
 
 # Words that mark a printed line as a report of something going wrong

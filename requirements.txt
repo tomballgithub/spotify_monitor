@@ -5,9 +5,9 @@ pyotp
 python-dotenv
 wcwidth
 
-# Google Sheets Support #jmk
-gspread
-google-auth-oauthlib
+# Optional for direct Google Sheets support #jmk
+# gspread
+# google-auth-oauthlib
 
 # Optional for ntfy artwork attachments (NTFY_IMAGES)
 # Pillow 12 dropped Python 3.9, so 3.9 keeps the last release that supports it

@@ -42,6 +42,8 @@ lint = ["ruff==0.16.7"]
 notification-images = ["Pillow>=11.3.0,<12; python_version < '3.10'", "Pillow>=12.0.0; python_version >= '3.10'"]
 legacy-oauth = ["spotipy>=2.24.0"]
 browser = ["pycookiecheat>=0.8"]
+# Optional for direct Google Sheets writes (sheets_helper.py) #jmk
+google-sheets = ["gspread", "google-auth-oauthlib"]
 
 [project.urls]
 Homepage = "https://github.com/misiektoja/spotify_monitor"
