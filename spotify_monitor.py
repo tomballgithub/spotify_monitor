@@ -8665,11 +8665,11 @@ def _startup_webhook_detail_rows() -> List[StartupSummaryRow]:
         provider = "Not configured"
     else:
         provider = f"{webhook_provider_display_name()} ({'enabled' if WEBHOOK_ENABLED else 'disabled'})"
-    rows = [StartupSummaryRow("Webhook provider", provider)]
-    rows.append(StartupSummaryRow("Webhook URL", mask_secret(WEBHOOK_URL) or "Invalid", concise=False))
+    rows = [StartupSummaryRow("Webhook URL", mask_secret(WEBHOOK_URL) or "Invalid", concise=False)]
+    rows.append(StartupSummaryRow("Webhook provider", provider))
     # The ntfy attachment setting says nothing about a run that posts to Discord, which ignores it
     if normalized_webhook_provider() == "ntfy":
-        rows.append(StartupSummaryRow("ntfy images", str(NTFY_IMAGES)))
+        rows.append(StartupSummaryRow("Ntfy images", str(NTFY_IMAGES)))
     rows.append(StartupSummaryRow("Delivery confirmations", str(DELIVERY_CONFIRMATIONS)))
     return rows
 
@@ -8787,7 +8787,7 @@ def build_startup_summary(target: str, config_path, env_path, output_path) -> Li
 
 
 # Rows that detail the channel named right above them, indented so the block reads as one setting with its details
-_STARTUP_SUMMARY_NESTED_LABELS = ("Email transport", "Email recipient", "Email images", "Webhook provider", "ntfy images")
+_STARTUP_SUMMARY_NESTED_LABELS = ("Email transport", "Email recipient", "Email images", "Webhook provider", "Ntfy images", "Webhook URL")
 
 
 # Formats one startup summary row with aligned plain ASCII columns
