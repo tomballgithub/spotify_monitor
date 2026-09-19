@@ -8797,7 +8797,7 @@ def build_startup_summary(target: str, config_path, env_path, output_path) -> Li
     if UPDATE_SPREADSHEET and GOOGLE_OAUTH_TOKEN_FILE:
         rows.append(StartupSummaryRow("Google Sheets OAuth Token", GOOGLE_OAUTH_TOKEN_FILE, concise=True))
 
-    rows.append(StartupSummaryRow("More details", "use --verbose or --debug", concise=True, full=False, log=False))
+    rows.append(StartupSummaryRow("More details", "use --verbose or --debug", concise=True, full=False))
 
     rows.extend([
         StartupSummaryRow("----------------------------", "----------------------------", True),
@@ -14937,7 +14937,7 @@ def main():
         help="Max characters per screen line (not log), use 999 to auto-detect terminal width, ignored if -d is set"
     )
     opts.add_argument(
-        "-k", "--jmk",
+        "--jmk",
         dest="jmk",
         action="store_true",
         default=None,
