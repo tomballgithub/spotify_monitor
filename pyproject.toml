@@ -1,0 +1,84 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spotify_monitor"
+version = "3.4"
+description = "Track Spotify friends' music activity in real time with auto-playback, skipped tracks detection and instant notifications"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = ["LICEN[CS]E*"]
+authors = [{ name = "Michal Szymanski", email = "misiektoja-pypi@rm-rf.ninja" }]
+requires-python = ">=3.9"
+dependencies = [
+  "requests>=2.0",
+  "python-dateutil>=2.8",
+  "urllib3>=2.0.7",
+  "pyotp>=2.9.0",
+  "python-dotenv>=0.19",
+  "wcwidth>=0.2.7",
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Operating System :: OS Independent",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS :: MacOS X",
+]
+keywords = ["spotify", "monitoring", "tracking", "real-time", "friend-activity",  "osint"]
+
+[project.optional-dependencies]
+test = ["build>=1.2", "coverage>=7.10", "hypothesis>=6.100", "Pillow>=11.3.0,<12; python_version < '3.10'", "Pillow>=12.0.0; python_version >= '3.10'", "pyright>=1.1.400", "pytest>=7.0", "pyyaml>=6.0", "setuptools>=61.0", "wheel"]
+# Pinned so a new ruff release cannot fail CI on a rule that did not exist when the change was written
+lint = ["ruff==0.16.7"]
+# Pillow 12 dropped Python 3.9, so 3.9 keeps the last release that supports it while 3.10 and newer get the current one
+notification-images = ["Pillow>=11.3.0,<12; python_version < '3.10'", "Pillow>=12.0.0; python_version >= '3.10'"]
+legacy-oauth = ["spotipy>=2.24.0"]
+browser = ["pycookiecheat>=0.8"]
+# Optional for direct Google Sheets writes (sheets_helper.py) #jmk
+google-sheets = ["gspread", "google-auth-oauthlib"]
+
+[project.urls]
+Homepage = "https://github.com/misiektoja/spotify_monitor"
+Documentation = "https://misiektoja.github.io/spotify_monitor/"
+Source   = "https://github.com/misiektoja/spotify_monitor"
+Changelog= "https://github.com/misiektoja/spotify_monitor/blob/main/RELEASE_NOTES.md"
+
+[project.scripts]
+spotify_monitor = "spotify_monitor:main"
+spotify_monitor_secret_grabber = "debug.spotify_monitor_secret_grabber:main"
+spotify_monitor_totp_test = "debug.spotify_monitor_totp_test:main"
+
+[tool.setuptools]
+py-modules = ["spotify_monitor"]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["debug*"]
+namespaces = true
+
+[tool.ruff]
+target-version = "py39"
+
+[tool.ruff.lint]
+# Defect rules only: syntax errors, pyflakes and bugbear. Formatting and import order are left
+# to the surrounding code, which keeps each function definition on one physical line
+select = ["E9", "F", "B"]
+# Both are style preferences that would rewrite hundreds of existing lines without fixing a defect
+ignore = ["F541", "B904"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+  "e2e: offline end-to-end tests that exercise a complete local user flow",
+  "integration: local transport tests that use loopback HTTP or SMTP servers",
+]

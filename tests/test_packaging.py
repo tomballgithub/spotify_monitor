@@ -1,0 +1,236 @@
+"""Tests for the built wheel and its installed console commands."""
+
+import os
+import re
+import site
+import subprocess
+import sys
+import tempfile
+import venv
+import zipfile
+from collections.abc import Iterator
+from datetime import datetime
+from pathlib import Path
+
+import pytest
+
+import spotify_monitor as monitor
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+ARTIFACT_ROOT = PROJECT_ROOT / "local" / "package_test_artifacts"
+
+
+# Creates one disposable package test directory below the project local directory
+@pytest.fixture(scope="module")
+def package_test_directory() -> Iterator[Path]:
+    ARTIFACT_ROOT.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=ARTIFACT_ROOT) as directory_name:
+        yield Path(directory_name)
+
+
+# Builds the project wheel once for package and installed-CLI tests
+@pytest.fixture(scope="module")
+def built_wheel(package_test_directory: Path) -> Path:
+    wheel_directory = package_test_directory / "dist"
+    result = subprocess.run([sys.executable, "-m", "build", "--wheel", "--no-isolation", "--outdir", str(wheel_directory), str(PROJECT_ROOT)], check=False, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    wheels = list(wheel_directory.glob("*.whl"))
+    assert len(wheels) == 1
+    return wheels[0]
+
+
+# Installs the built wheel into an isolated command environment
+@pytest.fixture(scope="module")
+def installed_package(package_test_directory: Path, built_wheel: Path) -> tuple[Path, Path]:
+    environment_directory = package_test_directory / "venv"
+    venv.EnvBuilder(with_pip=True, system_site_packages=True).create(environment_directory)
+    python_executable = environment_directory / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    result = subprocess.run([str(python_executable), "-m", "pip", "install", "--no-deps", "--force-reinstall", str(built_wheel)], check=False, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    console_executable = environment_directory / ("Scripts/spotify_monitor.exe" if os.name == "nt" else "bin/spotify_monitor")
+    assert console_executable.is_file()
+    return python_executable, console_executable
+
+
+# Runs the installed console command from outside the source tree
+def run_installed_console(package_test_directory: Path, installed_package: tuple[Path, Path], *arguments: str) -> subprocess.CompletedProcess[str]:
+    _python_executable, console_executable = installed_package
+    working_directory = package_test_directory / "working"
+    working_directory.mkdir(exist_ok=True)
+    environment = installed_environment(installed_package)
+    return subprocess.run([str(console_executable), *arguments], cwd=working_directory, env=environment, check=False, capture_output=True, text=True, timeout=30)
+
+
+# Builds an import path that prefers the tested wheel while reusing installed dependencies
+def installed_environment(installed_package: tuple[Path, Path]) -> dict[str, str]:
+    python_executable, _console_executable = installed_package
+    environment_directory = python_executable.parent.parent
+    package_directory = environment_directory / ("Lib/site-packages" if os.name == "nt" else f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages")
+    environment = os.environ.copy()
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    environment["PYTHONPATH"] = os.pathsep.join([str(package_directory), *site.getsitepackages()])
+    return environment
+
+
+# Verifies the wheel carries every console entry point and Python module
+def test_wheel_contains_entry_points_and_runtime_modules(built_wheel: Path):
+    with zipfile.ZipFile(built_wheel) as wheel_archive:
+        names = wheel_archive.namelist()
+        entry_points_name = next(name for name in names if name.endswith(".dist-info/entry_points.txt"))
+        entry_points = wheel_archive.read(entry_points_name).decode("utf-8")
+    assert "spotify_monitor.py" in names
+    assert "debug/spotify_monitor_secret_grabber.py" in names
+    assert "debug/spotify_monitor_totp_test.py" in names
+    assert "spotify_monitor = spotify_monitor:main" in entry_points
+    assert "spotify_monitor_secret_grabber = debug.spotify_monitor_secret_grabber:main" in entry_points
+    assert "spotify_monitor_totp_test = debug.spotify_monitor_totp_test:main" in entry_points
+
+
+# Verifies the installed console imports from the wheel and exposes version and help
+def test_installed_console_version_and_help(package_test_directory: Path, installed_package: tuple[Path, Path]):
+    python_executable, _console_executable = installed_package
+    working_directory = package_test_directory / "working"
+    working_directory.mkdir(exist_ok=True)
+    import_result = subprocess.run([str(python_executable), "-c", "import spotify_monitor; print(spotify_monitor.__file__)"], cwd=working_directory, env=installed_environment(installed_package), check=False, capture_output=True, text=True, timeout=30)
+    version_result = run_installed_console(package_test_directory, installed_package, "--version")
+    help_result = run_installed_console(package_test_directory, installed_package, "--help")
+    assert import_result.returncode == 0, import_result.stdout + import_result.stderr
+    assert str(package_test_directory / "venv") in import_result.stdout
+    assert version_result.returncode == 0
+    assert re.search(r"^spotify_monitor(?:\.py)? v\d", version_result.stdout)
+    assert help_result.returncode == 0
+    for option in ("--setup", "--setup-scrobble-health", "--authorize-scrobble-health", "--doctor", "--generate-config", "--import-browser-cookie", "--webhook-url", "--webhook-provider", "--webhook-errors", "--send-test-webhook"):
+        assert option in help_result.stdout
+
+
+# Verifies the installed console generates a valid portable configuration file
+def test_installed_console_generates_valid_config(package_test_directory: Path, installed_package: tuple[Path, Path]):
+    destination = package_test_directory / "working" / "generated.conf"
+    result = run_installed_console(package_test_directory, installed_package, "--generate-config", str(destination))
+    assert result.returncode == 0, result.stdout + result.stderr
+    generated = destination.read_text(encoding="utf-8")
+    compile(generated, str(destination), "exec")
+    assert "TOKEN_SOURCE" in generated
+    assert "SPOTIFY_CHECK_INTERVAL" in generated
+    assert "WEBHOOK_ENABLED" in generated
+
+
+class TestWorkflowSupplyChain:
+    # Every third-party action is pinned to a commit, so a moved tag cannot change what runs with our secrets
+    def test_actions_are_pinned_to_commit_shas(self):
+        unpinned = []
+        for workflow in sorted((PROJECT_ROOT / ".github" / "workflows").glob("*.yml")):
+            for match in re.finditer(r"uses:\s*(\S+)", workflow.read_text(encoding="utf-8")):
+                reference = match.group(1)
+                if reference.startswith("./"):
+                    continue
+                action, _, ref = reference.partition("@")
+                if not re.fullmatch(r"[0-9a-f]{40}", ref):
+                    unpinned.append(f"{workflow.name}: {reference}")
+        assert unpinned == []
+
+    # Each pin records the human-readable version so updates stay reviewable
+    def test_pinned_actions_carry_a_version_comment(self):
+        missing = []
+        for workflow in sorted((PROJECT_ROOT / ".github" / "workflows").glob("*.yml")):
+            for line in workflow.read_text(encoding="utf-8").splitlines():
+                if "uses:" in line and "@" in line and "./" not in line and not re.search(r"#\s*v?\d", line):
+                    missing.append(f"{workflow.name}: {line.strip()}")
+        assert missing == []
+
+    # Event and input values never reach a shell directly, which would allow script injection
+    def test_run_steps_do_not_interpolate_event_values(self):
+        offenders = []
+        for workflow in sorted((PROJECT_ROOT / ".github" / "workflows").glob("*.yml")):
+            for block in re.findall(r"run: \|(.*?)(?=\n      [-a-zA-Z]|\Z)", workflow.read_text(encoding="utf-8"), re.S):
+                for line in block.splitlines():
+                    if "${{" in line:
+                        offenders.append(f"{workflow.name}: {line.strip()}")
+        assert offenders == []
+
+
+class TestVersionConsistency:
+    # The module, its docstring and the package metadata must agree, since only one of them reaches a user
+    def test_declared_versions_match(self):
+        pyproject = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        packaged = re.search(r'^version = "([^"]+)"', pyproject, re.M)
+        docstring = re.search(r"^v(\d+\.\d+(?:\.\d+)?)\s*$", monitor.__doc__ or "", re.M)
+
+        assert packaged is not None and docstring is not None
+        assert monitor.VERSION == packaged.group(1) == docstring.group(1)
+
+    # The citation must name a version somebody can actually cite, so it tracks the newest dated release
+    # notes section rather than the version under development
+    def test_citation_tracks_the_newest_released_version(self):
+        notes = (PROJECT_ROOT / "RELEASE_NOTES.md").read_text(encoding="utf-8")
+        citation = (PROJECT_ROOT / "CITATION.cff").read_text(encoding="utf-8")
+        released = re.search(r"^# Changes in ([\d.]+) \((\d{1,2} \w{3} \d{4})\)", notes, re.M)
+        cited_version = re.search(r'^version: "([^"]+)"', citation, re.M)
+        cited_date = re.search(r"^date-released: (\d{4}-\d{2}-\d{2})", citation, re.M)
+
+        assert released is not None and cited_version is not None and cited_date is not None
+        assert cited_version.group(1) == released.group(1)
+        assert cited_date.group(1) == datetime.strptime(released.group(2), "%d %b %Y").strftime("%Y-%m-%d")
+
+    # Release notes must describe the version the code actually declares, or the notes ship ahead of the code
+    def test_release_notes_lead_with_the_declared_version(self):
+        notes = (PROJECT_ROOT / "RELEASE_NOTES.md").read_text(encoding="utf-8")
+        newest = re.search(r"^# Changes in ([\d.]+)", notes, re.M)
+
+        assert newest is not None
+        assert newest.group(1) == monitor.VERSION
+
+
+# Verifies manual and packaged installs need the same runtime libraries, so both dependency lists must agree
+def test_runtime_dependency_declarations_agree():
+    pyproject = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    requirements = (PROJECT_ROOT / "requirements.txt").read_text(encoding="utf-8")
+
+    declared = re.search(r"^dependencies = \[(.*?)^\]", pyproject, re.S | re.M)
+    assert declared is not None
+    packaged = {name.casefold().replace("_", "-") for name in re.findall(r'"([A-Za-z0-9_.-]+)', declared.group(1))}
+    manual = {match.group(0).casefold().replace("_", "-") for line in requirements.splitlines() if line.strip() and not line.lstrip().startswith("#") if (match := re.match(r"[A-Za-z0-9_.-]+", line))}
+
+    assert manual == packaged
+
+
+# Verifies artwork support ships as an optional extra that keeps Python 3.9 on the last Pillow it supports
+def test_artwork_support_is_an_optional_extra():
+    pyproject = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    requirements = (PROJECT_ROOT / "requirements.txt").read_text(encoding="utf-8")
+
+    runtime_block = re.search(r"^dependencies = \[(.*?)^\]", pyproject, re.M | re.S)
+    assert runtime_block is not None and "Pillow" not in runtime_block.group(1)
+    assert "notification-images = [\"Pillow>=11.3.0,<12; python_version < '3.10'\", \"Pillow>=12.0.0; python_version >= '3.10'\"]" in pyproject
+    assert not any(line.strip().startswith("Pillow") for line in requirements.splitlines())
+    assert '# Pillow>=12.0.0; python_version >= "3.10"' in requirements
+
+
+# Verifies the runtime image preinstalls artwork support because it ships without pip
+def test_container_image_preinstalls_artwork_support():
+    dockerfile = (PROJECT_ROOT / "Dockerfile").read_text(encoding="utf-8")
+    install_line = next(line for line in dockerfile.splitlines() if "pip install" in line)
+    assert "-r requirements.txt" in install_line and '"Pillow>=12.0.0"' in install_line
+
+
+# Verifies the minimum supported Python version is declared once and matches the packaging metadata
+def test_the_minimum_python_version_is_declared_once():
+    pyproject = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+    assert monitor.MINIMUM_PYTHON_VERSION_TEXT == ".".join(str(part) for part in monitor.MINIMUM_PYTHON_VERSION)
+    assert f'requires-python = ">={monitor.MINIMUM_PYTHON_VERSION_TEXT}"' in pyproject
+    assert f"Programming Language :: Python :: {monitor.MINIMUM_PYTHON_VERSION_TEXT}" in pyproject
+    classifiers = re.findall(r"Programming Language :: Python :: (\d+\.\d+)", pyproject)
+    assert min(tuple(int(part) for part in version.split(".")) for version in classifiers) == monitor.MINIMUM_PYTHON_VERSION
+
+
+# Verifies published rebuilds refresh package updates even when the source is unchanged
+def test_published_images_do_not_reuse_package_update_layers():
+    publishers = []
+    for workflow in (PROJECT_ROOT / ".github" / "workflows").glob("*.yml"):
+        text = workflow.read_text(encoding="utf-8")
+        for match in re.finditer(r"uses: docker/build-push-action@[^\n]+\n(.*?)(?=\n      -|\Z)", text, re.S):
+            publishers.append(workflow.name)
+            assert re.search(r"^          no-cache: true$", match.group(1), re.M), workflow.name
+    assert len(publishers) == 2

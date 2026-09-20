@@ -1,0 +1,97 @@
+name: Bug report
+description: Monitoring stops, an alert is wrong or behavior does not match the documentation
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not report a suspected vulnerability here. Follow [SECURITY.md](https://github.com/misiektoja/spotify_monitor/blob/main/SECURITY.md) instead.
+
+        Never paste your `sp_dc` cookie, a Protobuf login file, a Spotify refresh token, a Last.fm API key, an SMTP password, a webhook URL or an ntfy token into an issue. Logs and `--doctor` output can name the friends you monitor, so redact anything you do not want public.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: The steps, including the command you ran and the relevant settings from your configuration file. Redact targets, credentials and webhook URLs.
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Doctor output
+      description: "Output of `spotify_monitor --doctor`, redacted. It reports the login token source, metadata backend, connectivity, configured files and target reachability."
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log or error output
+      description: "The error as printed or the relevant part of the log file. Adding `--debug` records the request flow."
+      render: shell
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: spotify_monitor version
+      description: "Output of `spotify_monitor --version`."
+      placeholder: "3.3"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: How it is installed
+      options:
+        - PyPI (pip install spotify_monitor)
+        - Standalone script
+        - Docker image
+        - Docker Compose
+        - From source
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Operating system and Python version
+      placeholder: macOS 26.1, Python 3.13.2
+    validations:
+      required: true
+
+  - type: dropdown
+    id: monitor-mode
+    attributes:
+      label: Which mode you are running
+      options:
+        - Friend Activity
+        - Scrobble Health (Spotify to Last.fm)
+        - Both
+    validations:
+      required: true
+
+  - type: dropdown
+    id: token-source
+    attributes:
+      label: Authentication in use
+      options:
+        - Cookie (sp_dc)
+        - Advanced client mode (captured desktop credentials)
+        - Not sure
+    validations:
+      required: false

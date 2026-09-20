@@ -1,0 +1,383 @@
+from command_expectations import runtime_command
+import shlex
+from pathlib import Path
+from unittest.mock import Mock
+
+import pytest
+
+import spotify_monitor as monitor
+
+
+# Returns the interpreter name the printed commands use on the host running the tests
+def interpreter_name():
+    return "python" if monitor.platform.system() == "Windows" else "python3"
+
+
+# Forces install-method inputs to a known environment for one assertion
+def force_install_environment(monkeypatch, dockerenv=False, docker_env=False, compose_env=False, argv0="spotify_monitor"):
+    monkeypatch.setattr(monitor.os.path, "exists", lambda path: dockerenv and path == "/.dockerenv")
+    if docker_env:
+        monkeypatch.setenv("SPOTIFY_MONITOR_DOCKER", "1")
+    else:
+        monkeypatch.delenv("SPOTIFY_MONITOR_DOCKER", raising=False)
+    if compose_env:
+        monkeypatch.setenv("SPOTIFY_MONITOR_COMPOSE", "1")
+    else:
+        monkeypatch.delenv("SPOTIFY_MONITOR_COMPOSE", raising=False)
+    monkeypatch.setattr(monitor.sys, "argv", [argv0])
+
+
+# Verifies manual and pip launches are distinguished by the executable name
+def test_install_method_detects_manual_and_pip(monkeypatch):
+    force_install_environment(monkeypatch, argv0="spotify_monitor.py")
+    assert monitor._wizard_install_method() == "manual"
+    force_install_environment(monkeypatch, argv0="/usr/local/bin/spotify_monitor")
+    assert monitor._wizard_install_method() == "pip"
+
+
+# Verifies both Docker markers and the Compose marker follow the required precedence
+def test_install_method_detects_docker_and_compose(monkeypatch):
+    force_install_environment(monkeypatch, dockerenv=True, argv0="spotify_monitor.py")
+    assert monitor._wizard_install_method() == "docker"
+    force_install_environment(monkeypatch, docker_env=True, argv0="spotify_monitor.py")
+    assert monitor._wizard_install_method() == "docker"
+    force_install_environment(monkeypatch, dockerenv=True, compose_env=True, argv0="spotify_monitor.py")
+    assert monitor._wizard_install_method() == "compose"
+
+
+# Verifies the startup summary names every detected install method in readable form
+def test_install_method_display_names(monkeypatch):
+    assert monitor.install_method_display_name("manual") == "downloaded script"
+    assert monitor.install_method_display_name("pip") == "PyPI install"
+    assert monitor.install_method_display_name("docker") == "Docker container"
+    assert monitor.install_method_display_name("compose") == "Docker Compose container"
+    force_install_environment(monkeypatch, argv0="spotify_monitor.py")
+    assert monitor.install_method_display_name() == "downloaded script"
+
+
+# Verifies container prefixes use host-side IDs only for selected Linux hosts
+def test_install_method_command_prefixes(monkeypatch):
+    monkeypatch.setattr(monitor.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(monitor.sys, "executable", "/usr/bin/python")
+    monkeypatch.setattr(monitor.sys, "argv", ["spotify_monitor.py"])
+    monkeypatch.setattr(monitor.os, "getuid", lambda: 10001, raising=False)
+    assert monitor._wizard_cmd_prefix("manual") == runtime_command("python3 spotify_monitor.py")
+    assert monitor._wizard_cmd_prefix("pip") == runtime_command("spotify_monitor")
+    assert monitor._wizard_cmd_prefix("docker") == 'docker run --rm -it --init -v "${PWD}:/data:z" misiektoja/spotify-monitor'
+    monkeypatch.setattr(monitor.os, "getuid", lambda: 1000, raising=False)
+    assert monitor._wizard_cmd_prefix("docker") == 'docker run --rm -it --init --user "$(id -u):$(id -g)" -v "${PWD}:/data:z" misiektoja/spotify-monitor'
+    assert monitor._wizard_cmd_prefix("docker", host_os="macos") == 'docker run --rm -it --init -v "${PWD}:/data:z" misiektoja/spotify-monitor'
+    assert monitor._wizard_cmd_prefix("docker", host_os="linux") == 'docker run --rm -it --init --user "$(id -u):$(id -g)" -v "${PWD}:/data:z" misiektoja/spotify-monitor'
+    assert monitor._wizard_cmd_prefix("docker", host_os="windows-powershell") == 'docker run --rm -it --init -v "${PWD}:/data:z" misiektoja/spotify-monitor'
+    assert monitor._wizard_cmd_prefix("docker", host_os="windows-cmd") == 'docker run --rm -it --init -v "%cd%:/data:z" misiektoja/spotify-monitor'
+    assert monitor._wizard_cmd_prefix("compose") == "docker compose run --rm spotify_monitor"
+
+
+# Verifies Windows commands use short names and safely quote selected file paths
+def test_windows_manual_commands_are_friendly_and_space_safe(tmp_path, monkeypatch):
+    script_path = tmp_path / "Project Space" / "spotify_monitor.py"
+    config_path = tmp_path / "Config Space" / "spotify_monitor.conf"
+    env_path = tmp_path / "Config Space" / ".env"
+    monkeypatch.setattr(monitor.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(monitor.sys, "executable", r"C:\Python Tools\python.exe")
+    monkeypatch.setattr(monitor.sys, "argv", [str(script_path)])
+    monkeypatch.setattr(monitor, "__file__", str(script_path))
+    assert monitor._wizard_cmd_prefix("manual") == runtime_command("python spotify_monitor.py")
+    command = monitor._wizard_action_command("manual", "--doctor", config_path, env_path)
+    assert command.startswith(runtime_command("python spotify_monitor.py --doctor"))
+    assert f'"{config_path}"' in command
+    assert f'"{env_path}"' in command
+    assert monitor._wizard_cmd_prefix("pip") == "spotify_monitor"
+
+
+# Verifies a target shaped like a placeholder is quoted, so pasting the printed command cannot run a substitution
+def test_a_bracketed_target_is_quoted_rather_than_pasted_into_the_shell(monkeypatch):
+    monkeypatch.setattr(monitor.platform, "system", lambda: "Linux")
+    target = monitor.normalize_spotify_user_id("<$(echo>marker)>")
+    command = monitor._wizard_action_command("manual", "--doctor", None, None, target)
+
+    assert command.endswith(shlex.quote(target))
+    assert shlex.split(command)[-1] == target
+
+
+# Verifies the documentation placeholder itself stays readable, since the reader replaces it before running the command
+def test_the_target_placeholder_is_left_unquoted(monkeypatch):
+    monkeypatch.setattr(monitor.platform, "system", lambda: "Linux")
+
+    assert monitor._wizard_action_command("manual", "--doctor", None, None, "<spotify_target>").endswith("--doctor <spotify_target>")
+
+
+# Verifies container doctor and monitoring commands use /data paths and preserve a non-persisted target
+def test_container_action_commands_include_paths_and_target(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    config_path = tmp_path / "spotify_monitor.conf"
+    env_path = tmp_path / ".env"
+    command = monitor._wizard_action_command("compose", "--doctor", config_path, env_path, "target.user")
+    assert command == "docker compose run --rm spotify_monitor --doctor target.user --config-file /data/spotify_monitor.conf --env-file /data/.env"
+
+
+@pytest.mark.parametrize(("method", "prefix"), [("docker", 'docker run --rm -it --init -v "${PWD}:/data:z" misiektoja/spotify-monitor'), ("compose", "docker compose run --rm spotify_monitor")])
+# Verifies scrobble Doctor prints a complete command for both container installation types
+def test_scrobble_health_doctor_monitoring_command_matches_container_install(monkeypatch, capsys, method, prefix):
+    monkeypatch.setattr(monitor, "_wizard_install_method", lambda: method)
+    monkeypatch.setattr(monitor.os, "getuid", lambda: 10001, raising=False)
+    monitor._wizard_print_scrobble_health_monitor_after_doctor("/data/spotify_monitor_scrobble_health.conf", "/data/.env.scrobble_health")
+    assert f'{prefix} --monitor-mode scrobble_health --config-file /data/spotify_monitor_scrobble_health.conf --env-file /data/.env.scrobble_health' in capsys.readouterr().out
+
+
+# Verifies container setup defaults always target the bind-mounted data directory
+@pytest.mark.parametrize("method", ["docker", "compose"])
+def test_container_setup_destinations_use_data_mount(tmp_path, monkeypatch, method):
+    monkeypatch.chdir(tmp_path)
+    config_path, env_path = monitor._wizard_destinations(method=method)
+    assert config_path == Path("/data/spotify_monitor.conf")
+    assert env_path == Path("/data/.env")
+
+
+# Verifies scrobble health setup uses isolated defaults inside the data mount
+@pytest.mark.parametrize("method", ["docker", "compose"])
+def test_scrobble_health_setup_destinations_use_isolated_data_files(tmp_path, monkeypatch, method):
+    monkeypatch.chdir(tmp_path)
+    config_path, env_path = monitor._wizard_destinations(method=method, default_config_filename=monitor.SCROBBLE_HEALTH_CONFIG_FILENAME, default_env_filename=monitor.SCROBBLE_HEALTH_DOTENV_FILENAME)
+    assert config_path == Path("/data/spotify_monitor_scrobble_health.conf")
+    assert env_path == Path("/data/.env.scrobble_health")
+
+
+# Verifies temporary container paths outside the bind mount are rejected
+@pytest.mark.parametrize("method", ["docker", "compose"])
+def test_container_setup_rejects_destinations_outside_data(method):
+    with pytest.raises(ValueError, match="must be inside /data"):
+        monitor._wizard_destinations("/tmp/custom.conf", "/data/.env", method=method)
+    with pytest.raises(ValueError, match="must be inside /data"):
+        monitor._wizard_destinations("/data/custom.conf", "/tmp/custom.env", method=method)
+
+
+# Verifies paths already expressed inside the bind mount remain unchanged
+def test_container_paths_already_inside_data_are_preserved():
+    assert monitor._wizard_container_path("/data/nested/custom.conf") == "/data/nested/custom.conf"
+
+
+# Verifies Firefox import commands use the selected host profile layout
+@pytest.mark.parametrize("host_os,source", [("macos", '"${HOME}/Library/Application Support/Firefox:/home/spotify/.mozilla/firefox:ro"'), ("linux", '"$HOME/.mozilla/firefox:/home/spotify/.mozilla/firefox:ro"'), ("linux-snap", '"$HOME/snap/firefox/common/.mozilla/firefox:/home/spotify/.mozilla/firefox:ro"'), ("linux-flatpak", '"$HOME/.var/app/org.mozilla.firefox/.mozilla/firefox:/home/spotify/.mozilla/firefox:ro"'), ("windows-powershell", '"$env:APPDATA\\Mozilla\\Firefox:/home/spotify/.mozilla/firefox:ro"'), ("windows-cmd", '"%APPDATA%\\Mozilla\\Firefox:/home/spotify/.mozilla/firefox:ro"')])
+def test_firefox_import_commands_mount_selected_host_profile(tmp_path, monkeypatch, host_os, source):
+    monkeypatch.chdir(tmp_path)
+    compose = monitor._wizard_firefox_import_cmd("compose", tmp_path / ".env", host_os=host_os)
+    docker = monitor._wizard_firefox_import_cmd("docker", tmp_path / ".env", host_os=host_os)
+    assert compose == f"docker compose run --rm -v {source} spotify_monitor --import-browser-cookie --browser firefox --env-file /data/.env"
+    assert f"-v {source} misiektoja/spotify-monitor" in docker
+    assert ('--user "$(id -u):$(id -g)"' in docker) is host_os.startswith("linux")
+    assert ('-v "%cd%:/data:z"' in docker) is (host_os == "windows-cmd")
+    assert docker.endswith("--import-browser-cookie --browser firefox --env-file /data/.env")
+
+
+# Verifies a setup-generated import carries the saved config and target into post-import guidance
+def test_firefox_import_command_carries_followup_context(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    command = monitor._wizard_firefox_import_cmd("docker", tmp_path / ".env", host_os="macos", config_path=tmp_path / "spotify_monitor.conf", target="target.user")
+    assert "--import-browser-cookie --browser firefox target.user" in command
+    assert "--config-file /data/spotify_monitor.conf --env-file /data/.env" in command
+
+
+# Verifies private entry commands use installation-aware dotenv paths
+def test_set_sp_dc_commands_use_container_data_paths(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert monitor._wizard_set_sp_dc_cmd("pip") == runtime_command("spotify_monitor --set-sp-dc")
+    assert monitor._wizard_set_sp_dc_cmd("docker", tmp_path / ".env").endswith("misiektoja/spotify-monitor --set-sp-dc --env-file /data/.env")
+    assert monitor._wizard_set_sp_dc_cmd("compose", tmp_path / ".env") == "docker compose run --rm spotify_monitor --set-sp-dc --env-file /data/.env"
+    assert monitor._wizard_set_sp_dc_cmd("compose", tmp_path / ".env", config_path=tmp_path / "custom.conf") == "docker compose run --rm spotify_monitor --set-sp-dc --config-file /data/custom.conf --env-file /data/.env"
+
+
+# Verifies the two sentinels are treated differently, since these commands write the dotenv file they name
+def test_dotenv_writing_commands_drop_the_env_sentinel_and_keep_the_config_one(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+
+    for command in (monitor._wizard_firefox_import_cmd("manual", "none", config_path="none"), monitor._wizard_set_sp_dc_cmd("manual", "none", config_path="none")):
+        # Every one of these refuses --env-file none, so repeating it would print a command the tool rejects
+        assert "--env-file" not in command
+        # The config sentinel is carried, and never resolved into a file called "none" in the working directory
+        assert command.endswith("--config-file none")
+
+
+# Verifies Chromium-family browser choices are removed on Windows and inside containers
+def test_browser_choices_respect_platform_and_container(monkeypatch):
+    monkeypatch.setattr(monitor.platform, "system", lambda: "Darwin")
+    assert monitor._wizard_import_browsers("pip") == list(monitor.IMPORT_BROWSERS)
+    monkeypatch.setattr(monitor.platform, "system", lambda: "Windows")
+    assert monitor._wizard_import_browsers("pip") == ["firefox"]
+    monkeypatch.setattr(monitor.platform, "system", lambda: "Linux")
+    assert monitor._wizard_import_browsers("docker") == ["firefox"]
+    assert monitor._wizard_import_browsers("compose") == ["firefox"]
+
+
+# Verifies interactive no-argument welcome can decline setup cleanly
+def test_interactive_welcome_declines_setup(monkeypatch, capsys):
+    monkeypatch.setattr(monitor.sys, "stdin", Mock(isatty=lambda: True))
+    monkeypatch.setattr(monitor, "_wizard_install_method", lambda: "pip")
+    monkeypatch.setattr(monitor, "_wizard_ask_yes_no", lambda *args, **kwargs: False)
+    monitor.print_welcome_screen()
+    output = capsys.readouterr().out
+    assert "Welcome to Spotify Monitor" not in output
+    assert "For <spotify_target>, use a complete Spotify profile URL, spotify:user URI or user ID.\n" in output
+    assert runtime_command("Quickest start (already configured):\n    spotify_monitor <spotify_target>\n") in output
+    assert runtime_command("Easiest start (guided setup wizard):\n    spotify_monitor --setup   (or just answer Y below)\n") in output
+    assert runtime_command("Check setup before monitoring:\n    spotify_monitor --doctor <spotify_target>\n") in output
+    assert runtime_command("spotify_monitor --setup") in output
+    assert runtime_command("spotify_monitor <spotify_target>") in output
+    assert runtime_command("spotify_monitor --doctor") in output
+    assert f"Guide:        {monitor.QUICK_START_GUIDE_URL}" in output
+
+
+# Verifies noninteractive no-argument welcome never prompts and exits with concise guidance
+def test_noninteractive_welcome_does_not_prompt(monkeypatch, capsys):
+    monkeypatch.setattr(monitor.sys, "stdin", Mock(isatty=lambda: False))
+    monkeypatch.setattr(monitor, "_wizard_install_method", lambda: "pip")
+    monkeypatch.setattr(monitor, "_wizard_ask_yes_no", Mock(side_effect=AssertionError("prompted")))
+    monitor.print_welcome_screen()
+    output = capsys.readouterr().out
+    assert "Quickest start (already configured)" in output
+    assert "Easiest start (guided setup wizard)" in output
+    assert "or just answer Y below" not in output
+    assert runtime_command("Full options: spotify_monitor --help") in output
+    assert monitor.QUICK_START_GUIDE_URL in output
+
+
+# Verifies manual help examples preserve exact comments, indentation and portable commands
+def test_manual_help_epilog_exact_raw_text(monkeypatch):
+    force_install_environment(monkeypatch, argv0="spotify_monitor.py")
+    monkeypatch.setattr(monitor.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(monitor.sys, "executable", "/usr/bin/python3")
+    assert monitor._build_help_epilog() == runtime_command("""Examples:
+
+Getting started:
+  # Guided setup, recommended for the first run
+  python3 spotify_monitor.py --setup
+
+  # Open https://open.spotify.com/ in Firefox and sign in first
+  # Then import Spotify login from Firefox (recommended for local installs)
+  python3 spotify_monitor.py --import-browser-cookie --browser firefox
+
+  # Or use the most secure manual method to enter the Spotify cookie
+  python3 spotify_monitor.py --set-sp-dc
+
+  # Check the setup before relying on it
+  python3 spotify_monitor.py --doctor <spotify_target>
+
+  # Start monitoring, a spotify:user URI or profile URL is also accepted
+  python3 spotify_monitor.py <spotify_target>
+
+  # Advanced Spotify desktop client mode
+  python3 spotify_monitor.py <spotify_target> --token-source client --login-request-body-file <protobuf_file>
+
+Notifications:
+  # Email when the user starts and stops listening
+  python3 spotify_monitor.py <spotify_target> -a -i
+
+  # Send one test email
+  python3 spotify_monitor.py --send-test-email
+
+  # Send one test webhook
+  python3 spotify_monitor.py --send-test-webhook
+
+Information and diagnostics:
+  # List friends visible to the configured Spotify account
+  python3 spotify_monitor.py --list-friends
+
+  # Trace what the tool is doing
+  python3 spotify_monitor.py <spotify_target> --debug
+
+Scrobble health mode:
+  # Guided setup for Spotify-to-Last.fm monitoring
+  python3 spotify_monitor.py --setup-scrobble-health
+
+  # Start Spotify-to-Last.fm monitoring
+  python3 spotify_monitor.py --monitor-mode scrobble_health
+
+Guide: https://misiektoja.github.io/spotify_monitor/setup-and-first-run/
+""")
+
+
+# Verifies pip help examples use the installed console command throughout
+def test_pip_help_epilog_uses_console_command(monkeypatch):
+    force_install_environment(monkeypatch, argv0="/usr/local/bin/spotify_monitor")
+    epilog = monitor._build_help_epilog()
+    assert "spotify_monitor --setup" in epilog
+    assert "spotify_monitor --import-browser-cookie --browser firefox" in epilog
+    assert "spotify_monitor --set-sp-dc" in epilog
+    assert "recommended for local installs" in epilog
+    assert "spotify_monitor <spotify_target>" in epilog
+    assert "spotify_monitor --doctor <spotify_target>" in epilog
+    assert "spotify_monitor --list-friends" in epilog
+
+
+# Verifies Docker help examples include safe container paths and the Linux host note
+def test_docker_help_epilog_uses_container_commands(monkeypatch):
+    force_install_environment(monkeypatch, docker_env=True, argv0="spotify_monitor.py")
+    epilog = monitor._build_help_epilog()
+    prefix = monitor._wizard_cmd_prefix("docker")
+    assert f"{prefix} --setup" in epilog
+    assert f"{prefix} --set-sp-dc --env-file /data/.env" in epilog
+    assert monitor._wizard_firefox_import_cmd("docker", Path.cwd() / ".env") in epilog
+    assert epilog.index("--import-browser-cookie") < epilog.index("--set-sp-dc")
+    assert "Linux host example" in epilog
+    assert "profile read-only" in epilog
+    assert "Host Spotify auto-play is unavailable by default" in epilog
+    assert f"{prefix} --doctor <spotify_target>" in epilog
+    assert "--login-request-body-file /data/login.protobuf" in epilog
+
+
+# Verifies Compose help examples include service commands and the saved-target launch
+def test_compose_help_epilog_uses_service_commands(monkeypatch):
+    force_install_environment(monkeypatch, dockerenv=True, compose_env=True, argv0="spotify_monitor.py")
+    epilog = monitor._build_help_epilog()
+    prefix = monitor._wizard_cmd_prefix("compose")
+    assert f"{prefix} --setup" in epilog
+    assert f"{prefix} --set-sp-dc --env-file /data/.env" in epilog
+    assert monitor._wizard_firefox_import_cmd("compose", Path.cwd() / ".env") in epilog
+    assert epilog.index("--import-browser-cookie") < epilog.index("--set-sp-dc")
+    assert f"{prefix} --list-friends" in epilog
+    assert "--login-request-body-file /data/login.protobuf" in epilog
+    assert "# Start from the target saved by setup\n  docker compose up --no-log-prefix" in epilog
+
+
+# Verifies every help epilog avoids command-line secret flags and values
+@pytest.mark.parametrize("method", ["manual", "pip", "docker", "compose"])
+def test_help_epilog_contains_no_secret_bearing_examples(monkeypatch, method):
+    force_install_environment(monkeypatch, dockerenv=method in ("docker", "compose"), compose_env=method == "compose", argv0="spotify_monitor.py" if method != "pip" else "spotify_monitor")
+    epilog = monitor._build_help_epilog()
+    for forbidden in ("--spotify-dc-cookie", " sp_dc", "refresh_token", "SMTP_PASSWORD", "SP_APP_CLIENT_ID", "SP_APP_CLIENT_SECRET", " -u "):
+        assert forbidden not in epilog
+
+
+# Verifies the cookie recovery command is pasteable as printed and reaches the files this run was given
+def test_the_cookie_recovery_command_names_the_files_this_run_was_given(monkeypatch, tmp_path):
+    config_path = tmp_path / "spotify_monitor.conf"
+    env_path = tmp_path / "private.env"
+    monkeypatch.setattr(monitor.sys, "argv", ["spotify_monitor.py"])
+    monkeypatch.setattr(monitor, "CLI_CONFIG_PATH", str(config_path))
+    monkeypatch.setattr(monitor, "DOTENV_FILE", str(env_path))
+
+    fix = monitor.cookie_auth_recovery_fix()
+
+    # The paths are quoted for the host shell, so the expectation is built the same way rather than pinned to POSIX
+    assert runtime_command(f"{interpreter_name()} spotify_monitor.py --import-browser-cookie --browser firefox --config-file {monitor._wizard_quote_argument(config_path.resolve())} --env-file {monitor._wizard_quote_argument(env_path.resolve())}") in fix
+
+
+# Verifies a dotenv switched off with the none sentinel is not printed as a file path
+def test_the_cookie_recovery_command_skips_a_dotenv_switched_off(monkeypatch):
+    monkeypatch.setattr(monitor.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(monitor.sys, "argv", ["spotify_monitor.py"])
+    monkeypatch.setattr(monitor, "CLI_CONFIG_PATH", None)
+    monkeypatch.setattr(monitor, "DOTENV_FILE", "none")
+
+    assert monitor.cookie_auth_recovery_fix().endswith(runtime_command("python3 spotify_monitor.py --import-browser-cookie --browser firefox"))
+
+
+# Verifies the config sentinel is carried, since the import it suggests reads the config rather than writing it
+def test_the_cookie_recovery_command_carries_the_config_sentinel(monkeypatch):
+    monkeypatch.setattr(monitor.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(monitor.sys, "argv", ["spotify_monitor.py"])
+    monkeypatch.setattr(monitor, "CLI_CONFIG_PATH", None)
+    monkeypatch.setattr(monitor, "CONFIG_DISCOVERY_DISABLED", True)
+    monkeypatch.setattr(monitor, "DOTENV_FILE", "")
+
+    assert monitor.cookie_auth_recovery_fix().endswith(runtime_command("python3 spotify_monitor.py --import-browser-cookie --browser firefox --config-file none"))
