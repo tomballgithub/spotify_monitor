@@ -4665,13 +4665,15 @@ class PlaylistTracker:
     screen-only line, and text/HTML fragments for the email body.
     """
 
-    def __init__(self):
+    def __init__(self, on_reset=None):
+        """on_reset: called every time reset_counts() runs, e.g. to clear a caller-owned display flag."""
         self.current = None
         self.previous = None
         self.message = ""
         self.screen_message = ""
         self.body_text = ""
         self.body_html = ""
+        self._on_reset = on_reset or (lambda: None)
 
     def reset_counts(self, protect_name=""):
         """Zero every monitored playlist's counters and clear the pending status-message strings.
@@ -4680,6 +4682,7 @@ class PlaylistTracker:
         count_end is cleared) so a playlist that's mid-detection or mid-count doesn't lose its
         progress just because every *other* playlist is being reset around it.
         """
+        self._on_reset()
         self.message = ""
         self.screen_message = ""
         self.body_text = ""
@@ -4696,7 +4699,7 @@ class PlaylistTracker:
                 print_debug(f"-- UNPROTECTED PLAYLIST COUNTS (start: {playlist_data['count_start']}, end: {playlist_data['count_end']}, shuffle: {playlist_data['count_shuffle']}) -> {playlist_name}")
 
     def advance(self, song_key, reported_name, has_track, *, notify, already_active, active_user_ok, apply_override,
-                alt_view, songstr, timediff, sp_track, sp_artist, sp_album):
+                alt_view, on_detected, songstr, timediff, sp_track, sp_artist, sp_album):
         """Resolve one observed song against monitored playlists and update counts/messages.
 
         This is the whole algorithm: match the song (by Spotify's own reported playlist name, by
@@ -4721,6 +4724,12 @@ class PlaylistTracker:
         alt_view: whether to also print an early "cleared" screen line immediately, for the cases
             where it would otherwise be overwritten later in this same call by a follow-up
             detection for a different playlist.
+        on_detected: zero-arg callback invoked exactly when a playlist first crosses its detection
+            threshold, before the "detected" notification's text is built. The caller uses it to
+            apply its own display-side updates (is_playlist, sp_playlist, sp_track + icon, ...) -
+            which the notification text (via songstring()) needs to already reflect - and must
+            return the (possibly icon-appended) sp_track and freshly-built songstr to use in the
+            notification. Only ever called when notify=True; pass a harmless no-op otherwise.
 
         Returns "matched" (song is on the current, confirmed-detected playlist), "shuffle" (song is
         a tolerated off-list exception of an already-confirmed playlist - e.g. a smart-shuffle
@@ -4784,8 +4793,9 @@ class PlaylistTracker:
                     count_overridden = True
             if notify and active_user_ok and self.current['count_start'] == self.current['qty_start']:
                 print_debug(f"PLAYLIST_DETECTED: {self.current['count_start']}, {self.current['qty_start']}")
+                detected_sp_track, detected_songstr = on_detected()
                 self.body_text, self.body_html, self.message, self.screen_message = monitored_playlist_detected(
-                    self.current, songstr, timediff, False, sp_track, sp_artist, sp_album)
+                    self.current, detected_songstr, timediff, False, detected_sp_track, sp_artist, sp_album)
             else:
                 self.message = build_playlist_status_message(self.current)
                 self.body_text = self.message + "\n"
@@ -12898,17 +12908,25 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
     jmk_send = False
 
-    # Monitored-playlist detection state for this friend - see PlaylistTracker and its advance()
-    # method above for the actual algorithm. icon_add is display-only (not part of the tracker):
-    # it's set True right after advance() returns "shuffle", to show ICON_SONG_MISSING_FROM_PLAYLIST
-    # next to the song as a "still in the playlist, but this one was a smart-shuffle exception" cue.
-    tracker = PlaylistTracker()
     active_ever = False
     icon_add = False
     hasTrack = False
     sp_playlist_owner = ""
     sp_playlist_image_url = ""
     playlist_suffix = ""
+
+    def clear_icon_add():
+        nonlocal icon_add
+        if ALT_VIEW:
+            icon_add = False
+
+    # Monitored-playlist detection state for this friend - see PlaylistTracker and its advance()
+    # method above for the actual algorithm. icon_add is display-only (not part of the tracker):
+    # it's cleared whenever the tracker resets a playlist's counts (a fresh match or a real clear -
+    # see clear_icon_add above and PlaylistTracker.reset_counts's on_reset callback), and set True
+    # right after advance() returns "shuffle", to show ICON_SONG_MISSING_FROM_PLAYLIST next to the
+    # song as a "still in the playlist, but this one was a smart-shuffle exception" cue.
+    tracker = PlaylistTracker(on_reset=clear_icon_add)
 
     def iconstring():
         nonlocal icon_add, playlist_suffix
@@ -13140,7 +13158,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
             outcome = tracker.advance(
                 song_lookup_key, sp_playlist if is_playlist else "", hasTrack,
                 notify=False, already_active=False, active_user_ok=True, apply_override=True, alt_view=ALT_VIEW,
-                songstr="", timediff="", sp_track=sp_track, sp_artist=sp_artist, sp_album=sp_album)
+                on_detected=lambda: ("", ""), songstr="", timediff="", sp_track=sp_track, sp_artist=sp_artist, sp_album=sp_album)
             if DEBUG_JMK and tracker.message != "":
                 tracker.message = tracker.message + " (2)"
                 tracker.body_text = tracker.message + "\n"
@@ -13683,18 +13701,36 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                     print_debug(f"hasTrack: {hasTrack}")
                     song_lookup_key = f"{sp_artist} - {sp_track}"
                     active_user_ok = not ((cur_ts - sp_ts_old) > SPOTIFY_INACTIVITY_CHECK and sp_active_ts_stop > 0)
-                    outcome = tracker.advance(
-                        song_lookup_key, sp_playlist if is_playlist else "", hasTrack,
-                        notify=True, already_active=active_ever, active_user_ok=active_user_ok, apply_override=False, alt_view=ALT_VIEW,
-                        songstr=songstring(), timediff=time_diff_str(), sp_track=sp_track, sp_artist=sp_artist, sp_album=sp_album)
 
-                    if outcome == "matched":
+                    # A freshly-detected playlist's "Detected" notification embeds songstring(), which
+                    # reads sp_playlist/sp_track - so those must already reflect the newly-matched
+                    # playlist by the time that notification's text is built, not just afterward.
+                    # advance() calls this at exactly that moment (see PlaylistTracker.advance's
+                    # on_detected parameter); matched_cosmetics_applied avoids re-applying it below.
+                    matched_cosmetics_applied = False
+
+                    def apply_matched_cosmetics():
+                        nonlocal is_playlist, sp_playlist, sp_playlist_url, sp_track, playlist_m_body, playlist_m_body_html, matched_cosmetics_applied
                         is_playlist = True
                         sp_playlist = tracker.current['name']
                         sp_playlist_url = tracker.current.get('url', '')
                         sp_track = sp_track + tracker.current.get('icon', '')
                         playlist_m_body = f"\nPlaylist: {sp_playlist}{iconstring()}"
                         playlist_m_body_html = f"<br>Playlist: <a href=\"{escape_html_attr(sp_playlist_url)}\">{escape(sp_playlist)}{iconstring()}</a>"
+                        matched_cosmetics_applied = True
+
+                    def on_detected():
+                        apply_matched_cosmetics()
+                        return sp_track, songstring()  # noqa: B023 - called synchronously within this same iteration, never deferred
+
+                    outcome = tracker.advance(
+                        song_lookup_key, sp_playlist if is_playlist else "", hasTrack,
+                        notify=True, already_active=active_ever, active_user_ok=active_user_ok, apply_override=False, alt_view=ALT_VIEW,
+                        on_detected=on_detected, songstr=songstring(), timediff=time_diff_str(), sp_track=sp_track, sp_artist=sp_artist, sp_album=sp_album)
+
+                    if outcome == "matched":
+                        if not matched_cosmetics_applied:
+                            apply_matched_cosmetics()
                     elif outcome == "shuffle":
                         is_playlist = True
                         sp_playlist = tracker.current['name']
