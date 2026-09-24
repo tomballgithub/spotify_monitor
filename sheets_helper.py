@@ -41,7 +41,7 @@ def _invalidate_cache():
     _worksheet_cache = {}
 
 
-def _get_credentials(client_file, token_file):
+def _get_credentials(client_file, token_file, on_reauth_required=None):
     creds = None
     if os.path.isfile(token_file):
         creds = Credentials.from_authorized_user_file(token_file, SCOPES)
@@ -55,6 +55,13 @@ def _get_credentials(client_file, token_file):
                 # consent instead of propagating, since that's the whole point of this function.
                 creds = None
         if not creds or not creds.valid:
+            # This call can be reached mid-run (e.g. the cached client got invalidated after a
+            # write failure, and the refresh token has since died too), not just from the caller's
+            # own proactive startup check - on_reauth_required lets the caller alert (email/ntfy)
+            # right before this blocks on interactive browser consent, so an unattended run never
+            # sits silently waiting with nobody aware of it.
+            if on_reauth_required is not None:
+                on_reauth_required()
             flow = InstalledAppFlow.from_client_secrets_file(client_file, SCOPES)
             creds = flow.run_local_server(port=0)
         with open(token_file, "w", encoding="utf-8") as f:
@@ -106,23 +113,23 @@ def queue_has_pending(err_code):
     return _queue_length(err_code) > 0
 
 
-def drain_queue_at_startup(spreadsheet_id, tab_name, err_code, client_file, token_file):
+def drain_queue_at_startup(spreadsheet_id, tab_name, err_code, client_file, token_file, on_reauth_required=None):
     """Attempts to drain any rows queued by a previous run, before the main loop starts,
     instead of waiting for the next real song/event to trigger a retry. Returns
     (drained, error_message): drained is True if the queue is now fully empty; error_message
     is the exception text from whichever row failed and stopped the drain, or None."""
     if not LIBS_AVAILABLE:
         return False, f"Google Sheets libraries not installed ({IMPORT_ERROR})"
-    return _drain_queue(spreadsheet_id, tab_name, err_code, client_file, token_file)
+    return _drain_queue(spreadsheet_id, tab_name, err_code, client_file, token_file, on_reauth_required)
 
 
-def _get_worksheet(spreadsheet_id, tab_name, client_file, token_file):
+def _get_worksheet(spreadsheet_id, tab_name, client_file, token_file, on_reauth_required=None):
     global _client_cache
     cache_key = (spreadsheet_id, tab_name)
     if cache_key in _worksheet_cache:
         return _worksheet_cache[cache_key]
     if _client_cache is None:
-        creds = _get_credentials(client_file, token_file)
+        creds = _get_credentials(client_file, token_file, on_reauth_required)
         _client_cache = gspread.authorize(creds)
     sh = _client_cache.open_by_key(spreadsheet_id)
     ws = sh.worksheet(tab_name)
@@ -156,7 +163,7 @@ def _is_retryable(e):
     return status_code in _RETRYABLE_STATUS_CODES
 
 
-def _write_row(spreadsheet_id, tab_name, row, client_file, token_file):
+def _write_row(spreadsheet_id, tab_name, row, client_file, token_file, on_reauth_required=None):
     # A single batchUpdate call that inserts the row, writes both cell values, and pins their
     # number formats all atomically - one API request instead of insert_row() + a separate
     # format() call. Sheets rows inherit the number format of whichever row they push down, so
@@ -175,7 +182,7 @@ def _write_row(spreadsheet_id, tab_name, row, client_file, token_file):
     last_error = None
     for attempt in range(_MAX_WRITE_ATTEMPTS):
         try:
-            ws = _get_worksheet(spreadsheet_id, tab_name, client_file, token_file)
+            ws = _get_worksheet(spreadsheet_id, tab_name, client_file, token_file, on_reauth_required)
             date_serial = _date_to_serial(row[0])
             ws.spreadsheet.batch_update({
                 "requests": [
@@ -237,7 +244,7 @@ def _enqueue(err_code, row):
         f.write(json.dumps(row) + "\n")
 
 
-def _drain_queue(spreadsheet_id, tab_name, err_code, client_file, token_file):
+def _drain_queue(spreadsheet_id, tab_name, err_code, client_file, token_file, on_reauth_required=None):
     """Attempts to write all queued rows in order, oldest first. Stops at the first
     failure so remaining rows stay queued in their original order. Returns
     (drained, error_message): drained is True if the queue is fully empty afterwards;
@@ -254,7 +261,7 @@ def _drain_queue(spreadsheet_id, tab_name, err_code, client_file, token_file):
     error_message = None
     for line in lines:
         row = json.loads(line)
-        ok, error_message = _write_row(spreadsheet_id, tab_name, row, client_file, token_file)
+        ok, error_message = _write_row(spreadsheet_id, tab_name, row, client_file, token_file, on_reauth_required)
         if ok:
             remaining.pop(0)
         else:
@@ -270,7 +277,7 @@ def _drain_queue(spreadsheet_id, tab_name, err_code, client_file, token_file):
     return not remaining, error_message
 
 
-def update_spreadsheet(err_code, spreadsheet_id, tab_name, row, client_file, token_file):
+def update_spreadsheet(err_code, spreadsheet_id, tab_name, row, client_file, token_file, on_reauth_required=None):
     """
     Writes `row` to the given spreadsheet tab, draining any previously queued rows first.
 
@@ -279,6 +286,11 @@ def update_spreadsheet(err_code, spreadsheet_id, tab_name, row, client_file, tok
       entered_error - True only on the call where the queue goes from empty to non-empty.
       recovered     - True only on the call where a previously non-empty queue fully drains.
       error_message - the exception text behind entered_error, or None.
+
+    on_reauth_required: called (with no arguments) right before this would otherwise block on
+    interactive browser OAuth consent - e.g. the cached client was invalidated after a write
+    failure, and the refresh token has since died too. Lets the caller alert (email/ntfy) before
+    an unattended run sits silently waiting on a browser window nobody's watching for.
     """
     if not LIBS_AVAILABLE:
         error_message = f"Google Sheets libraries not installed ({IMPORT_ERROR}); to install, run: pip install gspread google-auth-oauthlib"
@@ -291,13 +303,13 @@ def update_spreadsheet(err_code, spreadsheet_id, tab_name, row, client_file, tok
     recovered = False
 
     if had_queue:
-        drained, _ = _drain_queue(spreadsheet_id, tab_name, err_code, client_file, token_file)
+        drained, _ = _drain_queue(spreadsheet_id, tab_name, err_code, client_file, token_file, on_reauth_required)
         if drained:
             recovered = True
             had_queue = False
 
     if not had_queue:
-        ok, error_message = _write_row(spreadsheet_id, tab_name, row, client_file, token_file)
+        ok, error_message = _write_row(spreadsheet_id, tab_name, row, client_file, token_file, on_reauth_required)
         if ok:
             return True, False, recovered, None
         _enqueue(err_code, row)

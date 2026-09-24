@@ -16,11 +16,16 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CLI_PATH = PROJECT_ROOT / "spotify_monitor.py"
 
 
-# Runs one CLI command without raising for a nonzero status
+# Runs one CLI command without raising for a nonzero status. input="" (rather than
+# stdin=subprocess.DEVNULL) is what actually makes the child's sys.stdin.isatty() read False in
+# every environment this has been checked in (Windows included) - some environments hand a child
+# process a stdin that still looks like a real terminal under DEVNULL/inherited-from-parent, which
+# silently defeats --authorize-scrobble-health's own "am I running interactively" guard and lets it
+# fall through to the real webbrowser.open() call this suite must never trigger.
 def run_cli(*arguments):
     environment = os.environ.copy()
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
-    return subprocess.run([sys.executable, str(CLI_PATH), *arguments], cwd=PROJECT_ROOT, capture_output=True, text=True, env=environment, timeout=30, check=False)
+    return subprocess.run([sys.executable, str(CLI_PATH), *arguments], cwd=PROJECT_ROOT, input="", text=True, capture_output=True, env=environment, timeout=30, check=False)
 
 
 # Installs deterministic focused-wizard inputs for one project-local destination pair
