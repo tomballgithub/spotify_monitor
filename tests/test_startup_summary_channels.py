@@ -169,3 +169,37 @@ def test_the_webhook_send_line_names_the_provider(monkeypatch, capsys, provider,
     monitor.send_notification_channels("error", "subject", "body", webhook_enabled=True)
 
     assert f"Sending webhook notification via {expected}" in capsys.readouterr().out
+
+
+# Verifies a configuration still holding the shipped sample values reports no channel, rather than naming a server and a recipient no alert can reach
+@pytest.mark.parametrize("label,setting,placeholder", [
+    ("Email transport", "SMTP_HOST", "your_smtp_server_ssl"),
+    ("Email recipient", "RECEIVER_EMAIL", "your_receiver_email"),
+    ("Webhook provider", "WEBHOOK_URL", "your_webhook_url"),
+])
+def test_a_placeholder_destination_is_reported_as_unconfigured(monkeypatch, label, setting, placeholder):
+    monkeypatch.setattr(monitor, setting, placeholder)
+
+    assert summary_values()[label] == "Not configured"
+
+
+# Verifies a selected channel names an unusable setting while an unselected channel stays off
+def test_a_channel_without_a_destination_is_reported_as_unavailable():
+    assert monitor._startup_notification_state(["errors"], None) == "On (errors)"
+    assert monitor._startup_notification_state(["errors"], "SMTP_PASSWORD is missing") == "Unavailable (SMTP_PASSWORD is missing)"
+    assert monitor._startup_notification_state([], "SMTP_PASSWORD is missing") == "Off"
+
+
+# Verifies the printed channel rows name local settings that prevent delivery
+def test_selected_channels_with_missing_secrets_are_unavailable(monkeypatch):
+    monkeypatch.setattr(monitor, "ERROR_NOTIFICATION", True)
+    monkeypatch.setattr(monitor, "WEBHOOK_ENABLED", True)
+    monkeypatch.setattr(monitor, "WEBHOOK_ERROR_NOTIFICATION", True)
+    monkeypatch.setattr(monitor, "SENDER_EMAIL", "sender@example.com")
+    monkeypatch.setattr(monitor, "SMTP_PASSWORD", "")
+    monkeypatch.setattr(monitor, "WEBHOOK_URL", "")
+    rows = summary_values()
+    assert "SMTP_PASSWORD" in rows["Notifications (email)"]
+    assert rows["Notifications (email)"].startswith("Unavailable (")
+    assert "WEBHOOK_URL" in rows["Notifications (webhook)"]
+    assert rows["Notifications (webhook)"].startswith("Unavailable (")
