@@ -37,6 +37,44 @@ def test_smtp_cleanup_preserves_delivery_result(smtp_connection, capsys, failure
         assert "Error:" not in output
 
 
+# Regression: two JMK_MODE emails sent back to back for one logical event (a divider row then the
+# real content) used to open two complete, separate SMTP sessions - each connect+STARTTLS+login+quit
+# cycle is its own network round-trip, and doing it twice for what's really one event was a real
+# contributor to a "friend became active" pause of tens of seconds with no visible cause in the log.
+# Passing an already-connected session in must skip opening a second one entirely
+def test_send_email_with_a_shared_connection_does_not_open_a_second_one(monkeypatch, smtp_connection):
+    smtp_ctor = monitor.smtplib.SMTP
+    assert monitor.send_email("A complete subject", "A complete body", "", False, smtp_object=smtp_connection) == 0
+    smtp_ctor.assert_not_called()
+    smtp_connection.sendmail.assert_called_once()
+
+
+# Ownership of a shared connection stays with whoever opened it - send_email() must not quit or
+# close a connection it didn't open itself, or the caller's next send on that same connection
+# would fail
+def test_send_email_with_a_shared_connection_leaves_it_open_afterward(smtp_connection):
+    assert monitor.send_email("A complete subject", "A complete body", "", False, smtp_object=smtp_connection) == 0
+    smtp_connection.quit.assert_not_called()
+    smtp_connection.close.assert_not_called()
+
+
+# A shared connection still reports a real sendmail failure honestly, and still leaves closing it
+# to the caller even on that failure path
+def test_send_email_with_a_shared_connection_still_reports_a_real_failure(smtp_connection, capsys):
+    smtp_connection.sendmail.side_effect = OSError("Connection reset")
+    assert monitor.send_email("A complete subject", "A complete body", "", False, smtp_object=smtp_connection) == 1
+    smtp_connection.quit.assert_not_called()
+    assert "Error:" in capsys.readouterr().out
+
+
+# Without a shared connection, behavior is unchanged from before this parameter existed - one
+# connection opened and quit per call
+def test_send_email_without_a_shared_connection_still_opens_and_quits_its_own(smtp_connection):
+    assert monitor.send_email("A complete subject", "A complete body", "", False) == 0
+    monitor.smtplib.SMTP.assert_called_once()
+    smtp_connection.quit.assert_called_once()
+
+
 @pytest.mark.parametrize("verbose", [False, True])
 @pytest.mark.parametrize("confirmations", [False, True])
 @pytest.mark.parametrize("report_delivery", [False, True])

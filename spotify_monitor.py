@@ -743,6 +743,9 @@ COLORED_OUTPUT = True
 #     "help_command": "bright_white",
 #     "help_comment": "bright_black",
 #     "help_default": "bright_black",
+#     # ALT_VIEW only
+#     "alt_view_heart": "bright_red",
+#     "alt_view_timestamp": "bright_yellow",
 # }
 
 # Whether to enable verbose operational output
@@ -4439,6 +4442,12 @@ _QUOTED_URL_PART_RE = re.compile(r"^[?&]|://")
 
 # Listing rows that name one playlist, for example "- 'Playlist name'"
 _LIST_ITEM_NAME_RE = re.compile(r"^\s*-\s+'")
+
+# Playlist names printed unquoted in two fixed line shapes (the periodic reload summary and the
+# startup monitoring list) - the general quoted-name rule above doesn't apply since neither uses
+# quote marks around the name.
+_LOADED_MONITORED_TRACKS_RE = re.compile(r"(\*\*\* Loaded Monitored Tracks \()(.+?)(\)\s*:)")
+_MONITORING_TRACKS_RE = re.compile(r"(Monitoring Tracks \[[^\]]*\]:\s*)(.+?)(\s*\(\d+ songs\))")
 _PLAYBACK_STOPPED_RE = re.compile(r"\b(SKIPPED|PAUSED)\b")
 _PLAYBACK_STARTED_RE = re.compile(r"\b(RESUMED|LOOP|PLAYING)\b")
 _PLAYBACK_CHANGED_RE = re.compile(r"\b(CONT)\b")
@@ -4471,11 +4480,16 @@ def _stream_supports_color(stream):
         return False
     if os.getenv("NO_COLOR"):
         return False
-    # On Windows with colorama, skip TERM check since colorama handles ANSI translation
-    # Windows Terminal and Command Prompt often don't set TERM, but colorama works fine
+    term = os.getenv("TERM", "")
+    # "dumb" is an explicit "this terminal cannot render colors" signal and is always honoured,
+    # on every platform - unlike an empty/unset TERM (very common on Windows, handled below),
+    # which isn't a signal either way and gets the colorama benefit of the doubt instead.
+    if term.lower() == "dumb":
+        return False
+    # On Windows with colorama, skip the rest of the TERM check since colorama handles ANSI
+    # translation - Windows Terminal and Command Prompt often don't set TERM, but colorama works fine
     if not (colorama_init and platform.system() == 'Windows'):
-        term = os.getenv("TERM", "")
-        if term.lower() in ("", "dumb", "unknown"):
+        if term.lower() in ("", "unknown"):
             return False
     # If stdin is a pipe, we're likely being piped (e.g. via tee), so disable colors to avoid writing ANSI codes to files
     if hasattr(sys.stdin, "isatty") and not sys.stdin.isatty():
@@ -4686,6 +4700,10 @@ def _colorize_line(line):
 
     # Highlight URLs / links
     line = _sub_outside_color(_URL_RE, lambda mo: colorize("link", mo.group(0)), line)
+
+    # Highlight the unquoted playlist name in the two fixed line shapes above
+    line = _sub_outside_color(_LOADED_MONITORED_TRACKS_RE, lambda mo: mo.group(1) + colorize("playlist", mo.group(2)) + mo.group(3), line)
+    line = _sub_outside_color(_MONITORING_TRACKS_RE, lambda mo: mo.group(1) + colorize("playlist", mo.group(2)) + mo.group(3), line)
 
     # Highlight quoted names, taking the colour of what the line is about. A line that is only a quoted string
     # is a free-form description, so it stays plain instead of being read as a name
@@ -6325,7 +6343,14 @@ def smtp_quit_quietly(smtp_object):
 
 
 # Sends email notification through the shared SMTP validation and login path
-def send_email(subject, body, body_html, use_ssl, smtp_timeout=15, report_delivery=True):
+def send_email(subject, body, body_html, use_ssl, smtp_timeout=15, report_delivery=True, smtp_object=None):
+    """smtp_object: an already-connected-and-logged-in SMTP session (from smtp_connect_and_login())
+    to send over instead of opening a fresh one. Passing one hands ownership of quitting it back to
+    the caller - this function won't quit a connection it didn't open itself. Meant for a caller
+    that's about to send several messages back to back (e.g. a divider row followed by the real
+    one): each full connect+STARTTLS+login+quit cycle is its own network round-trip, and doing two
+    of them in a row for what's really one logical event is the difference between one slow SMTP
+    handshake and two."""
     subject = apply_privacy_substitutions(subject)
     body = apply_privacy_substitutions(body)
     body_html = apply_privacy_substitutions(body_html)
@@ -6343,9 +6368,10 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15, report_delive
         print_recovery_error(context="smtp_config", detail="Email body and body_html cannot both be empty")
         return 1
 
-    smtp_object = None
+    owns_connection = smtp_object is None
     try:
-        smtp_object = smtp_connect_and_login(use_ssl, smtp_timeout)
+        if owns_connection:
+            smtp_object = smtp_connect_and_login(use_ssl, smtp_timeout)
         email_msg = MIMEMultipart('alternative')
         email_msg["From"] = SENDER_EMAIL
         email_msg["To"] = RECEIVER_EMAIL
@@ -6366,7 +6392,8 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15, report_delive
         print_recovery_error(e, "smtp")
         return 1
     finally:
-        smtp_quit_quietly(smtp_object)
+        if owns_connection:
+            smtp_quit_quietly(smtp_object)
     if report_delivery:
         verbose_delivery_print(f"Email sent to {RECEIVER_EMAIL}")
     return 0
@@ -14412,12 +14439,41 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                     m_body_html = f"<html><head></head><body>{escape(activity_label)}: <b><a href=\"{escape_html_attr(sp_artist_url)}\">{escape(sp_artist)}</a> - <a href=\"{escape_html_attr(sp_track_url)}\">{escape(sp_track)}</a></b><br>Duration: {display_time(sp_track_duration)}{playlist_m_body_html}<br>Album: <a href=\"{escape_html_attr(sp_album_url)}\">{escape(sp_album)}</a>{context_m_body_html}{music_section_html}{lyrics_section_html}<br><br>Last activity: <b>{get_date_from_ts(sp_ts)}</b>{get_cur_ts('<br>Timestamp: ')}</body></html>"
                     m_body_short = build_short_ntfy_body(sp_track, sp_artist, sp_album, sp_playlist if is_playlist else "", playlist_suffix)
                     if JMK_MODE:
+                        # This whole block is synchronous network I/O (2 Sheets writes, 2 emails) with
+                        # no timeout tightening and no way to interrupt it cleanly - it's the usual
+                        # explanation for a "friend became active" pause of tens of seconds with no
+                        # visible cause. Timed per call so a slow run says exactly which one was slow.
+                        # The two send_email() calls share one SMTP connection instead of each opening
+                        # and closing its own - a full connect+STARTTLS+login+quit cycle is a real
+                        # network round-trip, and this is one logical event (a divider then the real
+                        # content), not two.
+                        t0 = time.time()
                         update_spreadsheet_row(SPREADSHEET_DIVIDER_TEXT, False)
-                        send_email(f"{GMAIL_TAG}---------------------------------", "  ", "  ", SMTP_SSL)
+                        print_debug(f"update_spreadsheet_row (divider) took {time.time() - t0:.2f}s")
+
+                        t0 = time.time()
+                        shared_smtp = None
+                        try:
+                            shared_smtp = smtp_connect_and_login(SMTP_SSL)
+                        except Exception as e:
+                            print_recovery_error(e, "smtp")
+                        print_debug(f"smtp_connect_and_login took {time.time() - t0:.2f}s")
+
+                        t0 = time.time()
+                        send_email(f"{GMAIL_TAG}---------------------------------", "  ", "  ", SMTP_SSL, smtp_object=shared_smtp)
+                        print_debug(f"send_email (divider) took {time.time() - t0:.2f}s")
+
+                        t0 = time.time()
                         song_footer_txt, song_footer_html = update_spreadsheet_row(f"{datetime.now().strftime('%H:%M:%S')} {songstring()}", True)
+                        print_debug(f"update_spreadsheet_row (song) took {time.time() - t0:.2f}s")
                         # m_body += song_footer_txt
                         # m_body_html = m_body_html.replace("</body></html>", song_footer_html + "</body></html>")
-                        send_email(f"{GMAIL_TAG}[{time_diff_str()}] {timestring()} {songstring()}", m_body, m_body_html, SMTP_SSL)
+
+                        t0 = time.time()
+                        send_email(f"{GMAIL_TAG}[{time_diff_str()}] {timestring()} {songstring()}", m_body, m_body_html, SMTP_SSL, smtp_object=shared_smtp)
+                        print_debug(f"send_email (song) took {time.time() - t0:.2f}s")
+
+                        smtp_quit_quietly(shared_smtp)
                     else:
                         # jmk on 8/22/2026 to removed duplicate alerts since my code above sends this alert
                         send_notification_channels("active", m_subject, m_body, m_body_html, ACTIVE_NOTIFICATION, image_url=sp_playlist_image_url or sp_album_image_url, subject_short=m_subject_short, body_short=m_body_short)
@@ -15112,12 +15168,36 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                         active_ever = True
                         if ACTIVE_NOTIFICATION or webhook_event_enabled("active"):
                             if JMK_MODE:
+                                # See the boot-time "Friend is currently ACTIVE" block for why this is
+                                # timed per call and why the two send_email() calls share one SMTP
+                                # connection instead of each opening and closing its own.
+                                t0 = time.time()
                                 song_footer_txt, song_footer_html = update_spreadsheet_row(f"{datetime.now().strftime('%H:%M:%S')} {songstring()}", True)
+                                print_debug(f"update_spreadsheet_row (song) took {time.time() - t0:.2f}s")
                                 # m_body += song_footer_txt
                                 # m_body_html = m_body_html.replace("</body></html>", song_footer_html + "</body></html>")
+
+                                t0 = time.time()
                                 update_spreadsheet_row(SPREADSHEET_DIVIDER_TEXT, False)
-                                send_email(f"{GMAIL_TAG}---------------------------------", "  ", "  ", SMTP_SSL)
-                                send_email(f"{GMAIL_TAG}[{time_diff_str()}] {timestring()} {songstring()}", m_body, m_body_html, SMTP_SSL)
+                                print_debug(f"update_spreadsheet_row (divider) took {time.time() - t0:.2f}s")
+
+                                t0 = time.time()
+                                shared_smtp = None
+                                try:
+                                    shared_smtp = smtp_connect_and_login(SMTP_SSL)
+                                except Exception as e:
+                                    print_recovery_error(e, "smtp")
+                                print_debug(f"smtp_connect_and_login took {time.time() - t0:.2f}s")
+
+                                t0 = time.time()
+                                send_email(f"{GMAIL_TAG}---------------------------------", "  ", "  ", SMTP_SSL, smtp_object=shared_smtp)
+                                print_debug(f"send_email (divider) took {time.time() - t0:.2f}s")
+
+                                t0 = time.time()
+                                send_email(f"{GMAIL_TAG}[{time_diff_str()}] {timestring()} {songstring()}", m_body, m_body_html, SMTP_SSL, smtp_object=shared_smtp)
+                                print_debug(f"send_email (song) took {time.time() - t0:.2f}s")
+
+                                smtp_quit_quietly(shared_smtp)
                             email_succeeded, webhook_succeeded = send_notification_channels("active", m_subject, m_body, m_body_html, ACTIVE_NOTIFICATION, image_url=sp_playlist_image_url or sp_album_image_url, subject_short=m_subject_short, body_short=m_body_short)
                             email_sent = email_sent or email_succeeded
                             webhook_sent = webhook_sent or webhook_succeeded
@@ -15166,10 +15246,18 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                         m_body_short = build_short_ntfy_body(sp_track, sp_artist, sp_album, sp_playlist if is_playlist else "", playlist_suffix)
                         notification_type = "track" if on_the_list and ((TRACK_NOTIFICATION and email_song_enabled) or webhook_event_enabled("track")) else "song"
                         if JMK_MODE:
+                            # Same synchronous-network-I/O timing as the session-start blocks above -
+                            # this fires on every ordinary song change, so it's worth knowing which of
+                            # the two calls was slow if this pause shows up here instead.
+                            t0 = time.time()
                             song_footer_txt, song_footer_html = update_spreadsheet_row(f"{datetime.now().strftime('%H:%M:%S')} {songstring()}", True)
+                            print_debug(f"update_spreadsheet_row (song) took {time.time() - t0:.2f}s")
                             # m_body += song_footer_txt
                             # m_body_html = m_body_html.replace("</body></html>", song_footer_html + "</body></html>")
+
+                            t0 = time.time()
                             send_email(f"{GMAIL_TAG}[{time_diff_str()}] {timestring()} {songstring()}", m_body, m_body_html, SMTP_SSL)
+                            print_debug(f"send_email (song) took {time.time() - t0:.2f}s")
                         email_succeeded, webhook_succeeded = send_notification_channels(notification_type, m_subject, m_body, m_body_html, email_song_enabled, webhook_song_enabled, image_url=sp_album_image_url, subject_short=m_subject_short, body_short=m_body_short)
                         email_sent = email_sent or email_succeeded
                         webhook_sent = webhook_sent or webhook_succeeded

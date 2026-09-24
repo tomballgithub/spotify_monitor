@@ -530,6 +530,30 @@ def test_a_warning_row_still_shows_the_playlist_inside_it(colored):
     assert not rendered.startswith(colored["warning"])
 
 
+# The periodic reload summary names the playlist unquoted in parentheses, so the general quoted-name
+# rule doesn't apply - it needs its own dedicated rule. The row's own timestamp is coloured too (an
+# existing, unrelated rule), so this checks the playlist span specifically rather than the whole line
+@pytest.mark.parametrize("line, name", [
+    ("*** Loaded Monitored Tracks (Discovery Zone): Thu 24 Sep 2026, 11:17:05 -> 312 songs [2 duplicates removed]", "Discovery Zone"),
+    # Shorter names are left-padded before the colon so several rows line up - padding sits between
+    # the name and the colon, outside the coloured span
+    ("*** Loaded Monitored Tracks (Liked Songs)   : Thu 24 Sep 2026, 11:17:05 -> 236 songs [3 duplicates removed]", "Liked Songs"),
+])
+def test_loaded_monitored_tracks_names_the_playlist(colored, line, name):
+    rendered = monitor._colorize_line(line)
+
+    assert rendered.startswith(f"*** Loaded Monitored Tracks ({colored['playlist']}{name}{monitor.ANSI_RESET}")
+    assert monitor.ANSI_ESCAPE_RE.sub("", rendered) == line
+
+
+# The startup monitoring list also names the playlist unquoted, between the alerts/refresh summary
+# and the track count
+def test_monitoring_tracks_list_names_the_playlist(colored):
+    rendered = monitor._colorize_line("Monitoring Tracks [alerts: true,  refresh: 3600]: Discovery Zone (312 songs)")
+
+    assert rendered == f"Monitoring Tracks [alerts: true,  refresh: 3600]: {colored['playlist']}Discovery Zone{monitor.ANSI_RESET} (312 songs)"
+
+
 # A value drawn in the colour of the block enclosing it disappears
 def test_a_block_style_never_hides_a_name(colored):
     for block in monitor.BLOCK_STYLE_PARTS:
