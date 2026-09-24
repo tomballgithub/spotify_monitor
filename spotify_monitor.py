@@ -1472,7 +1472,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import secrets
 import unicodedata
-from typing import Any, Callable, List, Optional, Sequence, Tuple, Union, cast, TypeVar
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union, cast, TypeVar
 from email.utils import parseaddr, parsedate_to_datetime
 try:
     import sheets_helper #jmk
@@ -6397,21 +6397,41 @@ def send_spreadsheet_recovery_alert():
         send_notification("sheet", f"spotify_monitor: Google Sheet (tab '{ERR_CODE}') caught up")
 
 
-# Alerts (email/ntfy, gated on ERROR_NOTIFICATION) that spotify_monitor is about to block waiting
-# for interactive Google Sheets OAuth consent on the machine it's running on. Shared by the
-# proactive startup check below and by sheets_helper's on_reauth_required callback (passed into
-# drain_spreadsheet_queue_at_startup()/update_spreadsheet_row()'s sheets_helper calls) - the
-# proactive check only catches a token that's already dead *before* the run starts; a refresh
-# token can just as easily die mid-run (e.g. revoked, or Google expiring it after months of
-# inactivity), and without this callback that case fell straight into sheets_helper's blocking
-# flow.run_local_server() with zero alerting - exactly the "waiting in the log with no idea it was
-# waiting" gap this closes.
-def alert_sheets_reauth_required():
+# Three console/alert stages for one Google Sheets reauth pass - sheets_helper fires exactly one
+# of alert_sheets_reauth_silent()/alert_sheets_reauth_required() per pass, always after
+# alert_sheets_reauth_checking(). Passed as sheets_helper's on_checking/on_reauth_silent/
+# on_reauth_required callbacks from the proactive startup check below and from
+# drain_spreadsheet_queue_at_startup()/update_spreadsheet_row() - the proactive check only catches
+# a token that's already dead *before* the run starts; a refresh token can just as easily die
+# mid-run (e.g. revoked, or Google expiring it after months of inactivity).
+#
+# Google can silently reissue a code - no visible consent screen, no click - when the account has
+# already granted this app+scope before and its browser session is already signed in; sheets_helper
+# only treats it as "required" once a short grace period passes with nothing back, since a real
+# person can't plausibly see the page and click Allow that fast. Separating the two means a routine
+# silent reissue doesn't spam an email/ntfy alert that has nothing to actually tell anyone to do.
+def alert_sheets_reauth_checking():
+    print(f"* Checking Google Sheets authorization for tab '{ERR_CODE}'...")
+
+
+def alert_sheets_reauth_silent():
+    print(f"* Google Sheets authorization token refreshed for tab '{ERR_CODE}'")
+
+
+def alert_sheets_reauth_required(auth_url=""):
     print(f"* Google Sheets authorization needed for tab '{ERR_CODE}' - opening browser for consent...")
     if ERROR_NOTIFICATION:
         reauth_subject = f"spotify_monitor: Google Sheets re-authorization needed (tab '{ERR_CODE}')"
-        reauth_body = f"The cached Google Sheets token for tab '{ERR_CODE}' is no longer valid and needs to be re-authorized. spotify_monitor is opening a browser consent window now on the machine it's running on and will wait there until it's completed.{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-        reauth_body_html = f"<html><head></head><body>The cached Google Sheets token for tab '{escape(ERR_CODE)}' is no longer valid and needs to be re-authorized. spotify_monitor is opening a browser consent window now on the machine it's running on and will wait there until it's completed.{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
+        # The link only actually completes the flow from the machine spotify_monitor is running on
+        # (or something that can reach its loopback callback server) - it's Google's own redirect
+        # back to http://localhost:<port>/, which only resolves on that machine - but it's still
+        # worth including: the local browser launch this is racing against doesn't always succeed
+        # (e.g. no default browser handler on a headless/service context), and this link is the
+        # fallback either way.
+        link_line = f"\n\nAuthorization link (open on the machine running spotify_monitor):\n{auth_url}" if auth_url else ""
+        link_line_html = f"<br><br>Authorization link (open on the machine running spotify_monitor):<br><a href=\"{escape_html_attr(auth_url)}\">{escape(auth_url)}</a>" if auth_url else ""
+        reauth_body = f"The cached Google Sheets token for tab '{ERR_CODE}' is no longer valid and needs to be re-authorized. spotify_monitor is opening a browser consent window now on the machine it's running on and will wait there until it's completed.{link_line}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+        reauth_body_html = f"<html><head></head><body>The cached Google Sheets token for tab '{escape(ERR_CODE)}' is no longer valid and needs to be re-authorized. spotify_monitor is opening a browser consent window now on the machine it's running on and will wait there until it's completed.{link_line_html}{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
         send_email(reauth_subject, reauth_body, reauth_body_html, SMTP_SSL)
         send_notification("sheet", f"spotify_monitor: Google Sheets re-authorization needed (tab '{ERR_CODE}') - complete the browser consent on the host machine")
 
@@ -6428,7 +6448,7 @@ def drain_spreadsheet_queue_at_startup():
         return
 
     print(f"* Retrying queued Google Sheet rows for tab '{ERR_CODE}'...")
-    drained, drain_error = sheets_helper.drain_queue_at_startup(SPREADSHEET_ID, ERR_CODE, ERR_CODE, GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE, on_reauth_required=alert_sheets_reauth_required)
+    drained, drain_error = sheets_helper.drain_queue_at_startup(SPREADSHEET_ID, ERR_CODE, ERR_CODE, GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE, on_checking=alert_sheets_reauth_checking, on_reauth_silent=alert_sheets_reauth_silent, on_reauth_required=alert_sheets_reauth_required)
     if drained:
         send_spreadsheet_recovery_alert()
     else:
@@ -6447,7 +6467,7 @@ def update_spreadsheet_row(col_b_text, want_footer):
     # full timestamp here too would be redundant and renders differently (date+time) than the
     # existing rows above it.
     row_ts = datetime.now().strftime("%Y-%m-%d")
-    success, entered_error, recovered, error_message = sheets_helper.update_spreadsheet(ERR_CODE, SPREADSHEET_ID, ERR_CODE, [row_ts, col_b_text], GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE, on_reauth_required=alert_sheets_reauth_required)
+    success, entered_error, recovered, error_message = sheets_helper.update_spreadsheet(ERR_CODE, SPREADSHEET_ID, ERR_CODE, [row_ts, col_b_text], GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE, on_checking=alert_sheets_reauth_checking, on_reauth_silent=alert_sheets_reauth_silent, on_reauth_required=alert_sheets_reauth_required)
 
     if entered_error:
         print(f"* Error: failed to update Google Sheet (tab '{ERR_CODE}') - row queued for retry ({error_message})")
@@ -17042,9 +17062,15 @@ def main():
             print_recovery_error(context="dependency", detail="sheets_helper is required because UPDATE_SPREADSHEET is enabled")
             sys.exit(1)
         if sheets_helper.credentials_need_reauth(GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE):
-            alert_sheets_reauth_required()
-            sheets_helper.interactive_reauth(GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE)
-            print(f"* Google Sheets authorization complete")
+            # Callbacks (rather than called eagerly here) so alert_sheets_reauth_required() fires
+            # only once sheets_helper actually has the real authorization URL to alert with, and
+            # only when a person is genuinely needed - see alert_sheets_reauth_checking()'s own
+            # comment for why a routine silent reissue takes a different, quieter path.
+            reauth_was_silent = []
+            sheets_helper.interactive_reauth(GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE, on_checking=alert_sheets_reauth_checking, on_reauth_silent=lambda: (alert_sheets_reauth_silent(), reauth_was_silent.append(True)), on_reauth_required=alert_sheets_reauth_required)
+            if not reauth_was_silent:
+                print(f"* Google Sheets authorization complete")
+                print()
 
     drain_spreadsheet_queue_at_startup()
 

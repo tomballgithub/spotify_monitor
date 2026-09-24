@@ -13,7 +13,9 @@
 
 import os
 import json
+import threading
 import time
+import webbrowser
 from datetime import date as _date
 
 try:
@@ -41,7 +43,29 @@ def _invalidate_cache():
     _worksheet_cache = {}
 
 
-def _get_credentials(client_file, token_file, on_reauth_required=None):
+# Google can silently reissue a code (no visible consent screen, no click) when the account has
+# already granted this exact app+scope before and its browser session is already signed in - real
+# human reaction+click+page-load time can't complete anywhere near this fast, so anything still
+# running past this grace period is treated as genuinely waiting on a person.
+_SILENT_REAUTH_GRACE_SECONDS = 5
+
+
+class _CapturingBrowserController:
+    """Wraps whatever real webbrowser controller run_local_server() would have used, so the exact
+    authorization URL it's about to open can be captured into `captured` without duplicating
+    run_local_server()'s own PKCE/state handling (a second, separately-built authorization_url()
+    call would carry a different state than the one the local server is actually listening for)."""
+
+    def __init__(self, real_controller, captured):
+        self._real_controller = real_controller
+        self._captured = captured
+
+    def open(self, url, *args, **kwargs):
+        self._captured["url"] = url
+        return self._real_controller.open(url, *args, **kwargs)
+
+
+def _get_credentials(client_file, token_file, on_checking=None, on_reauth_silent=None, on_reauth_required=None):
     creds = None
     if os.path.isfile(token_file):
         creds = Credentials.from_authorized_user_file(token_file, SCOPES)
@@ -57,13 +81,44 @@ def _get_credentials(client_file, token_file, on_reauth_required=None):
         if not creds or not creds.valid:
             # This call can be reached mid-run (e.g. the cached client got invalidated after a
             # write failure, and the refresh token has since died too), not just from the caller's
-            # own proactive startup check - on_reauth_required lets the caller alert (email/ntfy)
-            # right before this blocks on interactive browser consent, so an unattended run never
-            # sits silently waiting with nobody aware of it.
-            if on_reauth_required is not None:
-                on_reauth_required()
+            # own proactive startup check. run_local_server() blocks until Google's redirect
+            # arrives at its local callback server - which can happen almost instantly (Google
+            # silently reissuing, no click needed) or not until a person actually visits the URL
+            # and approves it. Running it in a background thread lets the grace period below tell
+            # the two apart: on_checking() fires unconditionally, then either on_reauth_silent()
+            # (finished within the grace period - nothing needed anyone's attention) or
+            # on_reauth_required(auth_url) (still running past it - alert, with the real URL,
+            # since an unattended run would otherwise sit blocked with nobody aware of it) fires,
+            # never both. run_local_server() calls webbrowser.get(browser).open(auth_url, ...) -
+            # not webbrowser.open() directly - so webbrowser.get itself has to be patched to hand
+            # back a controller that intercepts the URL on its way to the real one.
+            if on_checking is not None:
+                on_checking()
             flow = InstalledAppFlow.from_client_secrets_file(client_file, SCOPES)
-            creds = flow.run_local_server(port=0)
+            captured = {}
+            real_get = webbrowser.get
+            webbrowser.get = lambda using=None: _CapturingBrowserController(real_get(using), captured)
+            outcome = {}
+
+            def _run_flow():
+                try:
+                    outcome["creds"] = flow.run_local_server(port=0)
+                except Exception as e:
+                    outcome["error"] = e
+
+            worker = threading.Thread(target=_run_flow, daemon=True)
+            worker.start()
+            worker.join(timeout=_SILENT_REAUTH_GRACE_SECONDS)
+            if worker.is_alive():
+                if on_reauth_required is not None:
+                    on_reauth_required(captured.get("url", ""))
+                worker.join()
+            elif on_reauth_silent is not None:
+                on_reauth_silent()
+            webbrowser.get = real_get
+            if "error" in outcome:
+                raise outcome["error"]
+            creds = outcome["creds"]
         with open(token_file, "w", encoding="utf-8") as f:
             f.write(creds.to_json())
     return creds
@@ -100,12 +155,12 @@ def credentials_need_reauth(client_file, token_file):
     return False
 
 
-def interactive_reauth(client_file, token_file):
+def interactive_reauth(client_file, token_file, on_checking=None, on_reauth_silent=None, on_reauth_required=None):
     """Forces the interactive browser consent flow and caches the resulting refresh token.
     Meant to be called proactively (e.g. at startup, after credentials_need_reauth() returns
     True) so re-authorization happens at a predictable moment instead of blocking the first
     mid-run spreadsheet write unexpectedly while nobody's watching."""
-    return _get_credentials(client_file, token_file)
+    return _get_credentials(client_file, token_file, on_checking, on_reauth_silent, on_reauth_required)
 
 
 def queue_has_pending(err_code):
@@ -113,23 +168,23 @@ def queue_has_pending(err_code):
     return _queue_length(err_code) > 0
 
 
-def drain_queue_at_startup(spreadsheet_id, tab_name, err_code, client_file, token_file, on_reauth_required=None):
+def drain_queue_at_startup(spreadsheet_id, tab_name, err_code, client_file, token_file, on_checking=None, on_reauth_silent=None, on_reauth_required=None):
     """Attempts to drain any rows queued by a previous run, before the main loop starts,
     instead of waiting for the next real song/event to trigger a retry. Returns
     (drained, error_message): drained is True if the queue is now fully empty; error_message
     is the exception text from whichever row failed and stopped the drain, or None."""
     if not LIBS_AVAILABLE:
         return False, f"Google Sheets libraries not installed ({IMPORT_ERROR})"
-    return _drain_queue(spreadsheet_id, tab_name, err_code, client_file, token_file, on_reauth_required)
+    return _drain_queue(spreadsheet_id, tab_name, err_code, client_file, token_file, on_checking, on_reauth_silent, on_reauth_required)
 
 
-def _get_worksheet(spreadsheet_id, tab_name, client_file, token_file, on_reauth_required=None):
+def _get_worksheet(spreadsheet_id, tab_name, client_file, token_file, on_checking=None, on_reauth_silent=None, on_reauth_required=None):
     global _client_cache
     cache_key = (spreadsheet_id, tab_name)
     if cache_key in _worksheet_cache:
         return _worksheet_cache[cache_key]
     if _client_cache is None:
-        creds = _get_credentials(client_file, token_file, on_reauth_required)
+        creds = _get_credentials(client_file, token_file, on_checking, on_reauth_silent, on_reauth_required)
         _client_cache = gspread.authorize(creds)
     sh = _client_cache.open_by_key(spreadsheet_id)
     ws = sh.worksheet(tab_name)
@@ -163,7 +218,7 @@ def _is_retryable(e):
     return status_code in _RETRYABLE_STATUS_CODES
 
 
-def _write_row(spreadsheet_id, tab_name, row, client_file, token_file, on_reauth_required=None):
+def _write_row(spreadsheet_id, tab_name, row, client_file, token_file, on_checking=None, on_reauth_silent=None, on_reauth_required=None):
     # A single batchUpdate call that inserts the row, writes both cell values, and pins their
     # number formats all atomically - one API request instead of insert_row() + a separate
     # format() call. Sheets rows inherit the number format of whichever row they push down, so
@@ -182,7 +237,7 @@ def _write_row(spreadsheet_id, tab_name, row, client_file, token_file, on_reauth
     last_error = None
     for attempt in range(_MAX_WRITE_ATTEMPTS):
         try:
-            ws = _get_worksheet(spreadsheet_id, tab_name, client_file, token_file, on_reauth_required)
+            ws = _get_worksheet(spreadsheet_id, tab_name, client_file, token_file, on_checking, on_reauth_silent, on_reauth_required)
             date_serial = _date_to_serial(row[0])
             ws.spreadsheet.batch_update({
                 "requests": [
@@ -244,7 +299,7 @@ def _enqueue(err_code, row):
         f.write(json.dumps(row) + "\n")
 
 
-def _drain_queue(spreadsheet_id, tab_name, err_code, client_file, token_file, on_reauth_required=None):
+def _drain_queue(spreadsheet_id, tab_name, err_code, client_file, token_file, on_checking=None, on_reauth_silent=None, on_reauth_required=None):
     """Attempts to write all queued rows in order, oldest first. Stops at the first
     failure so remaining rows stay queued in their original order. Returns
     (drained, error_message): drained is True if the queue is fully empty afterwards;
@@ -261,7 +316,7 @@ def _drain_queue(spreadsheet_id, tab_name, err_code, client_file, token_file, on
     error_message = None
     for line in lines:
         row = json.loads(line)
-        ok, error_message = _write_row(spreadsheet_id, tab_name, row, client_file, token_file, on_reauth_required)
+        ok, error_message = _write_row(spreadsheet_id, tab_name, row, client_file, token_file, on_checking, on_reauth_silent, on_reauth_required)
         if ok:
             remaining.pop(0)
         else:
@@ -277,7 +332,7 @@ def _drain_queue(spreadsheet_id, tab_name, err_code, client_file, token_file, on
     return not remaining, error_message
 
 
-def update_spreadsheet(err_code, spreadsheet_id, tab_name, row, client_file, token_file, on_reauth_required=None):
+def update_spreadsheet(err_code, spreadsheet_id, tab_name, row, client_file, token_file, on_checking=None, on_reauth_silent=None, on_reauth_required=None):
     """
     Writes `row` to the given spreadsheet tab, draining any previously queued rows first.
 
@@ -287,10 +342,14 @@ def update_spreadsheet(err_code, spreadsheet_id, tab_name, row, client_file, tok
       recovered     - True only on the call where a previously non-empty queue fully drains.
       error_message - the exception text behind entered_error, or None.
 
-    on_reauth_required: called (with no arguments) right before this would otherwise block on
-    interactive browser OAuth consent - e.g. the cached client was invalidated after a write
-    failure, and the refresh token has since died too. Lets the caller alert (email/ntfy) before
-    an unattended run sits silently waiting on a browser window nobody's watching for.
+    A dead cached client triggers at most one reauth pass, reported through exactly one of:
+      on_checking()             - always fires first, before it's known whether this will
+                                   resolve on its own or need a person.
+      on_reauth_silent()        - Google reissued without any visible consent screen (the
+                                   account had already granted this app+scope before).
+      on_reauth_required(url)   - still waiting past the grace period; alert (email/ntfy, with
+                                   the real authorization URL) since an unattended run would
+                                   otherwise sit blocked with nobody aware of it.
     """
     if not LIBS_AVAILABLE:
         error_message = f"Google Sheets libraries not installed ({IMPORT_ERROR}); to install, run: pip install gspread google-auth-oauthlib"
@@ -303,13 +362,13 @@ def update_spreadsheet(err_code, spreadsheet_id, tab_name, row, client_file, tok
     recovered = False
 
     if had_queue:
-        drained, _ = _drain_queue(spreadsheet_id, tab_name, err_code, client_file, token_file, on_reauth_required)
+        drained, _ = _drain_queue(spreadsheet_id, tab_name, err_code, client_file, token_file, on_checking, on_reauth_silent, on_reauth_required)
         if drained:
             recovered = True
             had_queue = False
 
     if not had_queue:
-        ok, error_message = _write_row(spreadsheet_id, tab_name, row, client_file, token_file, on_reauth_required)
+        ok, error_message = _write_row(spreadsheet_id, tab_name, row, client_file, token_file, on_checking, on_reauth_silent, on_reauth_required)
         if ok:
             return True, False, recovered, None
         _enqueue(err_code, row)
