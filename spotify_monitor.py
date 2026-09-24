@@ -1017,6 +1017,7 @@ CLIENT_MODEL = 34404
 # Leave empty to auto-generate from USER_AGENT
 APP_VERSION = ""
 
+# ---------------------------------------------------------------------
 """
 
 # -------------------------
@@ -4310,9 +4311,6 @@ DEFAULT_COLOR_THEME = {
     "count_up": "green",
     "count_down": "red",
     "link": "blue underline",
-    # ALT_VIEW only - see colorize_alt_view_line() below
-    "alt_view_heart": "bright_red",
-    "alt_view_timestamp": "bright_yellow",
     # Help screen
     "help_heading": "bright_cyan bold",
     "help_usage": "bright_white bold",
@@ -4322,6 +4320,9 @@ DEFAULT_COLOR_THEME = {
     "help_command": "bright_white",
     "help_comment": "bright_black",
     "help_default": "bright_black",
+    # ALT_VIEW only - see colorize_alt_view_line() below
+    "alt_view_heart": "bright_red",
+    "alt_view_timestamp": "bright_yellow",
 }
 
 # A block style paints a whole line and keeps the colours already inside it, so a value drawn in the
@@ -6203,6 +6204,7 @@ def calculate_timespan(timestamp1, timestamp2, show_weeks=True, show_hours=True,
 
     if short:
         intervals = intervals_short
+
     if type(timestamp1) is int:
         dt1 = datetime.fromtimestamp(int(ts1))
     elif type(timestamp1) is float:
@@ -7017,6 +7019,7 @@ def send_webhook(title: str, description: str, notification_type: str = "song", 
     print_recovery_error(last_error, "webhook")
     return 1
 
+
 # Sends one alert through the enabled email and webhook channels
 def send_notification_channels(notification_type: str, subject: str, body: str, body_html: str = "", email_enabled: bool = False, webhook_enabled: Optional[bool] = None, image_url: str = "", subject_short: str = "", body_short: str = "", ntfy_priority: int = 0, ntfy_tags: str = "", retain_failures: bool = True, webhook_body: str = "", webhook_body_html: str = "") -> tuple[bool, bool]:
     email_selected = bool(email_enabled and email_settings_problem() is None)
@@ -7254,56 +7257,40 @@ def toggle_active_inactive_notifications_signal_handler(sig, frame):
     global INACTIVE_NOTIFICATION
     ACTIVE_NOTIFICATION = not ACTIVE_NOTIFICATION
     INACTIVE_NOTIFICATION = not INACTIVE_NOTIFICATION
-    if isinstance(sig, int):
-        sig_name = signal.Signals(sig).name
-    else:
-        sig_name = sig
+    sig_name = signal.Signals(sig).name
     print(f"* Signal {sig_name} received")
     print(f"* Email notifications: [active = {ACTIVE_NOTIFICATION}] [inactive = {INACTIVE_NOTIFICATION}]")
-    if isinstance(sig, int):
-        print_cur_ts("Timestamp:\t\t\t")
+    print_cur_ts("Timestamp:\t\t\t")
 
 
 # Signal handler for SIGUSR2 allowing to switch every song email notifications
 def toggle_song_notifications_signal_handler(sig, frame):
     global SONG_NOTIFICATION
     SONG_NOTIFICATION = not SONG_NOTIFICATION
-    if isinstance(sig, int):
-        sig_name = signal.Signals(sig).name
-    else:
-        sig_name = sig
+    sig_name = signal.Signals(sig).name
     print(f"* Signal {sig_name} received")
     print(f"* Email notifications: [every song = {SONG_NOTIFICATION}]")
-    if isinstance(sig, int):
-        print_cur_ts("Timestamp:\t\t\t")
+    print_cur_ts("Timestamp:\t\t\t")
 
 
 # Signal handler for SIGCONT allowing to switch tracked songs email notifications
 def toggle_track_notifications_signal_handler(sig, frame):
     global TRACK_NOTIFICATION
     TRACK_NOTIFICATION = not TRACK_NOTIFICATION
-    if isinstance(sig, int):
-        sig_name = signal.Signals(sig).name
-    else:
-        sig_name = sig
+    sig_name = signal.Signals(sig).name
     print(f"* Signal {sig_name} received")
     print(f"* Email notifications: [tracked = {TRACK_NOTIFICATION}]")
-    if isinstance(sig, int):
-        print_cur_ts("Timestamp:\t\t\t")
+    print_cur_ts("Timestamp:\t\t\t")
 
 
 # Signal handler for SIGPIPE allowing to switch songs on loop email notifications
 def toggle_songs_on_loop_notifications_signal_handler(sig, frame):
     global SONG_ON_LOOP_NOTIFICATION
     SONG_ON_LOOP_NOTIFICATION = not SONG_ON_LOOP_NOTIFICATION
-    if isinstance(sig, int):
-        sig_name = signal.Signals(sig).name
-    else:
-        sig_name = sig
+    sig_name = signal.Signals(sig).name
     print(f"* Signal {sig_name} received")
     print(f"* Email notifications: [songs on loop = {SONG_ON_LOOP_NOTIFICATION}]")
-    if isinstance(sig, int):
-        print_cur_ts("Timestamp:\t\t\t")
+    print_cur_ts("Timestamp:\t\t\t")
 
 
 # Reports whether the live Friend Activity backend is selected
@@ -11047,7 +11034,7 @@ def doctor_secret_is_set(value) -> bool:
 
 
 # Returns the diagnostic fields describing one secret, keeping the length out of the value so a line still splits on ", "
-def secret_fields(value, key=None) -> dict[str, Any]:
+def secret_fields(value, key=None) -> Dict[str, Any]:
     return {"value": "set" if doctor_secret_is_set(value) else "not set", "chars": len(str(value).strip()) if key in FIXED_LENGTH_SECRET_KEYS and doctor_secret_is_set(value) else None}
 
 
@@ -14034,7 +14021,6 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
     outage = OutageReporter()
 
     jmk_send = False
-
     active_ever = False
     icon_add = False
     hasTrack = False
@@ -14046,14 +14032,6 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
         nonlocal icon_add
         if ALT_VIEW:
             icon_add = False
-
-    # Monitored-playlist detection state for this friend - see PlaylistTracker and its advance()
-    # method above for the actual algorithm. icon_add is display-only (not part of the tracker):
-    # it's cleared whenever the tracker resets a playlist's counts (a fresh match or a real clear -
-    # see clear_icon_add above and PlaylistTracker.reset_counts's on_reset callback), and set True
-    # right after advance() returns "shuffle", to show ICON_SONG_MISSING_FROM_PLAYLIST next to the
-    # song as a "still in the playlist, but this one was a smart-shuffle exception" cue.
-    tracker = PlaylistTracker(on_reset=clear_icon_add)
 
     def iconstring():
         nonlocal icon_add, playlist_suffix
@@ -14070,6 +14048,14 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
     def time_diff_str():
         return str(round((sp_ts - sp_active_ts_start) / 60)).zfill(2)
+
+    # Monitored-playlist detection state for this friend - see PlaylistTracker and its advance()
+    # method above for the actual algorithm. icon_add is display-only (not part of the tracker):
+    # it's cleared whenever the tracker resets a playlist's counts (a fresh match or a real clear -
+    # see clear_icon_add above and PlaylistTracker.reset_counts's on_reset callback), and set True
+    # right after advance() returns "shuffle", to show ICON_SONG_MISSING_FROM_PLAYLIST next to the
+    # song as a "still in the playlist, but this one was a smart-shuffle exception" cue.
+    tracker = PlaylistTracker(on_reset=clear_icon_add)
 
     try:
         if csv_file_name:
@@ -14209,10 +14195,6 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
             sp_album = sp_data["sp_album"]
             if not sp_album:
                 sp_album = sp_track_data["sp_album_name"]
-
-            sp_album_image_url = sp_track_data["sp_album_image_url"]
-            if not sp_album_image_url:
-                sp_album_image_url = ""
 
             sp_ts = sp_data["sp_ts"]
             cur_ts = int(time.time())
@@ -14437,6 +14419,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
             if listened_songs:
                 print(f"\nSongs played:\t\t\t{songs_played_text(listened_songs, activity_ts, sp_active_ts_start)}")
 
+            print(f"\nTracks/playlists/albums to monitor: {tracks}")
             print(f"")
             for playlist_name, playlist_data in monitored_playlists_data.items():
 #                print(f"Monitoring Tracks: {playlist_name} ({len(playlist_data.get('tracks_set'))} songs)")
@@ -14715,10 +14698,6 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                     sp_album = sp_data["sp_album"]
                     if not sp_album:
                         sp_album = sp_track_data["sp_album_name"]
-
-                    sp_album_image_url = sp_track_data["sp_album_image_url"]
-                    if not sp_album_image_url:
-                        sp_album_image_url = ""
 
                     sp_track_duration = sp_track_data["sp_track_duration"]
                     sp_track_url = sp_track_data["sp_track_url"]
@@ -15174,6 +15153,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                         email_succeeded, webhook_succeeded = send_notification_channels(notification_type, m_subject, m_body, m_body_html, email_song_enabled, webhook_song_enabled, image_url=sp_album_image_url, subject_short=m_subject_short, body_short=m_body_short)
                         email_sent = email_sent or email_succeeded
                         webhook_sent = webhook_sent or webhook_succeeded
+
                     try:
                         if csv_file_name:
                             write_csv_entry(csv_file_name, datetime.fromtimestamp(int(cur_ts)), sp_artist, sp_track, sp_playlist, sp_album, datetime.fromtimestamp(int(sp_ts)))
@@ -16084,7 +16064,7 @@ def main():
         dest="jmk",
         action="store_true",
         default=None,
-        help="Enable Jeoff's view and turn on texting"
+        help="Enable Jeoff's view (ALT_VIEW) and (JMK_MODE)"
     )
 
     args = parser.parse_args()
