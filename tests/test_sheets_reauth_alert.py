@@ -248,8 +248,8 @@ def test_update_spreadsheet_threads_all_three_callbacks_through_to_get_credentia
     sheets_helper._invalidate_cache()
     received = []
 
-    def fake_get_credentials(client_file, token_file, on_checking=None, on_reauth_silent=None, on_reauth_required=None):
-        received.append((on_checking, on_reauth_silent, on_reauth_required))
+    def fake_get_credentials(client_file, token_file, on_checking=None, on_reauth_silent=None, on_reauth_required=None, debug_log=None):
+        received.append((on_checking, on_reauth_silent, on_reauth_required, debug_log))
         raise RuntimeError("stop here - only checking the callbacks reach _get_credentials")
 
     monkeypatch.setattr(sheets_helper, "_get_credentials", fake_get_credentials)
@@ -257,12 +257,13 @@ def test_update_spreadsheet_threads_all_three_callbacks_through_to_get_credentia
     checking_marker = lambda: None
     silent_marker = lambda: None
     required_marker = lambda url: None
+    debug_log_marker = lambda message: None
     sheets_helper.update_spreadsheet("TESTCODE", "sheet-id", "tab", ["2026-01-01", "text"],
                                       "client.json", "token.json",
                                       on_checking=checking_marker, on_reauth_silent=silent_marker,
-                                      on_reauth_required=required_marker)
+                                      on_reauth_required=required_marker, debug_log=debug_log_marker)
 
-    assert received == [(checking_marker, silent_marker, required_marker)]
+    assert received == [(checking_marker, silent_marker, required_marker, debug_log_marker)]
     sheets_helper._invalidate_cache()
 
 
@@ -341,3 +342,75 @@ def test_alert_sheets_reauth_silent_and_checking_never_send_email_or_ntfy(monkey
 
     monitor.alert_sheets_reauth_checking()
     monitor.alert_sheets_reauth_silent()
+
+
+# Regression: a real production hang - the first Google Sheets write of a run took 38+ seconds with
+# no error or retry message anywhere in the log, while every write after it (reusing the cached
+# client) took under half a second. gspread's own HTTPClient defaults .timeout to None - no timeout
+# at all - on every Sheets API call it makes, so a stalled connection (not a clean error, just no
+# response) can hang indefinitely instead of failing fast into the retry/queue path _write_row()
+# already has for actual errors
+def test_get_worksheet_sets_an_explicit_timeout_on_the_gspread_client(monkeypatch):
+    sheets_helper._invalidate_cache()
+    monkeypatch.setattr(sheets_helper, "_get_credentials", lambda *args, **kwargs: object())
+
+    class FakeHTTPClient:
+        def __init__(self):
+            self.timeout = None
+
+    class FakeWorksheet:
+        pass
+
+    class FakeSpreadsheet:
+        def worksheet(self, tab_name):
+            return FakeWorksheet()
+
+    class FakeGspreadClient:
+        def __init__(self):
+            self.http_client = FakeHTTPClient()
+
+        def open_by_key(self, spreadsheet_id):
+            return FakeSpreadsheet()
+
+    monkeypatch.setattr(sheets_helper.gspread, "authorize", lambda creds: FakeGspreadClient())
+
+    try:
+        sheets_helper._get_worksheet("sheet-id", "tab", "client.json", "token.json")
+        assert sheets_helper._client_cache.http_client.timeout == sheets_helper._HTTP_CLIENT_TIMEOUT_SECONDS
+        assert sheets_helper._client_cache.http_client.timeout is not None
+    finally:
+        sheets_helper._invalidate_cache()
+
+
+# Regression: sheets_helper's own per-call timing lines (e.g. "worksheet() took 21.83s") showed up
+# live on screen during a real run, reading exactly like the script had frozen or was doing
+# something significant, when it was really just internal plumbing detail meant for the log. This
+# must route through log_only() (never terminal_only()), unconditionally - the caller's own
+# DEBUG_JMK on-screen setting is for operationally meaningful state changes, not this level of
+# internal detail, so it must not affect whether this is shown live.
+def test_sheets_debug_log_only_writes_to_the_log_file_never_the_terminal(monkeypatch):
+    log_only_calls = []
+    terminal_only_calls = []
+
+    class FakeLogger:
+        def log_only(self, message):
+            log_only_calls.append(message)
+
+        def terminal_only(self, message):
+            terminal_only_calls.append(message)
+
+    monkeypatch.setattr(monitor, "log_logger", FakeLogger(), raising=False)
+
+    monitor.sheets_debug_log("worksheet() took 21.83s")
+
+    assert len(log_only_calls) == 1
+    assert "worksheet() took 21.83s" in log_only_calls[0]
+    assert terminal_only_calls == []
+
+
+def test_sheets_debug_log_tolerates_a_missing_log_logger(monkeypatch):
+    """Pure diagnostic output - must not crash a real write just because log_logger isn't set up
+    yet (or, as in most tests, never is)."""
+    monkeypatch.setattr(monitor, "log_logger", None, raising=False)
+
+    monitor.sheets_debug_log("this must not raise")

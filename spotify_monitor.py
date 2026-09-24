@@ -6441,6 +6441,18 @@ def alert_sheets_reauth_checking():
     print(f"* Checking Google Sheets authorization for tab '{ERR_CODE}'...")
 
 
+# Passed to sheets_helper as its debug_log callback - per-call timing detail for the credential,
+# auth and worksheet-lookup steps behind one Sheets write, useful for diagnosing a slow write after
+# the fact but not something to show live on screen, regardless of DEBUG_JMK's own on-screen debug
+# setting (which is meant for operationally meaningful state changes, not this level of internal
+# plumbing detail). log_only() writes it to the log file exactly like print_debug()'s own
+# [DEBUG HH:MM:SS] lines, just without ever also going to the terminal.
+def sheets_debug_log(message):
+    if log_logger is None:
+        return
+    log_logger.log_only(f"[DEBUG {datetime.now().strftime('%H:%M:%S')}] {message}\n")
+
+
 def alert_sheets_reauth_silent():
     print(f"* Google Sheets authorization token refreshed for tab '{ERR_CODE}'")
 
@@ -6475,7 +6487,7 @@ def drain_spreadsheet_queue_at_startup():
         return
 
     print(f"* Retrying queued Google Sheet rows for tab '{ERR_CODE}'...")
-    drained, drain_error = sheets_helper.drain_queue_at_startup(SPREADSHEET_ID, ERR_CODE, ERR_CODE, GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE, on_checking=alert_sheets_reauth_checking, on_reauth_silent=alert_sheets_reauth_silent, on_reauth_required=alert_sheets_reauth_required)
+    drained, drain_error = sheets_helper.drain_queue_at_startup(SPREADSHEET_ID, ERR_CODE, ERR_CODE, GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE, on_checking=alert_sheets_reauth_checking, on_reauth_silent=alert_sheets_reauth_silent, on_reauth_required=alert_sheets_reauth_required, debug_log=sheets_debug_log)
     if drained:
         send_spreadsheet_recovery_alert()
     else:
@@ -6494,7 +6506,7 @@ def update_spreadsheet_row(col_b_text, want_footer):
     # full timestamp here too would be redundant and renders differently (date+time) than the
     # existing rows above it.
     row_ts = datetime.now().strftime("%Y-%m-%d")
-    success, entered_error, recovered, error_message = sheets_helper.update_spreadsheet(ERR_CODE, SPREADSHEET_ID, ERR_CODE, [row_ts, col_b_text], GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE, on_checking=alert_sheets_reauth_checking, on_reauth_silent=alert_sheets_reauth_silent, on_reauth_required=alert_sheets_reauth_required)
+    success, entered_error, recovered, error_message = sheets_helper.update_spreadsheet(ERR_CODE, SPREADSHEET_ID, ERR_CODE, [row_ts, col_b_text], GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE, on_checking=alert_sheets_reauth_checking, on_reauth_silent=alert_sheets_reauth_silent, on_reauth_required=alert_sheets_reauth_required, debug_log=sheets_debug_log)
 
     if entered_error:
         print(f"* Error: failed to update Google Sheet (tab '{ERR_CODE}') - row queued for retry ({error_message})")
@@ -17155,7 +17167,7 @@ def main():
             # only when a person is genuinely needed - see alert_sheets_reauth_checking()'s own
             # comment for why a routine silent reissue takes a different, quieter path.
             reauth_was_silent = []
-            sheets_helper.interactive_reauth(GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE, on_checking=alert_sheets_reauth_checking, on_reauth_silent=lambda: (alert_sheets_reauth_silent(), reauth_was_silent.append(True)), on_reauth_required=alert_sheets_reauth_required)
+            sheets_helper.interactive_reauth(GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE, on_checking=alert_sheets_reauth_checking, on_reauth_silent=lambda: (alert_sheets_reauth_silent(), reauth_was_silent.append(True)), on_reauth_required=alert_sheets_reauth_required, debug_log=sheets_debug_log)
             if not reauth_was_silent:
                 print(f"* Google Sheets authorization complete")
                 print()
