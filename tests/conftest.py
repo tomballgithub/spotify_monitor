@@ -14,6 +14,12 @@ _SHARED_STATE_NAMES = (
     "EXPORTED_SECRET_KEYS",
     "EXPORTED_ENVIRONMENT_KEYS",
     "COMMAND_LINE_SECRET_KEYS",
+    # A rotated refresh token and its access-token cache are written back onto the module by the code under
+    # test. Left behind, they send a later monitoring test to the real Spotify endpoints instead of its doubles
+    "SPOTIFY_SCROBBLE_REFRESH_TOKEN",
+    "SP_CACHED_SCROBBLE_ACCESS_TOKEN",
+    "SP_SCROBBLE_ACCESS_TOKEN_EXPIRES_AT",
+    "SP_CACHED_SCROBBLE_AUTH_FINGERPRINT",
 )
 
 

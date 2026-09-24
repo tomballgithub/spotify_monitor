@@ -14174,6 +14174,9 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                     if friend_resuming_this_song:
 
                         if live_activity:
+                            if JMK_MODE:
+                                sp_active_ts_start = sp_ts # reset start time to [00], same as the buddylist JMK_MODE case below - live_timing.session_started_at defaults to the real time this resume was noticed (see LiveTiming.start_track()'s first_sample check, which won't retrigger on a friend this object has already been tracking), not to sp_ts, so it can land AFTER sp_ts and print a negative offset for this first song
+                            else:
                                 sp_active_ts_start = int(live_timing.session_started_at)
                         elif JMK_MODE:
                             sp_active_ts_start = sp_ts # reset start time to [00] instead starting at length of the first song (ex:[04])

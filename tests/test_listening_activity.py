@@ -441,6 +441,38 @@ def test_live_inactivity_and_same_track_restart(loop_environment, monkeypatch, c
     assert "Songs played:\t\t\t2" not in output
 
 
+# Regression: in listening_activity + JMK_MODE, the first song line printed right after a friend
+# resumes from being offline must read a fresh [00], not a negative offset. sp_active_ts_start used
+# to be set from live_timing.session_started_at, which defaults to the real time this resume was
+# *noticed* (LiveTiming.start_track()'s first_sample override never retriggers on a friend this
+# object has already been tracking across earlier samples) rather than to the resumed song's own
+# reported timestamp - and being "offline for a while" means those two moments are exactly the ones
+# expected to drift apart, with the noticing side landing later and producing a negative
+# time_diff_str(). JMK_MODE now resets to sp_ts here instead, mirroring the buddylist JMK_MODE branch
+# right below it, which already did this for the non-live-activity backend.
+def test_live_resume_after_being_offline_shows_a_fresh_offset_in_jmk_mode(loop_environment, monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(monitor, "JMK_MODE", True)
+    monkeypatch.setattr(monitor, "ALT_VIEW", True)
+    # ALT_VIEW makes the code under test reassign sys.stdout to a file-only Logger partway through
+    # (see spotify_monitor.py, just before "Primary loop") - FINAL_LOG_PATH/log_logger are the real
+    # globals it reads/writes when doing so, normally only set up by main(), which these tests bypass
+    # entirely by calling spotify_monitor_friend_uri() directly (same setup as playlist_harness.py's
+    # PlaylistSession, for the same reason).
+    log_path = tmp_path / "monitor.log"
+    monkeypatch.setattr(monitor, "FINAL_LOG_PATH", str(log_path), raising=False)
+    monkeypatch.setattr(monitor, "log_logger", monitor.Logger(str(tmp_path / "screen.log"), mode="screen"), raising=False)
+    now = loop_environment.now
+    snapshots = [feed_entity(now), feed_entity(now, playing=False), feed_entity(now, playing=False), feed_entity(now, playing=False), feed_entity(now)]
+    run_live_snapshots(monkeypatch, loop_environment, snapshots)
+    output = capsys.readouterr().out
+    # "Friend got ACTIVE" is a bare print(), which ALT_VIEW routes to FINAL_LOG_PATH only once the
+    # reassignment above kicks in (see the comment above) - not to stdout/capsys.
+    assert "Friend got ACTIVE" in log_path.read_text(encoding="utf-8"), "the resume itself must actually fire"
+    start_idx = output.rindex("Start notification sent")
+    song_line = next(line for line in output[start_idx:].splitlines() if "First" in line)
+    assert "[00]" in song_line, f"expected a fresh [00] offset right after resuming from being offline, got: {song_line!r}"
+
+
 # Fresh paused timestamps and track changes cannot open a session without observed playback
 def test_recent_stopped_activity_does_not_start_a_session(loop_environment, monkeypatch, capsys):
     now = loop_environment.now

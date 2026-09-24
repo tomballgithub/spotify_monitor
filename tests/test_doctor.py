@@ -37,12 +37,17 @@ class TTYBuffer(io.StringIO):
         return True
 
 
-# Runs an isolated doctor CLI scenario with real network access blocked
+# Runs an isolated doctor CLI scenario with real network access blocked. input="" (rather than
+# stdin=subprocess.DEVNULL) is what actually makes the child's sys.stdin.isatty() read False - some
+# environments (observed on Windows, and in at least one sandboxed shell) hand a child process a
+# stdin that still looks like a real terminal to isatty() even under DEVNULL/inherited-from-parent,
+# which silently defeats any code under test that gates on "am I running interactively" (e.g.
+# --authorize-scrobble-health's own guard) instead of forcing the noninteractive path it expects.
 def run_cli(arguments, runtime_setup=""):
     source = f"module = runpy.run_path({str(CLI_PATH)!r}, run_name='spotify_monitor_phase3_test'); runtime = module['main'].__globals__; runtime['sys'].argv = {[str(CLI_PATH), *arguments]!r}; runtime['CLEAR_SCREEN'] = False; {runtime_setup} module['main']()"
     environment = os.environ.copy()
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
-    return subprocess.run([sys.executable, "-c", ISOLATED_PRELUDE + source], cwd=PROJECT_ROOT, capture_output=True, text=True, env=environment, timeout=30, check=False)
+    return subprocess.run([sys.executable, "-c", ISOLATED_PRELUDE + source], cwd=PROJECT_ROOT, input="", text=True, capture_output=True, env=environment, timeout=30, check=False)
 
 
 # Creates one valid buddy-list response for a selected target
