@@ -128,7 +128,7 @@ VERSION = "3.4"
 # alerts on bedroom playlists?
 # always add icon if theres a match?
 # generatic notifcation and print strings real time instead of storing strings?
-# do this centrally? sp_track = sp_track + found_playlist.get('icon', '')
+# do this centrally? sp_track = sp_track + current_match.get('icon', '')
 # improve comments and delete old code
 # add # of sessions - need check on profile_monitor if # of songs changes by 100+/- to filter that out
 # rearchitect my playlist monitoring PR tracking/counting/messaging? (it's convoluted) [BIG JOB and why bother?]
@@ -804,27 +804,50 @@ ENABLE_LYRICS_COM_URL = False
 # Leave empty to disable
 SPOTIFY_SUFFIX = ""
 
-# The Spotify API sometimes doesn't provide specific public shared playlists for a user.
-# This allows you to add one or more playlists to be monitored
+# The Spotify API sometimes doesn't report a specific public shared playlist for a friend, even
+# though a song of theirs is really on it (e.g. when Spotify's "smart shuffle" mixes it into their
+# queue). This lets you supply your own list of tracks for a playlist and have it detected locally
+# by counting consecutive matching songs, instead of relying solely on what the API reports.
 #
-# Replace {playlist_id} with the ID of the playlist to monitor, and replace {user_id} with the ID for the owner of the playlist
+# Each entry is a dict with the following keys:
+#   name      (required) Display name for the playlist, also used as its key in internal state.
+#   filename  (required) Path to a text file with one "Artist - Track" line per song in the
+#             playlist (see load_spotify_tracks_from_file()). Reloaded periodically; see 'refresh'.
+#   qty_start (required) Number of consecutive songs from this playlist's track list needed in a
+#             row before the playlist is considered "detected" (started).
+#   qty_end   (required) Number of consecutive songs NOT from this playlist's track list allowed
+#             in a row (e.g. from Spotify's smart shuffle) before the playlist is considered
+#             "cleared" (ended). Set > 0 to tolerate the occasional off-list song without losing
+#             the detection.
+#   url       (optional) Playlist URL, used in notification links. Default: "" (no link).
+#   icon      (optional) Text/emoji appended to the track name once the playlist is detected.
+#             Default: "" (none).
+#   override  (optional) If True, immediately treat the playlist as detected the first time any
+#             one of its songs is seen this session, instead of waiting for 'qty_start' in a row.
+#             Only applies the first time a playlist is matched after (re)starting the tool.
+#             Default: OVERRIDE_PLAYLIST_AT_START.
+#   notify    (optional) Whether to send an email/notification when this playlist is detected or
+#             cleared, in addition to always showing its running count on screen.
+#             Default: NOTIFY_PLAYLIST_DETECTED.
+#   refresh   (optional) Seconds between reloading 'filename' from disk to pick up track-list
+#             changes; 0 disables reloading after the initial load. Default: LOAD_TRACKS_FREQUENCY.
 #
+# example:
 # ADD_PLAYLISTS_TO_MONITOR = [
-#   {'uri': 'spotify:playlist:{playlist_id}', 'owner_name': '{user_id}', 'owner_uri': 'spotify:user:{user_id}'},
-#   {'uri': 'spotify:playlist:{playlist_id}', 'owner_name': '{user_id}', 'owner_uri': 'spotify:user:{user_id}'}
+#   {'name': "Discovery Zone", 'filename': "_config_and_logs/dz_songs.txt", 'qty_start': 3, 'qty_end': 2,
+#    'refresh': 3600, 'icon': ' \\u2665', 'override': True, 'notify': True,
+#    'url': "https://open.spotify.com/playlist/xxxxxxxxxxxxxxxxxxxxxx"}
 # ]
-#
-# example: [ {'uri': 'spotify:playlist:6pYPhRkJMSg1d7j8RHgJK1', 'owner_name': 'teocida', 'owner_uri': 'spotify:user:teocida'} ]
-# example: [ {'uri': 'spotify:playlist:0AyBQ5uEhJgdh2NFcMe6wb', 'owner_name': 'uwacwfv5hr23atg1v3dez1sxs', 'owner_uri': 'spotify:user:uwacwfv5hr23atg1v3dez1sxs'} ]
-#
 
 ADD_PLAYLISTS_TO_MONITOR = []
 
 # Configuration Settings
-LOAD_TRACKS_FREQUENCY = 0
-OVERRIDE_PLAYLIST_AT_START = False
-NOTIFY_PLAYLIST_DETECTED   = False
+LOAD_TRACKS_FREQUENCY = 0            # default 'refresh' for a monitored playlist entry that omits it
+OVERRIDE_PLAYLIST_AT_START = False   # default 'override' for a monitored playlist entry that omits it
+NOTIFY_PLAYLIST_DETECTED   = False   # default 'notify' for a monitored playlist entry that omits it
 ICON_SONG_MISSING_FROM_PLAYLIST = "*"
+#ICON_SONG_MISSING_FROM_PLAYLIST = "\\u23fa" # white circle
+#ICON_SONG_MISSING_FROM_PLAYLIST = "\\u26a0" # warning symbol
 
 # If playlist varies by more that this during refresh, assume there was an error
 MAX_PLAYLIST_DIFFERENTIAL  = 0
@@ -1105,14 +1128,11 @@ MONITORING_ACTIVE = False
 ENABLE_MUSIXMATCH_URL = False
 ENABLE_LYRICS_COM_URL = False
 SPOTIFY_SUFFIX = ""
-LOAD_TRACKS_FREQUENCY      = 0
+LOAD_TRACKS_FREQUENCY = 0
 OVERRIDE_PLAYLIST_AT_START = False
-NOTIFY_PLAYLIST_DETECTED   = False
+NOTIFY_PLAYLIST_DETECTED = False
 ICON_SONG_MISSING_FROM_PLAYLIST = "*"
-#ICON_SONG_MISSING_FROM_PLAYLIST = "⏺" # white circle
-#ICON_SONG_MISSING_FROM_PLAYLIST = "⚠" # warning symbol
-# If playlist varies by more that this during refresh, assume there was an error
-MAX_PLAYLIST_DIFFERENTIAL  = 0
+MAX_PLAYLIST_DIFFERENTIAL = 0
 TOKEN_MAX_RETRIES = 0
 TOKEN_RETRY_TIMEOUT = 0.0
 TOTP_VERSION = 0
@@ -3570,16 +3590,56 @@ SCROBBLE_HEALTH_SESSION.mount("https://", scrobble_health_adapter)
 SCROBBLE_HEALTH_SESSION.mount("http://", scrobble_health_adapter)
 
 
-def build_dz_string(playlist_data):
+# ===========================================================================================
+# Monitored-playlist detection
+# ===========================================================================================
+# Spotify doesn't always report which playlist a friend's song came from (most notably its own
+# "smart shuffle" mixes). ADD_PLAYLISTS_TO_MONITOR (see its config comment above) lets a playlist
+# be tracked instead by matching songs against a user-supplied track list and counting consecutive
+# hits/misses. The state for that lives in monitored_playlists_data, a dict keyed by playlist name
+# whose per-playlist dict carries both static config (qty_start, qty_end, url, icon, override,
+# notify, refresh) and running counters (count_start, count_end, count_shuffle, tracks_set) -
+# see periodic_load_tracks_flexible() for how it's built and refreshed.
+#
+# Per friend being monitored (spotify_monitor_friend_uri()), two local variables track the
+# song-by-song match against that data: current_match (the playlist this song belongs to, if any)
+# and previous_match (the same, for the previous song) - both live references into
+# monitored_playlists_data, so mutating them updates the shared state directly. Comparing the two
+# is what detects a playlist switch. Alongside them, four strings - playlist_message,
+# playlist_screen_message, playlist_body_text, playlist_body_html - carry the current "detected" /
+# "cleared" status in the four shapes different outputs need (log line, screen-only line, email
+# text, email HTML); see reset_playlist_counts(), notify_playlist_detected/cleared() and
+# monitored_playlist_detected/cleared() below.
+#
+# The actual state machine (match -> is this a new playlist or a shuffle exception -> did a
+# threshold get crossed -> fire a notification) is inlined at three points inside
+# spotify_monitor_friend_uri(), because each runs in a different trigger context with genuinely
+# different behavior (see the comments at each site): a silent (no notifications) snapshot when a
+# friend is (re)acquired from the friends list ("LOOP A"), an ALT_VIEW-only immediate recheck right
+# after that, and the full state machine with real notifications on every actual track change
+# ("LOOP C", the steady-state path). resolve_playlist_match() and
+# is_playlist_already_monitored_by_name() below factor out the pieces that truly are identical
+# across those sites; the rest intentionally isn't unified further, since collapsing it would blur
+# real behavioral differences between the three call sites.
+# ===========================================================================================
+
+
+def build_playlist_status_message(playlist_data):
+    """One-line running-count status for a monitored playlist, e.g. "Playlist 'X' Count: 3 (1 via smart shuffle)".
+
+    Returns "" if the playlist hasn't reached 'qty_start' consecutive songs yet (nothing to show).
+    If count_overridden is set (find_song_in_playlists jump-started this playlist by name match),
+    the displayed count is shifted down by the injected head-start so it doesn't look inflated.
+    """
     name = playlist_data['name']
     count_start = playlist_data['count_start']
     count_shuffle = playlist_data['count_shuffle']
     shuffle_details = f"({count_shuffle} via smart shuffle)" if count_shuffle > 0 else ""
-    print_debug(f"BUILDING DZ -> name: {name}, count_start: {count_start}, count_shuffle: {count_shuffle}")
-    print_debug(f"BUILDING DZ -> shuffle_details: {shuffle_details}")
-    print_debug(f"BUILDING DZ -> override: {count_overridden}")
+    print_debug(f"BUILDING PLAYLIST STATUS -> name: {name}, count_start: {count_start}, count_shuffle: {count_shuffle}")
+    print_debug(f"BUILDING PLAYLIST STATUS -> shuffle_details: {shuffle_details}")
+    print_debug(f"BUILDING PLAYLIST STATUS -> override: {count_overridden}")
     if count_start < playlist_data['qty_start']:
-        print_debug(f"CLEARING DZ DUE TO START_CNT < QTY_CNT -> name: {name}, count_start: {count_start}, count_end: {playlist_data['qty_start']}")
+        print_debug(f"CLEARING PLAYLIST STATUS DUE TO START_CNT < QTY_CNT -> name: {name}, count_start: {count_start}, count_end: {playlist_data['qty_start']}")
         return ""
     if count_overridden:
         count_start -= (playlist_data['qty_start'] - 1)
@@ -3722,6 +3782,9 @@ DEFAULT_COLOR_THEME = {
     "count_up": "green",
     "count_down": "red",
     "link": "blue underline",
+    # ALT_VIEW only - see colorize_alt_view_line() below
+    "alt_view_heart": "bright_red",
+    "alt_view_timestamp": "bright_yellow",
     # Help screen
     "help_heading": "bright_cyan bold",
     "help_usage": "bright_white bold",
@@ -4154,9 +4217,12 @@ def apply_color_to_text(text):
         if chunk.endswith(("\n", "\r")):
             stripped = chunk.rstrip("\r\n")
             newline = chunk[len(stripped):]
-            parts.append(_colorize_line(stripped) + newline)
         else:
-            parts.append(_colorize_line(chunk))
+            stripped, newline = chunk, ""
+        # ALT_VIEW prints its own line shape that colorize_alt_view_line() below handles - see that
+        # function's own comment for why it's a completely separate rule set from _colorize_line().
+        colored = colorize_alt_view_line(stripped) if ALT_VIEW else None
+        parts.append((colored if colored is not None else _colorize_line(stripped)) + newline)
     return "".join(parts)
 
 
@@ -4168,6 +4234,94 @@ def colorize_links(text):
 # Colours one line of a fix block the way the output stream colours it, keeping its guide line a link
 def colorize_fix_line(line):
     return colorize_links(line) if line.lstrip().startswith("Guide: ") else colorize("info", line)
+
+
+# ============================================================================================
+# ALT_VIEW-only line colouring - deliberately kept in this one block, separate from every regex
+# and helper in _colorize_line() above (which matches the upstream project's own "Label:\tValue"
+# style output and is maintained independently of this JMK-specific view). ALT_VIEW instead prints
+# one compact line per song - "MM/DD, HH:MM:SS: <tag>, [NN] Track - Artist (Album) [Playlist]*" -
+# plus its own Detected/Cleared/notification banner lines, none of which match anything above, so
+# none of it needs touching to add, change, or remove a rule here. apply_color_to_text() calls
+# colorize_alt_view_line() first, only while ALT_VIEW is on, and falls back to _colorize_line() for
+# any line this doesn't recognize (None) - that one dispatch line above is the only place the two
+# rule sets meet.
+# ============================================================================================
+
+_ALT_VIEW_LINE_RE = re.compile(r"^(?P<prefix>\d{2}/\d{2}, \d{2}:\d{2}:\d{2}: [^,\n]*, )(?P<rest>.*)$")
+_ALT_VIEW_SONG_LINE_RE = re.compile(r"^\[(?P<offset>\d+)\] (?P<body>.*?)(?P<shuffle>\*)?$")
+_ALT_VIEW_TRAILING_PLAYLIST_RE = re.compile(r"^(?P<song>.*) \[(?P<playlist>[^\[\]]+)\]$")
+# TRUNCATE_CHARS cuts a line to the terminal width *before* this colouriser ever runs (Logger
+# truncates first, then colours - see Logger.write()/terminal_only()), so on a narrow or
+# split-screen terminal a playlist tag right at the edge often arrives with its closing "]"
+# already cut off. Without this, _ALT_VIEW_TRAILING_PLAYLIST_RE's required "]$" fails to match and
+# the whole tag falls back to plain, uncoloured text - exactly the moment a user running a narrow
+# terminal is most likely to actually be looking at that edge. This matches the same shape without
+# requiring the closing bracket, so whatever fragment of the name is still visible still gets
+# coloured; it never touches or needs to know about Logger's own truncation logic.
+_ALT_VIEW_TRUNCATED_PLAYLIST_RE = re.compile(r"^(?P<song>.*) \[(?P<playlist>[^\[\]]*)$")
+_ALT_VIEW_DETECTED_RE = re.compile(r"^(?:\[\d+\] )?\*\*\* Playlist '(?P<name>[^']+)' Detected$")
+_ALT_VIEW_CLEARED_RE = re.compile(r"^(?:\[\d+\] )?\*\*\* Playlist '(?P<name>[^']+)' Cleared")
+_ALT_VIEW_NOTIFICATION_RE = re.compile(r"^\*\*\* (?:Start|End) notification sent$")
+# A monitored playlist's own custom icon (e.g. the ' ♥' heart used for Discovery Zone-style
+# playlists) is always coloured red here, regardless of whatever colour the surrounding track text
+# gets - this is what makes a detected playlist's heart "pop" without embedding raw ANSI escape
+# codes into the plain icon string in .conf, which would leak into emails/notifications/the log
+# file too, since songstring() builds all of those from that same string.
+_ALT_VIEW_HEART_RE = re.compile("[♡♥]")
+
+
+def _colorize_alt_view_song_body(text):
+    """Colours the "Track - Artist (Album)" part of an ALT_VIEW song line - left uncoloured (plain)
+    apart from any heart-shaped playlist icon, which is always forced red."""
+    return _ALT_VIEW_HEART_RE.sub(lambda mo: colorize("alt_view_heart", mo.group(0)), text)
+
+
+def colorize_alt_view_line(line):
+    """Colours one ALT_VIEW console line. Returns None if `line` isn't shaped like one of ALT_VIEW's
+    own lines, so the caller falls back to the normal-view colouriser."""
+    match = _ALT_VIEW_LINE_RE.match(line)
+    if not match:
+        return None
+    prefix = colorize("alt_view_timestamp", match.group("prefix"))
+    rest = match.group("rest")
+
+    detected_match = _ALT_VIEW_DETECTED_RE.match(rest)
+    if detected_match:
+        name = colorize("playlist", detected_match.group("name"))
+        inner = rest[:detected_match.start("name")] + name + rest[detected_match.end("name"):]
+        return prefix + _apply_style_nested(inner, "status_active")
+
+    cleared_match = _ALT_VIEW_CLEARED_RE.match(rest)
+    if cleared_match:
+        name = colorize("playlist", cleared_match.group("name"))
+        inner = rest[:cleared_match.start("name")] + name + rest[cleared_match.end("name"):]
+        return prefix + _apply_style_nested(inner, "status_inactive")
+
+    if _ALT_VIEW_NOTIFICATION_RE.match(rest):
+        return prefix + _apply_style_nested(rest, "info")
+
+    song_match = _ALT_VIEW_SONG_LINE_RE.match(rest)
+    if not song_match:
+        return None
+
+    offset, body, shuffle = song_match.group("offset"), song_match.group("body"), song_match.group("shuffle")
+    full_match = _ALT_VIEW_TRAILING_PLAYLIST_RE.match(body)
+    truncated_match = None if full_match else _ALT_VIEW_TRUNCATED_PLAYLIST_RE.match(body)
+    if full_match:
+        song_part = _colorize_alt_view_song_body(full_match.group("song"))
+        playlist_part = f" [{colorize('playlist', full_match.group('playlist'))}]"
+    elif truncated_match:
+        # No closing "]" here since the raw line didn't have one either - adding one would make the
+        # coloured line one character longer than what Logger actually truncated it to.
+        song_part = _colorize_alt_view_song_body(truncated_match.group("song"))
+        playlist_part = f" [{colorize('playlist', truncated_match.group('playlist'))}"
+    else:
+        song_part = _colorize_alt_view_song_body(body)
+        playlist_part = ""
+    shuffle_part = colorize("warning", shuffle) if shuffle else ""
+
+    return f"{prefix}[{offset}] {song_part}{playlist_part}{shuffle_part}"
 
 
 # Returns the underlying terminal behind any number of sanitizing stream wrappers
@@ -4339,7 +4493,6 @@ def deliver_jmk_ntfy(notification_type, message, image_url, track, artist, album
 # END: [00]: Nobody But You (Duet with Gwen Stefani) - Blake Shelton (Fully Loaded: God's Country) [Discovery zone], Song Count: 1
 # f"{sp_track.strip()} - {sp_artist.strip()} ({sp_album.strip()}) [{sp_playlist.strip()}]{iconstring()}"
 # send_notification(f"END: [{time_diff_str()}]: {songstring()}, Song Count: {listened_songs}", sp_album_image_url)
-# send_notification(dz_message, "", track, artist, album, playlist, "", notify_playlist['count_start'])
 
     priority_kel      = 1
     priority_kel_lo   = 1
@@ -4520,7 +4673,23 @@ def search_playlist(access_token, search_playlist_name, search_playlist_uri, sea
     return found_track
 
 
-def find_song_in_playlists(song_name: str, current_playlist, playlist_name):
+def find_song_in_playlists(song_name: str, previous_match, playlist_name):
+    """Resolve which monitored playlist (if any) the current song belongs to.
+
+    Checked in priority order:
+      (A) Spotify itself reports a playlist name that matches a monitored one exactly. This is
+          trusted immediately: if that playlist wasn't already about to be detected (count_start
+          within one song of qty_start), its count is jump-started to qty_start - 1 (so the very
+          next increment crosses the threshold) and 'previous_match', if any, is force-closed by
+          setting its count_end to qty_end. Sets global count_overridden so the displayed count
+          in build_playlist_status_message() accounts for the jump-start.
+      (B) The song is in 'previous_match's own track list - stick with it for continuity (keeps a
+          playlist "active" across a smart-shuffle song that Spotify doesn't attribute to it).
+      (C) Fall back to scanning every monitored playlist's track list for the song.
+
+    Returns the matched playlist's dict (a live reference into monitored_playlists_data, so the
+    caller's mutations persist) or False if the song isn't in any monitored playlist.
+    """
     global count_overridden
     song_name_upper = song_name.upper() # Convert to uppercase for case-insensitive comparison
 
@@ -4533,24 +4702,24 @@ def find_song_in_playlists(song_name: str, current_playlist, playlist_name):
             print_debug(f"*** ACTUAL PLAYLIST NAME MATCH!!! (A) *** : {playlist_name} = {playlist_data.get('name', 'MissingB')}, {playlist_data['count_start']}, {playlist_data['qty_start']}")
             if playlist_data['count_start'] < (playlist_data['qty_start'] - 1):
                 print_debug(f"*** OVERRIDE COUNT - START NEW PL (A1): from {playlist_data['count_start']} to {playlist_data['qty_start'] - 1}")
-                if current_playlist:
-                    print_debug(f"*** OVERRIDE COUNT - END LAST PL  (A2): from {current_playlist['count_end']} to {current_playlist['qty_end']}")
+                if previous_match:
+                    print_debug(f"*** OVERRIDE COUNT - END LAST PL  (A2): from {previous_match['count_end']} to {previous_match['qty_end']}")
                 else:
-                    print_debug(f"*** OVERRIDE COUNT END SKIPPED - CURRENT PLAYLIST IS FALSE - (A3): {current_playlist}")
+                    print_debug(f"*** OVERRIDE COUNT END SKIPPED - CURRENT PLAYLIST IS FALSE - (A3): {previous_match}")
                 playlist_data['count_start'] = playlist_data['qty_start'] - 1 # gets incremented after return
                 count_overridden = True
-                if current_playlist:
-                    current_playlist['count_end'] = current_playlist['qty_end']
+                if previous_match:
+                    previous_match['count_end'] = previous_match['qty_end']
             return playlist_data
 
     # 2. Check existing playlist for continuity in case track is in multiple monitored playlists
-    if current_playlist:
+    if previous_match:
         print_debug(f"FIND_SONG_IN_PLAYLIST - EXISTING PLAYLIST (B) -> {playlist_name}, {song_name}")
-        tracks_set = current_playlist.get('tracks_set', False)
+        tracks_set = previous_match.get('tracks_set', False)
         if tracks_set and isinstance(tracks_set, set):
             if song_name_upper in tracks_set:
-                print_debug(f"EXISTING PLAYLIST PRIORITY MATCHED!!! (B) : {current_playlist.get('name', 'Missing')}, {song_name}")
-                return current_playlist
+                print_debug(f"EXISTING PLAYLIST PRIORITY MATCHED!!! (B) : {previous_match.get('name', 'Missing')}, {song_name}")
+                return previous_match
 
     # 3. Search for new playlist match
     print_debug(f"FIND_SONG_IN_PLAYLIST - NEW PLAYLIST (C) -> {playlist_name}, {song_name}")
@@ -4564,7 +4733,380 @@ def find_song_in_playlists(song_name: str, current_playlist, playlist_name):
     return False # Song not found in any playlist
 
 
+def is_playlist_already_monitored_by_name(reported_playlist_name, monitored_playlists_data):
+    """True if Spotify's reported playlist name exactly matches one we already monitor by name.
+
+    Used to downgrade a search_playlist() 'hasTrack' hit: if the reported playlist IS a monitored
+    one, its membership should be settled by our own track-list/count logic (find_song_in_playlists
+    and friends), not by treating Spotify's report as authoritative.
+    """
+    return any(
+        reported_playlist_name and reported_playlist_name.upper() == playlist_data.get('name', "B").upper()
+        for playlist_data in monitored_playlists_data.values()
+    )
+
+
+def is_song_in_any_monitored_playlist(song_name):
+    """True if "Artist - Track" appears in any monitored playlist's own track list.
+
+    A second way to downgrade a search_playlist() 'hasTrack' hit, alongside
+    is_playlist_already_monitored_by_name(): a song can genuinely belong both to the playlist
+    Spotify reports as the current context AND to a separately-tracked monitored playlist (e.g. a
+    friend's own playlist that happens to include songs also saved to a monitored list) - so a
+    confirmed match against the *reported* playlist must not disqualify the song from also being
+    counted against a monitored playlist it's actually on.
+    """
+    song_name_upper = song_name.upper()
+    return any(
+        isinstance(playlist_data.get('tracks_set', False), set) and song_name_upper in playlist_data['tracks_set']
+        for playlist_data in monitored_playlists_data.values()
+    )
+
+
+def compute_has_track(access_token, sp_playlist, sp_playlist_uri, sp_playlist_owner, sp_track_uri_id, sp_track, sp_artist):
+    """True if the song genuinely belongs to the playlist Spotify is reporting as current context,
+    AND that isn't something PlaylistTracker.advance() should decide instead.
+
+    Spotify-owned playlists (sp_playlist_owner == "Spotify", e.g. algorithmic ones like Discover
+    Weekly) are trusted without a live lookup; anything else is confirmed via a real
+    search_playlist() call. Either way, that confirmation is downgraded back to False - handing the
+    song to advance()'s own track-list/count logic instead - when the reported playlist IS a
+    monitored one by name, or the song is on some monitored playlist's own track list even though
+    Spotify is reporting a different, unrelated playlist as context right now (see
+    is_playlist_already_monitored_by_name() and is_song_in_any_monitored_playlist()).
+    """
+    has_track = (sp_playlist_owner == "Spotify") or search_playlist(access_token, sp_playlist, sp_playlist_uri, sp_track_uri_id, sp_track, sp_artist, False)
+    print_debug(f"hasTrack: {has_track}, sp_playlist_owner: {sp_playlist_owner}, sp_playlist: {sp_playlist}")
+    if has_track and (is_playlist_already_monitored_by_name(sp_playlist, monitored_playlists_data) or is_song_in_any_monitored_playlist(f"{sp_artist} - {sp_track}")):
+        has_track = False
+        print_debug(f"hasTrack downgraded - song is on a monitored playlist: {sp_playlist}")
+    return has_track
+
+
+class PlaylistTracker:
+    """Tracks which monitored playlist (if any) is the "current" one for one friend, across songs.
+
+    `current` / `previous`: live references into monitored_playlists_data for the playlist the
+    current/previous song matched, or None. Each playlist dict carries both static config
+    (qty_start, qty_end, url, icon, override, notify, refresh - from ADD_PLAYLISTS_TO_MONITOR) and
+    running counters (count_start, count_end, count_shuffle - see reset_counts()).
+
+    `message` / `screen_message` / `body_text` / `body_html`: the "detected"/"cleared" status text
+    for the current song, in the four shapes different outputs need: a plain line for logging, a
+    screen-only line, and text/HTML fragments for the email body.
+    """
+
+    def __init__(self, on_reset=None):
+        """on_reset: called every time reset_counts() runs, e.g. to clear a caller-owned display flag."""
+        self.current = None
+        self.previous = None
+        self.message = ""
+        self.screen_message = ""
+        self.body_text = ""
+        self.body_html = ""
+        # Set by _emit_screen_message() when advance() is called with defer_screen_message=True -
+        # see that method's docstring.
+        self.pending_screen_message = ""
+        self._on_reset = on_reset or (lambda: None)
+
+    def _emit_screen_message(self, alt_view, defer_screen_message):
+        """Shows self.screen_message right away - a later reset_counts() call within this same
+        advance() invocation would otherwise wipe it before the caller ever sees it, the same
+        problem eager-printing elsewhere in this method already solves - unless
+        defer_screen_message is set, in which case it's stashed in pending_screen_message instead
+        for the caller to show at the right moment itself (e.g. this song turned out to be the
+        first one after the friend resumed from offline, and "Start notification sent" for that new
+        session hasn't printed yet - showing this message immediately would print it first)."""
+        if not (alt_view and self.screen_message):
+            return
+        if defer_screen_message:
+            self.pending_screen_message = self.screen_message
+        else:
+            print_to_screen(self.screen_message)
+        self.screen_message = ""
+
+    def reset_counts(self, protect_name=""):
+        """Zero every monitored playlist's counters and clear the pending status-message strings.
+
+        If protect_name names a playlist, that one keeps its count_start/count_shuffle (only
+        count_end is cleared) so a playlist that's mid-detection or mid-count doesn't lose its
+        progress just because every *other* playlist is being reset around it.
+        """
+        self._on_reset()
+        self.message = ""
+        self.screen_message = ""
+        self.body_text = ""
+        self.body_html = ""
+        for playlist_name, playlist_data in monitored_playlists_data.items():
+            print_debug(f"-- CHECKING PLAYLIST {playlist_name}")
+            if playlist_name == protect_name:
+                playlist_data['count_end'] = 0
+                print_debug(f"-- PROTECTED PLAYLIST COUNTS (start: {playlist_data['count_start']}, end: {playlist_data['count_end']}, shuffle: {playlist_data['count_shuffle']}) -> {playlist_name}")
+            else:
+                playlist_data['count_start'] = 0
+                playlist_data['count_end'] = 0
+                playlist_data['count_shuffle'] = 0
+                print_debug(f"-- UNPROTECTED PLAYLIST COUNTS (start: {playlist_data['count_start']}, end: {playlist_data['count_end']}, shuffle: {playlist_data['count_shuffle']}) -> {playlist_name}")
+
+    def advance(self, song_key, reported_name, has_track, *, notify, active_user_ok, apply_override,
+                alt_view, on_detected, songstr, timediff, sp_track, sp_artist, sp_album,
+                defer_screen_message=False):
+        """Resolve one observed song against monitored playlists and update counts/messages.
+
+        This is the whole algorithm: match the song (by Spotify's own reported playlist name, by
+        staying on the previously-tracked playlist, or by scanning every monitored playlist's track
+        list - see find_song_in_playlists()); count consecutive hits/misses; and cross a detection
+        or clearing threshold when enough of them line up in a row. It runs once per observed song,
+        from two call sites with different privileges (see the `notify`/`active_user_ok`/
+        `apply_override` parameters below) - everywhere else that touches playlist
+        state is a read of what this method already decided, not a second copy of the algorithm.
+
+        notify: whether this call site may fire real notifications at all. False for the silent,
+            first-sample-of-a-session pass (nothing has been observed transitioning yet, so a
+            playlist that's already mid-run when we start watching is "assumed", not "detected");
+            True for the steady-state, per-track-change pass.
+        active_user_ok: whether the friend looks currently active enough to fire a fresh "detected"
+            notification, vs. just updating the status text silently.
+        apply_override: whether to honor a playlist's 'override' setting, which jump-starts its
+            count on first match instead of waiting for qty_start in a row. Only meaningful (and
+            only ever set True) on the first match of a session.
+        alt_view: whether to also print each "cleared"/"detected" screen line immediately, at the
+            moment it's built - reset_counts() clears self.screen_message again right after every
+            "cleared" call in this method, so without printing it eagerly it would never reach the
+            screen.
+        defer_screen_message: instead of printing eagerly (when alt_view is set), stash a "cleared"
+            message in self.pending_screen_message for the caller to show itself (has no effect on
+            "detected" messages, which are never deferred - see the exception-branch "detected" site
+            below for why). Set this when the caller already knows a "Start notification sent" banner
+            for a brand new session is about to print for this exact song (the friend just resumed
+            from being offline) but hasn't printed yet - eager-printing here would otherwise show the
+            cleared line before that banner, as if it belonged to the session that just ended rather
+            than the new one.
+        on_detected: zero-arg callback invoked exactly when a playlist first crosses its detection
+            threshold, before the "detected" notification's text is built. The caller uses it to
+            apply its own display-side updates (is_playlist, sp_playlist, sp_track + icon, ...) -
+            which the notification text (via songstring()) needs to already reflect - and must
+            return the (possibly icon-appended) sp_track and freshly-built songstr to use in the
+            notification. Only ever called when notify=True; pass a harmless no-op otherwise.
+
+        Returns "matched" (song is on the current, confirmed-detected playlist), "shuffle" (song is
+        a tolerated off-list exception of an already-confirmed playlist - e.g. a smart-shuffle
+        insert), or "none" (song isn't attributable to any monitored playlist right now).
+        """
+        global count_overridden
+        self.screen_message = ""
+        self.previous = self.current
+
+        if has_track:
+            # Spotify itself confirmed this song belongs to a genuinely different, non-monitored
+            # playlist - treat that exactly like any other off-list song (fall through to the
+            # ordinary miss-counting logic below) rather than instantly clearing self.previous:
+            # a playlist a friend is still otherwise tracking shouldn't lose its detected status
+            # over one song just because Spotify happens to also confirm it elsewhere - it should
+            # cost this playlist one miss toward qty_end, same as an unconfirmed off-list song.
+            print_debug(f"SKIPPED FIND_SONG_IN_PLAYLIST -> hasTrack: {has_track}")
+            self.current = None
+        else:
+            self.current = find_song_in_playlists(song_key, self.current, reported_name)
+
+        # If this song matched a *different* monitored playlist than the one we were tracking,
+        # that's either the start of a real switch, or - if the old one hasn't used up its miss
+        # tolerance yet - just an exception to keep counting against the old one.
+        if self.current and self.previous and (self.current.get('name', 'A') != self.previous.get('name', 'B')):
+            if self.previous['count_end'] >= self.previous['qty_end']:
+                switching = True
+                print_debug(f"SPECIAL CASE: SONG IN ANOTHER MONITORED PLAYLIST, AT EXCEPTION LIMIT FOR CURRENT - old: {self.previous.get('name', 'A')} new: {self.current.get('name', 'A')}")
+                # This checks count_start >= qty_start rather than already_active: self.previous is
+                # about to be reset regardless, so an already_active-gated miss here would silently
+                # drop the announcement forever, and notify_playlist_cleared() itself never checks
+                # whether the playlist was actually detected in the first place.
+                if notify and self.previous['count_start'] >= self.previous['qty_start']:
+                    self.message, self.screen_message = monitored_playlist_cleared(
+                        self.previous, songstr, timediff, sp_track, sp_artist, sp_album)
+                    # reset_counts() below clears self.screen_message again right after this - show
+                    # it now, before that happens (see _emit_screen_message's own docstring).
+                    self._emit_screen_message(alt_view, defer_screen_message)
+                self.reset_counts(self.current['name'])
+                count_overridden = False
+            else:
+                print_debug("SPECIAL CASE: SONG EXCEPTION BUT IN ANOTHER MONITORED PLAYLIST")
+                switching = False
+        else:
+            switching = True
+
+        if self.current and switching:
+            print_debug(f"FOUND PLAYLIST IN MONITORING LIST -> {self.current['name']}")
+            print_debug(f"COUNT START: {self.current['count_start']}, {self.current['qty_start']}")
+            self.reset_counts(self.current['name'])
+            self.current['count_start'] += 1
+            if apply_override and self.current.get('override', OVERRIDE_PLAYLIST_AT_START):
+                print_debug(f"OVERRIDE COUNT: from {self.current['count_start']} to {self.current['qty_start']}")
+                if self.current['count_start'] < self.current['qty_start']:
+                    self.current['count_start'] = self.current['qty_start']
+                    count_overridden = True
+            if notify and active_user_ok and self.current['count_start'] == self.current['qty_start']:
+                print_debug(f"PLAYLIST_DETECTED: {self.current['count_start']}, {self.current['qty_start']}")
+                detected_sp_track, detected_songstr = on_detected()
+                self.body_text, self.body_html, self.message, self.screen_message = monitored_playlist_detected(
+                    self.current, detected_songstr, timediff, False, detected_sp_track, sp_artist, sp_album)
+            else:
+                self.message = build_playlist_status_message(self.current)
+                self.body_text = self.message + "\n"
+                self.body_html = self.message + "<br>"
+            return "matched" if self.current['count_start'] >= self.current['qty_start'] else "none"
+
+        # Playlist not (newly) matched, or an exception to the one we were already tracking.
+        if self.previous:
+            print_debug(f"COUNT END - {self.previous['name']}: {self.previous['count_end']}")
+            self.previous['count_end'] += 1
+            current_just_detected = False
+            if self.current:
+                self.current['count_start'] += 1
+                print_debug(f"COUNT START + 1 - {self.current['name']}: {self.current['count_start']}")
+                # This increment can itself cross count_start's own qty_start threshold - e.g. a
+                # song matches a DIFFERENT monitored playlist (self.current) by name while the one
+                # we were tracking (self.previous) hasn't exhausted its own miss tolerance yet, so
+                # it's treated as an exception rather than a hard switch. Without this check, that
+                # crossing went completely unannounced: self.current kept accumulating past
+                # qty_start silently, and the next ordinary match saw a count already past
+                # threshold (count_start != qty_start), so it never built "Detected" either - the
+                # playlist quietly became "matched" (tagged, iconed) with no Detected notification
+                # ever having fired.
+                if notify and active_user_ok and self.current['count_start'] == self.current['qty_start']:
+                    print_debug(f"PLAYLIST_DETECTED (exception): {self.current['count_start']}, {self.current['qty_start']}")
+                    detected_sp_track, detected_songstr = on_detected()
+                    self.body_text, self.body_html, self.message, self.screen_message = monitored_playlist_detected(
+                        self.current, detected_songstr, timediff, False, detected_sp_track, sp_artist, sp_album)
+                    # self.previous's own clearing check just below can overwrite self.screen_message
+                    # with a "Cleared" message in this same call - show this one now so it isn't
+                    # silently lost. Never deferred (regardless of defer_screen_message): the
+                    # "friend resumed" recheck below only ever rebuilds a "Detected" message itself,
+                    # so there's nothing there that could double-announce this one - unlike the two
+                    # "Cleared" sites, which the recheck can never rebuild. Accepted tradeoff: on the
+                    # rare resumed-session song that hits this exact exception branch, this still
+                    # prints immediately (structurally before "Start notification sent"), same as
+                    # before defer_screen_message existed - deliberately not fixed here, since doing
+                    # so would need its own guard against double-announcing with the recheck below.
+                    self._emit_screen_message(alt_view, defer_screen_message=False)
+                    current_just_detected = True
+            if self.previous['count_end'] >= self.previous['qty_end']:
+                if notify and self.previous['count_start'] >= self.previous['qty_start']:
+                    self.message, self.screen_message = monitored_playlist_cleared(
+                        self.previous, songstr, timediff, sp_track, sp_artist, sp_album)
+                    # reset_counts() below clears self.screen_message again right after this - show
+                    # it now, before that happens (see _emit_screen_message's own docstring).
+                    self._emit_screen_message(alt_view, defer_screen_message)
+                self.reset_counts(self.current['name'] if self.current else "")
+                count_overridden = False
+                return "matched" if current_just_detected else "none"
+            # Haven't hit the limit yet to consider the playlist over - keep tracking it through
+            # this exception, but only if it was already confirmed (crossed its detection
+            # threshold) before the miss; an unconfirmed playlist gets no such benefit of the doubt.
+            if self.previous['count_start'] >= self.previous['qty_start']:
+                self.current = self.previous
+                self.current['count_shuffle'] += 1
+                print_debug(f"HAVEN'T HIT LIMIT TO DISCONTINUE PLAYLIST -> {self.current['name']}")
+                return "matched" if current_just_detected else "shuffle"
+            print_debug(f"SPECIAL CASE: PLAYLIST FOUND BUT PREVIOUS ONE WAS STILL COUNTING UP -> {self.previous['name']}")
+            return "matched" if current_just_detected else "none"
+
+        self.reset_counts()
+        count_overridden = False
+        return "none"
+
+
+REQUIRED_PLAYLIST_CONFIG_FIELDS = ("name", "filename", "qty_start", "qty_end")
+OPTIONAL_PLAYLIST_CONFIG_FIELDS = ("url", "icon", "override", "notify", "refresh")
+_MAX_SANE_REFRESH_SECONDS = 30 * 24 * 60 * 60  # 30 days - a reload interval past this is almost certainly a typo
+
+
+def validate_add_playlists_to_monitor(playlists):
+    """Check every ADD_PLAYLISTS_TO_MONITOR entry's shape and values before anything else uses it.
+
+    Catches the kind of config mistake (wrong type, missing field, nonsensical number) that would
+    otherwise surface much later as a confusing KeyError/TypeError deep inside the detection logic,
+    or as a playlist that silently never detects/clears/reloads the way its numbers look like they
+    should. A malformed entry is dropped (with a clear error printed) rather than crashing the
+    whole process, so a typo in one playlist doesn't take monitoring of the others down with it;
+    a name reused across entries is also dropped, since 'name' doubles as monitored_playlists_data's
+    key and a duplicate would silently overwrite the earlier entry's state.
+
+    Returns the subset of `playlists` that passed validation, preserving their original order.
+    """
+    valid_playlists = []
+    seen_names = set()
+
+    for index, playlist in enumerate(playlists):
+        label = f"ADD_PLAYLISTS_TO_MONITOR[{index}]"
+        errors = []
+
+        if not isinstance(playlist, dict):
+            print_to_both(f"*** ERROR: {label} must be a dict, got {type(playlist).__name__} - skipping this entry")
+            continue
+
+        name = playlist.get("name")
+        if not isinstance(name, str) or not name.strip():
+            errors.append("'name' must be a non-empty string")
+        else:
+            label = f"{label} ('{name}')"
+            if name in seen_names:
+                errors.append(f"duplicate playlist name '{name}' - names must be unique, since 'name' is used as the tracking key")
+
+        filename = playlist.get("filename")
+        if not isinstance(filename, str) or not filename.strip():
+            errors.append("'filename' must be a non-empty string")
+
+        for key in ("qty_start", "qty_end"):
+            value = playlist.get(key)
+            if not isinstance(value, int) or isinstance(value, bool):
+                errors.append(f"'{key}' must be an integer, got {value!r}")
+            elif value < 1:
+                errors.append(f"'{key}' must be at least 1 (got {value}) - 0 or negative can never be satisfied")
+
+        for key in ("override", "notify"):
+            if key in playlist and not isinstance(playlist[key], bool):
+                errors.append(f"'{key}' must be True or False, got {type(playlist[key]).__name__}")
+
+        if "refresh" in playlist:
+            refresh = playlist["refresh"]
+            if isinstance(refresh, bool) or not isinstance(refresh, (int, float)):
+                errors.append(f"'refresh' must be a number of seconds, got {type(refresh).__name__}")
+            elif refresh < 0:
+                errors.append(f"'refresh' must be 0 or positive (0 disables reloading), got {refresh}")
+            elif refresh > _MAX_SANE_REFRESH_SECONDS:
+                errors.append(f"'refresh' of {refresh}s is over 30 days - almost certainly a typo (did you mean seconds, not some other unit?)")
+
+        for key in ("url", "icon"):
+            if key in playlist and not isinstance(playlist[key], str):
+                errors.append(f"'{key}' must be a string, got {type(playlist[key]).__name__}")
+
+        unknown_keys = set(playlist) - set(REQUIRED_PLAYLIST_CONFIG_FIELDS) - set(OPTIONAL_PLAYLIST_CONFIG_FIELDS)
+        if unknown_keys:
+            print_debug(f"{label}: ignoring unrecognized key(s): {sorted(unknown_keys)}")
+
+        if errors:
+            for error in errors:
+                print_to_both(f"*** ERROR: {label}: {error}")
+            print_to_both(f"*** ERROR: {label}: not monitored due to the error(s) above")
+            continue
+
+        seen_names.add(name)
+        valid_playlists.append(playlist)
+
+    return valid_playlists
+
+
 def periodic_load_tracks_flexible(playlist_info):
+    """Load (and keep reloading) one ADD_PLAYLISTS_TO_MONITOR entry's track list into monitored_playlists_data.
+
+    On first call for a given playlist name, seeds monitored_playlists_data[name] from a copy of
+    playlist_info plus a fresh 'tracks_set' and count_start/count_end/count_shuffle all at 0. Every
+    call re-reads playlist_info['filename'] from disk; if the track count changed by more than
+    MAX_PLAYLIST_DIFFERENTIAL after startup, the reload is treated as suspect and skipped (the old
+    track list is kept) rather than replacing tracks_set. Self-reschedules via threading.Timer at
+    playlist_info['refresh'] (falling back to LOAD_TRACKS_FREQUENCY) seconds; refresh <= 0 disables
+    reloading after this initial load.
+    """
     playlist_name = playlist_info['name']
     filename = playlist_info['filename']
     # Use the 'refresh' key from playlist_info, or fall back to a default
@@ -5317,6 +5859,25 @@ def send_spreadsheet_recovery_alert():
         send_notification("sheet", f"spotify_monitor: Google Sheet (tab '{ERR_CODE}') caught up")
 
 
+# Alerts (email/ntfy, gated on ERROR_NOTIFICATION) that spotify_monitor is about to block waiting
+# for interactive Google Sheets OAuth consent on the machine it's running on. Shared by the
+# proactive startup check below and by sheets_helper's on_reauth_required callback (passed into
+# drain_spreadsheet_queue_at_startup()/update_spreadsheet_row()'s sheets_helper calls) - the
+# proactive check only catches a token that's already dead *before* the run starts; a refresh
+# token can just as easily die mid-run (e.g. revoked, or Google expiring it after months of
+# inactivity), and without this callback that case fell straight into sheets_helper's blocking
+# flow.run_local_server() with zero alerting - exactly the "waiting in the log with no idea it was
+# waiting" gap this closes.
+def alert_sheets_reauth_required():
+    print(f"* Google Sheets authorization needed for tab '{ERR_CODE}' - opening browser for consent...")
+    if ERROR_NOTIFICATION:
+        reauth_subject = f"spotify_monitor: Google Sheets re-authorization needed (tab '{ERR_CODE}')"
+        reauth_body = f"The cached Google Sheets token for tab '{ERR_CODE}' is no longer valid and needs to be re-authorized. spotify_monitor is opening a browser consent window now on the machine it's running on and will wait there until it's completed.{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+        reauth_body_html = f"<html><head></head><body>The cached Google Sheets token for tab '{escape(ERR_CODE)}' is no longer valid and needs to be re-authorized. spotify_monitor is opening a browser consent window now on the machine it's running on and will wait there until it's completed.{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
+        send_email(reauth_subject, reauth_body, reauth_body_html, SMTP_SSL)
+        send_notification("sheet", f"spotify_monitor: Google Sheets re-authorization needed (tab '{ERR_CODE}') - complete the browser consent on the host machine")
+
+
 # Drains any rows left queued by a previous run's write failures, before the main loop starts,
 # instead of waiting for the next real song/event to trigger a retry. Called once at startup.
 def drain_spreadsheet_queue_at_startup():
@@ -5329,7 +5890,7 @@ def drain_spreadsheet_queue_at_startup():
         return
 
     print(f"* Retrying queued Google Sheet rows for tab '{ERR_CODE}'...")
-    drained, drain_error = sheets_helper.drain_queue_at_startup(SPREADSHEET_ID, ERR_CODE, ERR_CODE, GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE)
+    drained, drain_error = sheets_helper.drain_queue_at_startup(SPREADSHEET_ID, ERR_CODE, ERR_CODE, GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE, on_reauth_required=alert_sheets_reauth_required)
     if drained:
         send_spreadsheet_recovery_alert()
     else:
@@ -5348,7 +5909,7 @@ def update_spreadsheet_row(col_b_text, want_footer):
     # full timestamp here too would be redundant and renders differently (date+time) than the
     # existing rows above it.
     row_ts = datetime.now().strftime("%Y-%m-%d")
-    success, entered_error, recovered, error_message = sheets_helper.update_spreadsheet(ERR_CODE, SPREADSHEET_ID, ERR_CODE, [row_ts, col_b_text], GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE)
+    success, entered_error, recovered, error_message = sheets_helper.update_spreadsheet(ERR_CODE, SPREADSHEET_ID, ERR_CODE, [row_ts, col_b_text], GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE, on_reauth_required=alert_sheets_reauth_required)
 
     if entered_error:
         print(f"* Error: failed to update Google Sheet (tab '{ERR_CODE}') - row queued for retry ({error_message})")
@@ -12413,39 +12974,58 @@ def run_setup_wizard(initial_target: Optional[str] = None, config_file=None, env
 
 
 def notify_playlist_detected(notify_playlist, songstr, timediff, track, artist, album):
-    dz_msg_screen = f"{timestring()}: {ERR_CODE}, [{timediff}] *** Playlist '{notify_playlist['name']}' Detected"
+    """Fire the "playlist detected" email/spreadsheet/push notification, gated on the playlist's 'notify' setting.
+
+    Always returns a screen-only status line ("*** Playlist 'X' Detected"). The alert text sent to
+    email/push (a separate, slightly different string) is only built and sent when
+    notify_playlist.get('notify', NOTIFY_PLAYLIST_DETECTED) is True.
+    """
+    playlist_screen_message = f"{timestring()}: {ERR_CODE}, [{timediff}] *** Playlist '{notify_playlist['name']}' Detected"
     if notify_playlist.get('notify', NOTIFY_PLAYLIST_DETECTED):
         update_spreadsheet_row(f"----------------- {notify_playlist['name']} Detected -----", False)
         send_email(f"{GMAIL_TAG}----------------- {notify_playlist['name']} Detected -----", "  ", "  ", SMTP_SSL)
-        dz_message = f"*** Playlist '{notify_playlist['name']}' Detected: {songstr}"
-        send_notification("detected", dz_message, "", track, artist, album, notify_playlist['name'], "", 0)
-    return dz_msg_screen
+        playlist_message = f"*** Playlist '{notify_playlist['name']}' Detected: {songstr}"
+        send_notification("detected", playlist_message, "", track, artist, album, notify_playlist['name'], "", 0)
+    return playlist_screen_message
 
 
 def notify_playlist_cleared(notify_playlist, songstr, timediff, track, artist, album):
-    dz_message = f"*** Playlist '{notify_playlist['name']}' Cleared: {songstr} - Song Count: {notify_playlist['count_start']}"
-    dz_msg_screen = f"{timestring()}: {ERR_CODE}, [{timediff}] *** Playlist '{notify_playlist['name']}' Cleared, Song Count: {notify_playlist['count_start']}"
+    """Fire the "playlist cleared" notification and return (playlist_message, playlist_screen_message).
+
+    Unlike notify_playlist_detected(), both strings are built unconditionally; only the actual
+    email/spreadsheet/push send is gated on notify_playlist.get('notify', NOTIFY_PLAYLIST_DETECTED).
+    """
+    playlist_message = f"*** Playlist '{notify_playlist['name']}' Cleared: {songstr} - Song Count: {notify_playlist['count_start']}"
+    playlist_screen_message = f"{timestring()}: {ERR_CODE}, [{timediff}] *** Playlist '{notify_playlist['name']}' Cleared, Song Count: {notify_playlist['count_start']}"
     if notify_playlist.get('notify', NOTIFY_PLAYLIST_DETECTED):
         update_spreadsheet_row(f"----------------- {notify_playlist['name']} Cleared -----", False)
         send_email(f"{GMAIL_TAG}----------------- {notify_playlist['name']} Cleared -----", "  ", "  ", SMTP_SSL)
-        send_notification("cleared", dz_message, "", track, artist, album, notify_playlist['name'], "", notify_playlist['count_start'])
-    return dz_message, dz_msg_screen
+        send_notification("cleared", playlist_message, "", track, artist, album, notify_playlist['name'], "", notify_playlist['count_start'])
+    return playlist_message, playlist_screen_message
 
 
 def monitored_playlist_detected(detected_playlist, songstr, timediff, print_msg, track="", artist="", album=""):
-    msg = build_dz_string(detected_playlist)
+    """Build the full message set for a just-detected playlist: (body_text, body_html, message, screen_message).
+
+    If print_msg is True, the screen line is printed immediately here (via print_to_both) and the
+    returned screen_message is cleared to "", so the caller doesn't print it a second time further
+    down the main loop; if False, the caller is expected to print the returned screen_message itself
+    once it's done printing the song line, so the two interleave in the right order.
+    """
+    msg = build_playlist_status_message(detected_playlist)
     if DEBUG_JMK:
         msg = msg + " (1)"
-    dz_msg_screen = notify_playlist_detected(detected_playlist, songstr, timediff, track, artist, album)
+    playlist_screen_message = notify_playlist_detected(detected_playlist, songstr, timediff, track, artist, album)
     if print_msg:
-        print_to_both(dz_msg_screen)
-        dz_msg_screen = ""
-    return msg + "\n", msg + "<br>", msg, dz_msg_screen
+        print_to_both(playlist_screen_message)
+        playlist_screen_message = ""
+    return msg + "\n", msg + "<br>", msg, playlist_screen_message
 
 
 def monitored_playlist_cleared(cleared_playlist, songstr, timediff, track="", artist="", album=""):
-    dz_message, dz_msg_screen = notify_playlist_cleared(cleared_playlist, songstr, timediff, track, artist, album)
-    return dz_message, dz_msg_screen
+    """Thin pass-through to notify_playlist_cleared(); kept separate to mirror monitored_playlist_detected()'s name."""
+    playlist_message, playlist_screen_message = notify_playlist_cleared(cleared_playlist, songstr, timediff, track, artist, album)
+    return playlist_message, playlist_screen_message
 
 
 # Runs a focused setup wizard for Spotify-to-Last.fm scrobble health monitoring
@@ -12610,18 +13190,26 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
     outage = OutageReporter()
 
     jmk_send = False
-    found_playlist = False
-    last_found_playlist = False
+
     active_ever = False
     icon_add = False
     hasTrack = False
     sp_playlist_owner = ""
     sp_playlist_image_url = ""
     playlist_suffix = ""
-    dz_message = ""
-    dz_msg_screen = ""
-    body_dz = ""
-    body_dz_html = ""
+
+    def clear_icon_add():
+        nonlocal icon_add
+        if ALT_VIEW:
+            icon_add = False
+
+    # Monitored-playlist detection state for this friend - see PlaylistTracker and its advance()
+    # method above for the actual algorithm. icon_add is display-only (not part of the tracker):
+    # it's cleared whenever the tracker resets a playlist's counts (a fresh match or a real clear -
+    # see clear_icon_add above and PlaylistTracker.reset_counts's on_reset callback), and set True
+    # right after advance() returns "shuffle", to show ICON_SONG_MISSING_FROM_PLAYLIST next to the
+    # song as a "still in the playlist, but this one was a smart-shuffle exception" cue.
+    tracker = PlaylistTracker(on_reset=clear_icon_add)
 
     def iconstring():
         nonlocal icon_add, playlist_suffix
@@ -12638,33 +13226,6 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
     def time_diff_str():
         return str(round((sp_ts - sp_active_ts_start) / 60)).zfill(2)
-
-    def reset_playlist_counts(playlist_name_to_protect=""):
-        nonlocal icon_add
-        nonlocal dz_message, body_dz, body_dz_html, dz_msg_screen
-
-        if ALT_VIEW:
-            icon_add = False
-        if playlist_name_to_protect:
-            print_debug(f"CLEARING ALL PLAYLIST COUNTS/STRINGS, BUT PROTECTING PLAYLIST START CNT -> {playlist_name_to_protect}")
-        else:
-            print_debug(f"CLEARING ALL PLAYLIST COUNTS/STRINGS, BUT NO PLAYLIST PROTECTION")
-        dz_message = ""
-        dz_msg_screen = ""
-        body_dz = ""
-        body_dz_html = ""
-        for playlist_name, playlist_data in monitored_playlists_data.items():
-            print_debug(f"-- CHECKING PLAYLIST {playlist_name}")
-            if (playlist_name == playlist_name_to_protect):
-                # playlist_data['count_start'] = 0
-                playlist_data['count_end'] = 0
-                # playlist_data['count_shuffle'] = 0
-                print_debug(f"-- PROTECTED PLAYLIST COUNTS (start: {playlist_data['count_start']}, end: {playlist_data['count_end']}, shuffle: {playlist_data['count_shuffle']}) -> {playlist_name}")
-            else:
-                playlist_data['count_start'] = 0
-                playlist_data['count_end'] = 0
-                playlist_data['count_shuffle'] = 0
-                print_debug(f"-- UNPROTECTED PLAYLIST COUNTS (start: {playlist_data['count_start']}, end: {playlist_data['count_end']}, shuffle: {playlist_data['count_shuffle']}) -> {playlist_name}")
 
     try:
         if csv_file_name:
@@ -12843,140 +13404,76 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                 playlist_m_body_html = f"<br>Playlist: <a href=\"{escape_html_attr(sp_playlist_url)}\">{escape(sp_playlist)}{playlist_suffix}</a>"
 
                 if JMK_MODE:
-                    hasTrack = (sp_playlist_owner == "Spotify") or (search_playlist(sp_accessToken, sp_playlist, sp_playlist_uri, sp_track_uri_id, sp_track, sp_artist, False))
-                    print_debug(f"hasTrack (A1): {hasTrack}, sp_playlist_owner: {sp_playlist_owner}, sp_playlist: {sp_playlist}")
-                    if hasTrack:
-                        for playlist_data in monitored_playlists_data.values():
-                            if sp_playlist and (sp_playlist.upper() == playlist_data.get('name', "B").upper()):
-                                hasTrack = False
-                                print_debug(f"hastrack Playlist Match (A2a): hastrack = FALSE, sp_playlist: {sp_playlist}")
-                        print_debug(f"hasTrack (A2b): {hasTrack}, sp_playlist: {sp_playlist}")
+                    hasTrack = compute_has_track(sp_accessToken, sp_playlist, sp_playlist_uri, sp_playlist_owner, sp_track_uri_id, sp_track, sp_artist)
 
-                    print_debug(f"hasTrack (A3): {hasTrack}, sp_playlist_owner: {sp_playlist_owner}")
-
-                    # if hasTrack:
-                        # print_debug(f"*** Track [{sp_track}] was found in playlist [{sp_playlist}{iconstring()}]")
                     if not hasTrack:
-                        if (sp_playlist_owner != "Spotify"):
+                        # A song genuinely on some monitored playlist's own track list isn't really
+                        # "not found" - it's a song our own tracking already knows about (counting
+                        # toward it, or already past its threshold), just not confirmed under
+                        # whatever unrelated playlist Spotify happens to be reporting as context
+                        # right now. Treating that as an error (log line or icon) is misleading.
+                        if (sp_playlist_owner != "Spotify") and not is_song_in_any_monitored_playlist(f"{sp_artist} - {sp_track}"):
                             print_debug(f"SONG NOT IN REPORTED PLAYLIST (1)")
                             print_to_log(f"*** ERROR: track [{sp_track}] NOT FOUND in playlist [{sp_playlist}] with owner [{sp_playlist_owner}] and uri [{sp_playlist_uri}]")
-                            #sp_playlist = sp_playlist + ICON_SONG_MISSING_FROM_PLAYLIST
-                            if ALT_VIEW and JMK_MODE: # 'hasTrack' is a JMK-specific code change
+                            # Only a playlist that's already been Detected (crossed qty_start) gets
+                            # the "*" shuffle-tolerance icon here - a song that isn't confirmed in
+                            # whatever Spotify reports as context is not, by itself, evidence that a
+                            # STILL-COUNTING-UP monitored playlist is being shuffle-tolerated; showing
+                            # "*" before Detected has even fired misrepresents what the icon means.
+                            if ALT_VIEW and JMK_MODE and tracker.current and tracker.current['count_start'] >= tracker.current['qty_start']: # 'hasTrack' is a JMK-specific code change
                                 icon_add = True
-                            # sp_playlist = "unknown - error"
-                            # is_playlist = False
             else:
                 hasTrack = False
                 sp_playlist_image_url = ""
 
-# this section is executed only during first boot up of script
+# Playlist-detection snapshot for whatever song is playing right when this friend is (re)acquired
+# from the friends-list poll - i.e. the outer "while True:" loop above (re)starting, whether that's
+# the very first check of the process or a friend reappearing after having dropped off the list.
+# Silent by design (notify=False below): this only recomputes tracker state and its printable
+# status text; it never fires an email/push notification - those happen once a real per-song-change
+# is observed in the primary loop below (LOOP C).
 # ------------------------------------------------------------
             print_debug(f"LOOP A - FIRST BOOT UP")
             # must be in front of possible 'icon' appending or search URLs will errantly include the icon
             context_m_body = ""
             context_m_body_html = ""
             apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url = get_apple_genius_search_urls(str(sp_artist), str(sp_track))
-            # apple_search_url, genius_search_url, youtube_music_search_url = get_apple_genius_search_urls(str(sp_artist), str(sp_track))
 
-            dz_str = f"{sp_artist} - {sp_track}"
-
-            last_found_playlist = found_playlist
-            if not hasTrack and (sp_playlist_owner != "Spotify"):
-                found_playlist = find_song_in_playlists(dz_str, found_playlist, sp_playlist if is_playlist else "")
+            song_lookup_key = f"{sp_artist} - {sp_track}"
+            # Computed here (rather than where it's used further below) so it can gate the
+            # tracker.advance() call immediately following it - see the comment there.
+            initially_active = bool(sp_data["sp_is_playing"]) if live_activity else cur_ts - sp_ts <= activity_inactivity_check()
+            if initially_active:
+                # notify=False: this is the silent, first-sample-of-a-session pass (see PlaylistTracker.advance),
+                # so songstr/timediff/track/artist/album are never actually used here.
+                outcome = tracker.advance(
+                    song_lookup_key, sp_playlist if is_playlist else "", hasTrack,
+                    notify=False, active_user_ok=True, apply_override=True, alt_view=ALT_VIEW,
+                    on_detected=lambda: ("", ""), songstr="", timediff="", sp_track=sp_track, sp_artist=sp_artist, sp_album=sp_album)
             else:
-                found_playlist = False
-                last_found_playlist = False
-                print_debug(f"SKIPPED FIND_SONG IN_PLAYLIST (1A) -> hasTrack: {hasTrack}")
+                # The friend is showing offline/stale right now, so whatever they were last playing
+                # is history, not something currently happening - counting it here would double-count
+                # it a moment later when they resume and this same track gets a fresh activity
+                # timestamp from Spotify (LOOP C's track_changed check compares only that reported
+                # timestamp, not track identity, so a same-track-newer-timestamp sample reads as a
+                # brand new song and runs the real, counting pass for it all over again).
+                outcome = "none"
 
-            # if song is not in currently tracked playlist, but a different one, it might be an exception or the start of a new detected playlist
-            if found_playlist and last_found_playlist and (found_playlist.get('name', 'A') != last_found_playlist.get('name', 'B')):
-            # if this song puts currently tracked playlist over the exception limit, then it can be start of a newly detected playlist
-#jmkfix can this case every happen. is it in log?
-                if last_found_playlist['count_end'] >= (last_found_playlist['qty_end']):
-                    new_playlist = True
-                    print_debug(f"SPECIAL CASE: SONG IN ANOTHER MONITORED PLAYLIST, AT EXCEPTION LIMIT FOR CURRENT (1) - old: {last_found_playlist.get('name', 'A')} new: {found_playlist.get('name', 'A')}")
-                    reset_playlist_counts()
-                    count_overridden = False
-            # else it should be considered an exception
-#jmkfix can this case every happen. is it in log?
-                else:
-                    print_debug(f"SPECIAL CASE: SONG EXCEPTION BUT IN ANOTHER MONITORED PLAYLIST (1)")
-                    new_playlist = False
-            else:
-                new_playlist = True
-
-            # playlist detected
-            # if playlist changed, need to handle it as an exception first
-            if found_playlist and new_playlist:
-                print_debug(f"FOUND PLAYLIST IN MONITORING LIST (1) -> {found_playlist['name']}")
-                print_debug(f"COUNT START: {found_playlist['count_start']}, {found_playlist['qty_start']}")
-                reset_playlist_counts(found_playlist['name'] if found_playlist else "")
-                found_playlist['count_start'] += 1
-                print_debug(f"COUNT START +1: {found_playlist['count_start']}")
-                if found_playlist.get('override', OVERRIDE_PLAYLIST_AT_START):
-                    print_debug(f"FIRST BOOT PLAYLIST COUNT OVERRIDE")
-                    print_debug(f"OVERRIDE COUNT (1): from {found_playlist['count_start']} to {found_playlist['qty_start']}")
-                    if found_playlist['count_start'] < found_playlist['qty_start']:
-                        found_playlist['count_start'] = found_playlist['qty_start']
-                        count_overridden = True
-                if found_playlist['count_start'] >= found_playlist['qty_start']:
-                    print_debug(f"PLAYLIST_DETECTED (1): {found_playlist['count_start']}, {found_playlist['qty_start']}")
-                    is_playlist = True
-                    sp_playlist = found_playlist['name']
-                    sp_playlist_url = found_playlist.get('url', '')
-                    sp_track = sp_track + found_playlist.get('icon', '')
-                    playlist_m_body = f"\nPlaylist: {sp_playlist}{iconstring()}"
-                    playlist_m_body_html = f"<br>Playlist: <a href=\"{escape_html_attr(sp_playlist_url)}\">{escape(sp_playlist)}{iconstring()}</a>"
-
-                dz_message = build_dz_string(found_playlist)
-                if DEBUG_JMK and dz_message != "":
-                    dz_message = dz_message + " (2)"
-                body_dz = dz_message + "\n"
-                body_dz_html = dz_message + "<br>"
-
-            else:
-                if DEBUG_JMK and not found_playlist:
-                    print_debug(f"SONG NOT IN A MONITORED PLAYLIST (1)")
-                # reset_playlist_counts()
-
-                # process a possible exception if last song was in a playlist (even if as exception) AND it's an active playlist (not counting up towards it)
-                # actually, if not allowing exception during counting up to > 2, may never get there since smart shuffle puts a new song every 3
-                # if last_found_playlist and (last_found_playlist['count_start'] >= last_found_playlist['qty_start']):
-                if last_found_playlist:
-                    print_debug(f"COUNT END: {last_found_playlist['count_end']}")
-                    last_found_playlist['count_end'] += 1
-                    print_debug(f"COUNT END + 1: {last_found_playlist['count_end']}")
-                    if found_playlist:
-                        found_playlist['count_start'] += 1
-                        print_debug(f"COUNT START + 1 - {found_playlist['name']}: {found_playlist['count_start']}")
-                    if last_found_playlist['count_end'] >= last_found_playlist['qty_end']:
-                        reset_playlist_counts(found_playlist['name'] if found_playlist else "")
-                        count_overridden = False
-                        # body_dz = ""
-                        # body_dz_html = ""
-                        # dz_message = ""
-                    else:
-                        # since haven't hit limit yet to consider playlist over, set found_playlist back to previous
-                        found_playlist = last_found_playlist
-                        is_playlist = True
-                        sp_playlist = found_playlist['name']
-                        sp_playlist_url = found_playlist.get('url', '')
-                        playlist_m_body = f"\nPlaylist: {sp_playlist}{iconstring()}"
-                        playlist_m_body_html = f"<br>Playlist: <a href=\"{escape_html_attr(sp_playlist_url)}\">{escape(sp_playlist)}</a>"
-                        print_debug(f"COUNT_SHUFFLE: {found_playlist['count_shuffle']}")
-                        found_playlist['count_shuffle'] += 1
-                        print_debug(f"COUNT SHUFFLE + 1: {found_playlist['count_shuffle']}")
-                        # don't show icon in this case, but OK to show playlist with an *
-                        # sp_track = sp_track + found_playlist.get('icon', '')
-                        if ALT_VIEW:
-                            icon_add = True
-                        print_debug(f"HAVEN'T HIT LIMIT TO DISCONTINUE PLAYLIST (1) -> {found_playlist['name']}")
-                else:
-                    reset_playlist_counts()
-                    count_overridden = False
-                    # body_dz = ""
-                    # body_dz_html = ""
-                    # dz_message = ""
+            if outcome == "matched":
+                is_playlist = True
+                sp_playlist = tracker.current['name']
+                sp_playlist_url = tracker.current.get('url', '')
+                sp_track = sp_track + tracker.current.get('icon', '')
+                playlist_m_body = f"\nPlaylist: {sp_playlist}{iconstring()}"
+                playlist_m_body_html = f"<br>Playlist: <a href=\"{escape_html_attr(sp_playlist_url)}\">{escape(sp_playlist)}{iconstring()}</a>"
+            elif outcome == "shuffle":
+                is_playlist = True
+                sp_playlist = tracker.current['name']
+                sp_playlist_url = tracker.current.get('url', '')
+                playlist_m_body = f"\nPlaylist: {sp_playlist}{iconstring()}"
+                playlist_m_body_html = f"<br>Playlist: <a href=\"{escape_html_attr(sp_playlist_url)}\">{escape(sp_playlist)}</a>"
+                if ALT_VIEW:
+                    icon_add = True
 
             print(f"\nUsername:\t\t\t{sp_username}")
             print(f"User URI ID:\t\t\t{sp_data['sp_uri']}")
@@ -13032,8 +13529,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
             print(f"\nLast activity:\t\t\t{get_date_from_ts(sp_ts)} ({calculate_timespan(int(time.time()), sp_ts)} ago)")
 
-            # A live session requires observed playback while the legacy feed supplies completed tracks
-            initially_active = bool(sp_data["sp_is_playing"]) if live_activity else cur_ts - sp_ts <= activity_inactivity_check()
+            # initially_active was already computed above, to gate the tracker.advance() call
             # Moment the current track is known to have started, used for session spans and the recent-track list
             activity_ts = sp_ts
             if initially_active:
@@ -13130,10 +13626,6 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                 alerts_status_str = f"{str(playlist_data.get('notify', NOTIFY_PLAYLIST_DETECTED)).lower()},"
                 refresh_value = playlist_data.get('refresh', LOAD_TRACKS_FREQUENCY)
                 print(f"Monitoring Tracks [alerts: {alerts_status_str:<6} refresh: {refresh_value:>4}]: {playlist_name} ({len(playlist_data.get('tracks_set'))} songs)")
-            if dz_message or listened_songs:
-                print("")
-            if dz_message:
-                print(dz_message)
 
             print_cur_ts("\nTimestamp:\t\t\t")
 
@@ -13159,25 +13651,16 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                 print_to_screen(f"----------------------")
                 print_to_both(f"{timestring()}: {ERR_CODE}, *** Start notification sent")
                 send_notification("active", f"START: {songstring()}", sp_playlist_image_url if sp_playlist_image_url else sp_album_image_url, sp_track, sp_artist, sp_album, (sp_playlist+iconstring()) if is_playlist else '')
-                #---
-#                dz_str = f"{sp_artist} - {sp_track}"
-                if not hasTrack and (sp_playlist_owner != "Spotify"):
-                    found_playlist = find_song_in_playlists(dz_str, found_playlist, sp_playlist if is_playlist else "")
-                else:
-                    found_playlist = False
-                    print_debug(f"SKIPPED FIND_SONG_IN_PLAYLIST (1B) -> hasTrack: {hasTrack}")
-                print_debug(f"PLAYLIST CHECK: {found_playlist}, {dz_str}")
-# this is executed during first boot up only
-                if found_playlist:
-                    print_debug(f"PLAYLIST FOUND: count: {found_playlist['count_start']}")
-                    if found_playlist['count_start'] >= found_playlist['qty_start']:
-                        print_debug(f"BOOTUP PLAYLIST DETECTED")
-                        print_debug(f"PLAYLIST_DETECT (1): {found_playlist['count_start']}")
-                        body_dz, body_dz_html, dz_message, dz_msg_screen = monitored_playlist_detected(found_playlist, songstring(), time_diff_str(), True, sp_track, sp_artist, sp_album)
-                    else:
-                        dz_message = build_dz_string(found_playlist)
-                        if DEBUG_JMK and dz_message != "":
-                            dz_message = dz_message + " (3)"
+                # ALT_VIEW-only: the track already playing when this friend was first observed active
+                # this session was already run through tracker.advance() moments earlier (above); if
+                # that already crossed a detection threshold, announce it now instead of waiting for
+                # the next per-song check (LOOP C) to catch it. Deliberately does NOT call advance()
+                # again for this same song - that already happened, so re-running it would just
+                # recompute (and risk re-notifying) an unchanged result.
+                if tracker.current and tracker.current['count_start'] >= tracker.current['qty_start']:
+                    print_debug(f"BOOTUP PLAYLIST DETECTED: count: {tracker.current['count_start']}")
+                    tracker.body_text, tracker.body_html, tracker.message, tracker.screen_message = monitored_playlist_detected(
+                        tracker.current, songstring(), time_diff_str(), True, sp_track, sp_artist, sp_album)
 
                 print_to_screen(f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}")
                 send_notification("song", f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}", sp_album_image_url, sp_track, sp_artist, sp_album, (sp_playlist+iconstring()) if is_playlist else '', time_diff_str(), listened_songs)
@@ -13419,26 +13902,22 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
                     if is_playlist:
                         if JMK_MODE:
-                            hasTrack = (sp_playlist_owner == "Spotify") or (search_playlist(sp_accessToken, sp_playlist, sp_playlist_uri, sp_track_uri_id, sp_track, sp_artist, False))
-                            print_debug(f"hasTrack (B1): {hasTrack}, sp_playlist_owner: {sp_playlist_owner}, sp_playlist: {sp_playlist}")
-                            if hasTrack:
-                                for playlist_data in monitored_playlists_data.values():
-                                    if sp_playlist and (sp_playlist.upper() == playlist_data.get('name', "B").upper()):
-                                        hasTrack = False
-                                        print_debug(f"hastrack Playlist Match (B2a): hastrack = FALSE, sp_playlist: {sp_playlist}")
-                                print_debug(f"hasTrack (B2b): {hasTrack}, sp_playlist: {sp_playlist}")
-
-                            print_debug(f"hasTrack (B3): {hasTrack}, sp_playlist_owner: {sp_playlist_owner}")
+                            hasTrack = compute_has_track(sp_accessToken, sp_playlist, sp_playlist_uri, sp_playlist_owner, sp_track_uri_id, sp_track, sp_artist)
 
                             if not hasTrack:
-                                if (sp_playlist_owner != "Spotify"):
+                                # See the matching LOOP A comment above: a song genuinely on some
+                                # monitored playlist's track list isn't really "not found" just
+                                # because it's unconfirmed under a different, unrelated reported
+                                # context.
+                                if (sp_playlist_owner != "Spotify") and not is_song_in_any_monitored_playlist(f"{sp_artist} - {sp_track}"):
                                     print_debug(f"SONG NOT IN REPORTED PLAYLIST (2)")
                                     print_to_log(f"ERROR: track: {sp_track}, NOT FOUND in playlist: {sp_playlist} ({sp_track})")
-    #                                sp_playlist = sp_playlist + ICON_SONG_MISSING_FROM_PLAYLIST
-                                    if ALT_VIEW and JMK_MODE: # 'hasTrack' is a JMK-specific code change
+                                    # "*" only belongs on a playlist that's already Detected, not on
+                                    # a song that merely isn't confirmed in whatever Spotify reports
+                                    # as context while a monitored playlist is still counting up
+                                    # toward its own threshold.
+                                    if ALT_VIEW and JMK_MODE and tracker.current and tracker.current['count_start'] >= tracker.current['qty_start']: # 'hasTrack' is a JMK-specific code change
                                         icon_add = True
-                                    # sp_playlist = "unknown - error"
-                                    # is_playlist = False
                     else:
                         hasTrack = False
 
@@ -13502,211 +13981,76 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
                     if sp_active_ts_start == 0:
                         sp_active_ts_start = sp_ts
-# this is executed for every song change
-# is that true?
-# below definitely does ("SONG NOT IN A MONITORED PLAYLIST (2)")
-# what's the difference?
+# Playlist-detection state machine, run once per genuine track change (this is LOOP C, inside
+# "if track_changed:") - the steady-state path that fires real detected/cleared notifications.
+# This is the fullest, most-corrected version of the same logic sketched in LOOP A above.
                     print_debug(f"LOOP C - FOR ALL SONGS")
                     # move this in front of possible 'icon' appending or that will impact search URLs
-                    # apple_search_url, genius_search_url, youtube_music_search_url = get_apple_genius_search_urls(str(sp_artist), str(sp_track))
                     apple_search_url, genius_search_url, azlyrics_search_url, tekstowo_search_url, musixmatch_search_url, lyrics_com_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url = get_apple_genius_search_urls(str(sp_artist), str(sp_track))
 
                     print_debug(f"SONG CHANGE -> {sp_artist} - {sp_track}")
                     print_debug(f"ACTIVE EVER: {active_ever} (2)")
                     print_debug(f"hasTrack: {hasTrack}")
-                    #---
-                    dz_msg_screen = ""
-                    dz_str = f"{sp_artist} - {sp_track}"
-                    last_found_playlist = found_playlist
-                    if not hasTrack:
-                        found_playlist = find_song_in_playlists(dz_str, found_playlist, sp_playlist if is_playlist else "")
-                    else:
-                        # DZ cleared is lost here - 2/28/2026 try to fix #jmk
-                        if active_ever and last_found_playlist:
-                            print_debug(f"last_found_playlist: {last_found_playlist}")
-                            print_debug(f"songstring(): {songstring}, time_diff_str: {time_diff_str}")
-                            print_debug(f"sp_track: {sp_track}, sp_artist: {sp_artist}, sp_album: {sp_album}")
-                            dz_message, dz_msg_screen = monitored_playlist_cleared(last_found_playlist, songstring(), time_diff_str(), sp_track, sp_artist, sp_album)
-                            print_debug(f"dz_message: {dz_message}, dz_msg_screen: {dz_msg_screen}")
-                            if ALT_VIEW:
-                                print_to_screen(dz_msg_screen) # could get overwritten in next section
-                                dz_msg_screen = "" # prevent duplicate printing below
-                        # reset after 'monitored_playlist_cleared' to ensure 'song count' is available for it
-                        reset_playlist_counts(found_playlist['name'] if found_playlist else "")
-                        count_overridden = False
-                        # DZ cleared is lost here - 2/28/2026 try to fix #jmk
+                    song_lookup_key = f"{sp_artist} - {sp_track}"
+                    active_user_ok = not ((cur_ts - sp_ts_old) > SPOTIFY_INACTIVITY_CHECK and sp_active_ts_stop > 0)
 
-                        # copied above here from just below where it's not triggering due to the next two lines
-                        found_playlist = False
-                        last_found_playlist = False
+                    # A freshly-detected playlist's "Detected" notification embeds songstring(), which
+                    # reads sp_playlist/sp_track - so those must already reflect the newly-matched
+                    # playlist by the time that notification's text is built, not just afterward.
+                    # advance() calls this at exactly that moment (see PlaylistTracker.advance's
+                    # on_detected parameter); matched_cosmetics_applied avoids re-applying it below.
+                    matched_cosmetics_applied = False
 
-                        print_debug(f"SKIPPED FIND_SONG_IN_PLAYLIST (2) -> hasTrack: {hasTrack}")
-                    # if song is not in currently tracked playlist, but a different one, it might be an exception or the start of a new detected playlist
-                    if DEBUG_JMK:
-                        if found_playlist:
-                            print_debug(f"playlist A: {found_playlist.get('name', 'A')}")
-                        if last_found_playlist:
-                            print_debug(f"playlist B: {last_found_playlist.get('name', 'B')}")
-                    if found_playlist and last_found_playlist and (found_playlist.get('name', 'A') != last_found_playlist.get('name', 'B')):
-                    # if this song puts currently tracked playlist over the exception limit, then it can be start of a newly detected playlist
-                        print_debug(f"count_end: {last_found_playlist['count_end']}, qty_end: {last_found_playlist['qty_end']}")
-                        if last_found_playlist['count_end'] >= (last_found_playlist['qty_end']):
-                            new_playlist = True
-                            print_debug(f"SPECIAL CASE: SONG IN ANOTHER MONITORED PLAYLIST, AT EXCEPTION LIMIT FOR CURRENT (2) - old: {last_found_playlist.get('name', 'A')} new: {found_playlist.get('name', 'A')}")
-                            # force notify_playlist_cleared before going down code path for new playlist
-                            # skip if never active after boot, because any existing monitored playlist was 'assumed'
-                            print_debug(f"ACTIVE EVER: {active_ever} (2)")
-                            if active_ever:
-                                dz_message, dz_msg_screen = monitored_playlist_cleared(last_found_playlist, songstring(), time_diff_str(), sp_track, sp_artist, sp_album)
-                            if ALT_VIEW:
-                                print_to_screen(dz_msg_screen) # could get overwritten in next section
-                                dz_msg_screen = "" # prevent duplicate printing below
-                            # reset after 'monitored_playlist_cleared' to ensure 'song count' is available for it
-                            reset_playlist_counts(found_playlist['name'] if found_playlist else "")
-                            count_overridden = False
-                    # else it should be considered an exception
-                        else:
-                            print_debug(f"SPECIAL CASE: SONG EXCEPTION BUT IN ANOTHER MONITORED PLAYLIST (2): count_end: {last_found_playlist['count_end']} qty_end: {last_found_playlist['qty_end']}")
-                            new_playlist = False
-                    else:
-                        new_playlist = True
+                    def apply_matched_cosmetics():
+                        nonlocal is_playlist, sp_playlist, sp_playlist_url, sp_track, playlist_m_body, playlist_m_body_html, matched_cosmetics_applied
+                        is_playlist = True
+                        sp_playlist = tracker.current['name']
+                        sp_playlist_url = tracker.current.get('url', '')
+                        sp_track = sp_track + tracker.current.get('icon', '')
+                        playlist_m_body = f"\nPlaylist: {sp_playlist}{iconstring()}"
+                        playlist_m_body_html = f"<br>Playlist: <a href=\"{escape_html_attr(sp_playlist_url)}\">{escape(sp_playlist)}{iconstring()}</a>"
+                        matched_cosmetics_applied = True
 
-                    # playlist detected
-                    # if playlist changed, need to handle it as an exception first
-                    if found_playlist and new_playlist:
-                        print_debug(f"FOUND PLAYLIST IN MONITORING LIST (2) -> {found_playlist['name']}")
-                        print_debug(f"COUNT START: {found_playlist['count_start']}, {found_playlist['qty_start']}")
-                        reset_playlist_counts(found_playlist['name'] if found_playlist else "")
-                        found_playlist['count_start'] += 1
-                        print_debug(f"COUNT START + 1: {found_playlist['count_start']}")
+                    def on_detected():
+                        apply_matched_cosmetics()
+                        return sp_track, songstring()  # noqa: B023 - called synchronously within this same iteration, never deferred
 
-                        # count was high enough to trigger detection
-                        if found_playlist['count_start'] >= found_playlist['qty_start']:
-                            print_debug(f"PLAYLIST_DETECTED (2): {found_playlist['count_start']}, {found_playlist['qty_start']}")
-                            is_playlist = True
-                            sp_playlist = found_playlist['name']
-                            sp_playlist_url = found_playlist.get('url', '')
-                            sp_track = sp_track + found_playlist.get('icon', '')
-                            playlist_m_body = f"\nPlaylist: {sp_playlist}{iconstring()}"
-                            playlist_m_body_html = f"<br>Playlist: <a href=\"{escape_html_attr(sp_playlist_url)}\">{escape(sp_playlist)}</a>"
+                    # Same condition the "Friend got ACTIVE after being offline" check below uses -
+                    # if this exact song is about to trigger that block's own "Start notification
+                    # sent" banner for a brand new session, any detected/cleared line advance()
+                    # would otherwise print eagerly here needs to wait until after that banner
+                    # prints, or it would read as belonging to the session that just ended.
+                    friend_resuming_this_song = resumed_live_session or (not live_activity and (cur_ts - sp_ts_old) > activity_inactivity_check() and sp_active_ts_stop > 0)
+                    outcome = tracker.advance(
+                        song_lookup_key, sp_playlist if is_playlist else "", hasTrack,
+                        notify=True, active_user_ok=active_user_ok, apply_override=False, alt_view=ALT_VIEW,
+                        on_detected=on_detected, songstr=songstring(), timediff=time_diff_str(), sp_track=sp_track, sp_artist=sp_artist, sp_album=sp_album,
+                        defer_screen_message=friend_resuming_this_song)
 
-                        # active user check
-                        if not ((cur_ts - sp_ts_old) > SPOTIFY_INACTIVITY_CHECK and sp_active_ts_stop > 0):
-                            # enough to start playlist?
-                            if found_playlist['count_start'] == found_playlist['qty_start']:
-                                print_debug(f"PLAYLIST_DETECT (2): {found_playlist['count_start']}")
-                                body_dz, body_dz_html, dz_message, dz_msg_screen = monitored_playlist_detected(found_playlist, songstring(), time_diff_str(), False, sp_track, sp_artist, sp_album) # False is because dz_msg_screen is printed below in sequence after the song name gets printed
-                            else:
-                            # not enough to start playlist
-                                dz_message = build_dz_string(found_playlist)
-                                if DEBUG_JMK and dz_message != "":
-                                    dz_message = dz_message + " (4a)"
-                                    print_debug(f"DZ_MESSAGE (4a) -> {dz_message}")
-                        else:
-                        # inactive user (but going active?)
-                            dz_message = build_dz_string(found_playlist)
-                            if DEBUG_JMK and dz_message != "":
-                                dz_message = dz_message + " (4b)"
-                                print_debug(f"DZ_MESSAGE (4b) -> {dz_message}")
-
-                        body_dz = dz_message + "\n"
-                        body_dz_html = dz_message + "<br>"
-
-                    # playlist NOT detected or an exception
-                    else:
-# handled in section further below if someone just became active
-# this check handles if NOT just becoming active
-                        if DEBUG_JMK and not found_playlist:
-                            print_debug(f"SONG NOT IN A MONITORED PLAYLIST (2)")
-                        else:
-                            print_debug(f"SONG FOUND IN A MONITORED PLAYLIST (2)")
-                        # check for user just becoming active - if so, proceed
-                        #7/31/25 do we need this next line? (found_checklist doesn't have it)
-                        # if ((cur_ts - sp_ts_old) > SPOTIFY_INACTIVITY_CHECK and sp_active_ts_stop > 0):
-                        # (all below was intented to above line)
-                        # this is case where playlist not found BUT it was previously found (so either lost or count exceptions)
-                        # dz_message = ""
-                        # dz_message_screen = ""
-                        # body_dz = ""
-                        # body_dz_html = ""
-                        # reset_playlist_counts()
-
-                        # process a possible exception if last song was in a playlist (even if as exception) AND it's an active playlist (not counting up towards it)
-                        # actually, if not allowing exception during counting up to > 2, may never get there since smart shuffle puts a new song every 3
-                        # if last_found_playlist and (last_found_playlist['count_start'] >= last_found_playlist['qty_start']):
-                        print_debug(f"ACTIVE USER, CHECKING FOR PLAYLIST (2)")
-                        if last_found_playlist:
-                            print_debug(f"BUT LAST SONG WAS IN PLAYLIST")
-                            print_debug(f"COUNT END - {last_found_playlist['name']}: {last_found_playlist['count_end']}")
-                            last_found_playlist['count_end'] += 1
-                            print_debug(f"COUNT END + 1 - {last_found_playlist['name']}: {last_found_playlist['count_end']}")
-                            if found_playlist:
-                                found_playlist['count_start'] += 1
-                                print_debug(f"COUNT START + 1 - {found_playlist['name']}: {found_playlist['count_start']}")
-
-                            print_debug(f"count_end: {last_found_playlist['count_end']}, qty_end: {last_found_playlist['qty_end']}")
-
-                            if last_found_playlist['count_end'] >= last_found_playlist['qty_end']:
-                                # limit achieved
-                                # 7/31: actually don't want to show a "cleared" message when first coming up
-                                # dz_message, dz_msg_screen = monitored_playlist_cleared(last_found_playlist, songstring(), time_diff_str())
-                                #jmkfix 08/04 this DEFINITELY also runs during runtime
-                                # only clear if last playlist was active
-                                if last_found_playlist['count_start'] >= last_found_playlist['qty_start']:
-                                    dz_message, dz_msg_screen = monitored_playlist_cleared(last_found_playlist, songstring(), time_diff_str(), sp_track, sp_artist, sp_album)
-
-                                #jmkfix 2/28/2026
-                                if ALT_VIEW:
-                                    #4/19 jmk creating a blank line: print_to_screen(dz_msg_screen) # could get overwritten in next section
-                                    dz_msg_screen = "" # prevent duplicate printing below
-                                # reset after 'monitored_playlist_cleared' to ensure 'song count' is available for it
-                                reset_playlist_counts(found_playlist['name'] if found_playlist else "")
-                                count_overridden = False
-
-                                #jmkfix 2/28/2026
-                                # # reset after 'monitored_playlist_cleared' to ensure 'song count' is available for it
-                                # #jmkfix this will delete the dz_messages from _cleared call just above
-                                # reset_playlist_counts(found_playlist['name'] if found_playlist else "")
-
-                                #8/4/2025 fixed in reset_playlist_counts
-                                # dz_message = ""
-                            else:
-                                # since haven't hit limit yet to consider playlist over, set found_playlist back to previous
-                                found_playlist = last_found_playlist
-                                # check to verify previous playlist was actually a confirmed playlist or counting up
-                                if last_found_playlist['count_start'] >= last_found_playlist['qty_start']:
-                                    is_playlist = True
-                                    sp_playlist = found_playlist['name']
-                                    sp_playlist_url = found_playlist.get('url', '')
-                                    playlist_m_body = f"\nPlaylist: {sp_playlist}{iconstring()}"
-                                    playlist_m_body_html = f"<br>Playlist: <a href=\"{escape_html_attr(sp_playlist_url)}\">{escape(sp_playlist)}</a>"
-                                    found_playlist['count_shuffle'] += 1
-                                    # don't show icon in this case, but OK to show playlist with an *
-                                    # sp_track = sp_track + found_playlist.get('icon', '')
-                                    if ALT_VIEW:
-                                        icon_add = True
-                                else:
-                                    print_debug(f"SPECIAL CASE 2: PLAYLIST FOUND BUT PREVIOUS ONE WAS STILL COUNTING UP -> {found_playlist['name']}")
-
-                                print_debug(f"HAVEN'T HIT LIMIT TO DISCONTINUE PLAYLIST (2) -> {found_playlist['name']}")
-                        else:
-                            reset_playlist_counts()
-                            count_overridden = False
-                            #8/4/2025 fixed in reset_playlist_counts
-                            #dz_message = ""
-                        # else:
-                            # print_debug(f"INACTIVE USER, SKIPPING PLAYLIST CHECKS (2)")
-                            #---
+                    if outcome == "matched":
+                        if not matched_cosmetics_applied:
+                            apply_matched_cosmetics()
+                    elif outcome == "shuffle":
+                        is_playlist = True
+                        sp_playlist = tracker.current['name']
+                        sp_playlist_url = tracker.current.get('url', '')
+                        playlist_m_body = f"\nPlaylist: {sp_playlist}{iconstring()}"
+                        playlist_m_body_html = f"<br>Playlist: <a href=\"{escape_html_attr(sp_playlist_url)}\">{escape(sp_playlist)}</a>"
+                        if ALT_VIEW:
+                            icon_add = True
 #jmk 2026/09/19                    listened_songs += 1
         # print song line if NOT just becoming active
                     if not ((cur_ts - sp_ts_old) > SPOTIFY_INACTIVITY_CHECK and sp_active_ts_stop > 0):
         # main song line printer is here
                         if ALT_VIEW:
+                            # Printed before the song line it belongs to (the song that just
+                            # crossed the detection threshold), not after - "Detected" describes
+                            # what happened as of this song, so it reads better leading into it.
+                            if tracker.screen_message:
+                                print_debug(f"PLAYLIST_SCREEN_MESSAGE: {tracker.screen_message}")
+                                print_to_screen(tracker.screen_message)
                             print_to_screen(f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}")
                             send_notification("song", f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}", sp_album_image_url, sp_track, sp_artist, sp_album, (sp_playlist+iconstring()) if is_playlist else '', time_diff_str(), listened_songs)
-                            if dz_msg_screen:
-                                print_debug(f"DZ_MSG_SCREEN: {dz_msg_screen}")
-                                print_to_screen(dz_msg_screen)
 
                     print(f"Spotify user:\t\t\t{sp_username}")
                     print(f"\n{activity_label}:{activity_tabs}{sp_artist} - {sp_track}")
@@ -13827,7 +14171,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                         print("─" * HORIZONTAL_LINE)
 
                     # Friend got active after being offline
-                    if resumed_live_session or (not live_activity and (cur_ts - sp_ts_old) > activity_inactivity_check() and sp_active_ts_stop > 0):
+                    if friend_resuming_this_song:
 
                         if live_activity:
                                 sp_active_ts_start = int(live_timing.session_started_at)
@@ -13866,87 +14210,50 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
                         print_debug(f"LOOP C - FOR ALL SONGS - FRIEND ACTIVE AFTER BEING OFFLINE")
                         if ALT_VIEW:
-#                            song_count = 1
-# this is executed when friend becomes active
-# already handled above for every song (2), THEN this (3) gets executed for the 'got ACTIVE' messaging
-                            # #---
-                            # dz_msg_screen = ""
-                            # dz_str = f"{sp_artist} - {sp_track}"
-
-                            # 8/5 uncommented to ensure refresh of foound_playlist
-                            last_found_playlist = found_playlist
-                            if not hasTrack and (sp_playlist_owner != "Spotify"):
-                                found_playlist = find_song_in_playlists(dz_str, found_playlist, sp_playlist if is_playlist else "")
-                            else:
-                                found_playlist = False
-                                last_found_playlist = False
-                                print_debug(f"SKIPPED FIND_SONG_IN_PLAYLIST (3) -> hasTrack: {hasTrack}")
-
-                            if found_playlist:
-                                print_debug(f"FOUND PLAYLIST IN MONITORING LIST (3) -> {found_playlist['name']}")
-                                print_debug(f"COUNT START: {found_playlist['count_start']}, {found_playlist['qty_start']}")
-# already handled above for every song (2), THEN this (3) gets executed for the 'got ACTIVE' messaging
-# so this +1 is extra and double-counts
-                                # save_count = found_playlist['count_start']
-                                # reset_playlist_counts()
-                                # found_playlist['count_start'] = save_count + 1
-                                # print_debug(f"COUNT START + 1: {found_playlist['count_start']}")
-
-                                # don't check to override count here; only do it when starting up, not when user starts back up later
-                                # count was high enough to trigger detection
-# already handled above for every song (2), THEN this (3) gets executed for the 'got ACTIVE' messaging
-# so this is redundant
-                                # this is needed to cause detection messaging/notifications when user becomes active and already on a detected playlist
-                                if found_playlist['count_start'] >= found_playlist['qty_start']:
-                                    print_debug(f"PLAYLIST_DETECTED (3): {found_playlist['count_start']}, {found_playlist['qty_start']}")
-                                    is_playlist = True
-                                    sp_playlist = found_playlist['name']
-                                    sp_playlist_url = found_playlist.get('url', '')
-                                    playlist_m_body = f"\nPlaylist: {sp_playlist}{iconstring()}"
-                                    playlist_m_body_html = f"<br>Playlist: <a href=\"{escape_html_attr(sp_playlist_url)}\">{escape(sp_playlist)}</a>"
-                                    save_track = sp_track
-                                    sp_track = sp_track + found_playlist.get('icon', '')
-                                    body_dz, body_dz_html, dz_message, dz_msg_screen = monitored_playlist_detected(found_playlist, songstring(), time_diff_str(), True, sp_track, sp_artist, sp_album)
-                                    # restore to avoid adding 'icon' twice (in code processing all tracks)
-                                    sp_track = save_track
-                                # else:
-                                    # dz_message = build_dz_string(found_playlist)
-                                    # if DEBUG_JMK and dz_message != "":
-                                        # dz_message = dz_message + " (5)"
-                            # else:
-                                # reset_playlist_counts()
-
-                                # process a possible exception if last song was in a playlist (even if as exception) AND it's an active playlist (not counting up towards it)
-                                # actually, if not allowing exception during counting up to > 2, may never get there since smart shuffle puts a new song every 3
-                                # if last_found_playlist and (last_found_playlist['count_start'] >= last_found_playlist['qty_start']):
-                                # if last_found_playlist:
-                                    # print_debug(f"COUNT END: {last_found_playlist['count_end']}")
-                                    # last_found_playlist['count_end'] += 1
-                                    # print_debug(f"COUNT END + 1: {last_found_playlist['count_end']}")
-                                    # if last_found_playlist['count_end'] >= last_found_playlist['qty_end']:
-                                        # # limit achieved
-                                        # # reset_playlist_counts()
-                                        # dz_message, dz_msg_screen = monitored_playlist_cleared(last_found_playlist, songstring(), time_diff_str())
-                                    # else:
-                                        # # since haven't hit limit yet to consider playlist over, set found_playlist back to previous
-                                        # found_playlist = last_found_playlist
-                                        # is_playlist = True
-                                        # sp_playlist = found_playlist['name']
-                                        # sp_playlist_url = found_playlist.get('url', '')
-                                        # # don't show icon in this case, but OK to show playlist with an *
-                                        # # sp_track = sp_track + found_playlist.get('icon', '')
-                                        # if ALT_VIEW:
-                                            # icon_add = True
-                                        # print_debug(f"HAVEN'T HIT LIMIT TO DISCONTINUE PLAYLIST (3) -> {found_playlist['name']}")
-                                # # else:
-                                    # reset_playlist_counts()
-
                             #---
                             print_to_screen(f" ")
                             print_to_screen(f"----------------------")
                             print_to_both(f"{timestring()}: {ERR_CODE}, *** Start notification sent")
                             send_notification("active", f"START: {songstring()}", sp_playlist_image_url if sp_playlist_image_url else sp_album_image_url, sp_track, sp_artist, sp_album, (sp_playlist+iconstring()) if is_playlist else '', timediffstr=timediffstrtmp)
                             #---
+                            # A "Cleared" line the normal tracker.advance() call above built for this exact
+                            # song was deferred (see friend_resuming_this_song) specifically so it would
+                            # print after the "Start notification sent" banner above, not before it - show
+                            # it now. Only ever a "Cleared" message (advance()'s "Detected" sites never
+                            # defer), so this can't collide with the recheck just below, which only ever
+                            # rebuilds "Detected" - the two can't be announcing the same thing twice.
+                            if tracker.pending_screen_message:
+                                print_to_screen(tracker.pending_screen_message)
+                                tracker.pending_screen_message = ""
+                            # ALT_VIEW-only re-announce when a friend goes from offline back to active. LOOP C
+                            # above already ran the full detection/counting state machine for this same song, so
+                            # this only needs to check whether that already put a playlist over its threshold, and
+                            # if so, announce it (with print_msg=True) - after the "Start notification sent" banner
+                            # above, not before it, so a persisted-from-before-the-gap Detected reads as part of
+                            # this new session rather than preceding it. Deliberately does NOT call tracker.advance()
+                            # again for this song - that already happened moments ago (in LOOP C above) - since
+                            # doing so would double-count it.
+                            #
+                            # NOTE: an earlier version of this code *did* re-run the lookup here (a since-removed
+                            # "8/5 uncommented to ensure refresh of found_playlist" fix), implying re-using the
+                            # cached tracker state once caused a real bug. That couldn't be reproduced without a
+                            # live Spotify session when this was cleaned up - if playlist detection looks wrong
+                            # specifically right after a friend resumes from offline, this is the first place to
+                            # check, and re-introducing a fresh (but non-mutating) lookup here may be the fix.
+                            if tracker.current and tracker.current['count_start'] >= tracker.current['qty_start']:
+                                print_debug(f"FOUND PLAYLIST IN MONITORING LIST (3) -> {tracker.current['name']}")
+                                is_playlist = True
+                                sp_playlist = tracker.current['name']
+                                sp_playlist_url = tracker.current.get('url', '')
+                                playlist_m_body = f"\nPlaylist: {sp_playlist}{iconstring()}"
+                                playlist_m_body_html = f"<br>Playlist: <a href=\"{escape_html_attr(sp_playlist_url)}\">{escape(sp_playlist)}</a>"
+                                save_track = sp_track
+                                sp_track = sp_track + tracker.current.get('icon', '')
+                                tracker.body_text, tracker.body_html, tracker.message, tracker.screen_message = monitored_playlist_detected(
+                                    tracker.current, songstring(), time_diff_str(), True, sp_track, sp_artist, sp_album)
+                                # restore to avoid adding 'icon' twice (in code processing all tracks)
+                                sp_track = save_track
+
                             print_to_screen(f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}")
                             send_notification("song", f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}", sp_album_image_url, sp_track, sp_artist, sp_album, (sp_playlist+iconstring()) if is_playlist else '', time_diff_str(), listened_songs)
 
@@ -14068,11 +14375,8 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                     except Exception as e:
                         print_recovery_error(e, "file_write", detail=f"CSV destination '{csv_file_name}' could not be written: {e}")
 
-                    if dz_message or listened_songs:
-                        print("")
-                    if dz_message:
-                        print(dz_message)
                     if listened_songs:
+                        print("")
                         print(f"\nSongs played:\t\t\t{songs_played_text(listened_songs, activity_ts, sp_active_ts_start)}")
                     if ALT_VIEW:
                         icon_add = False
@@ -15908,13 +16212,7 @@ def main():
             print_recovery_error(context="dependency", detail="sheets_helper is required because UPDATE_SPREADSHEET is enabled")
             sys.exit(1)
         if sheets_helper.credentials_need_reauth(GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE):
-            print(f"* Google Sheets authorization needed for tab '{ERR_CODE}' - opening browser for consent...")
-            if ERROR_NOTIFICATION:
-                reauth_subject = f"spotify_monitor: Google Sheets re-authorization needed (tab '{ERR_CODE}')"
-                reauth_body = f"The cached Google Sheets token for tab '{ERR_CODE}' is no longer valid and needs to be re-authorized. spotify_monitor is opening a browser consent window now on the machine it's running on and will wait there until it's completed.{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                reauth_body_html = f"<html><head></head><body>The cached Google Sheets token for tab '{escape(ERR_CODE)}' is no longer valid and needs to be re-authorized. spotify_monitor is opening a browser consent window now on the machine it's running on and will wait there until it's completed.{get_cur_ts('<br><br>Timestamp: ')}</body></html>"
-                send_email(reauth_subject, reauth_body, reauth_body_html, SMTP_SSL)
-                send_notification("sheet", f"spotify_monitor: Google Sheets re-authorization needed (tab '{ERR_CODE}') - complete the browser consent on the host machine")
+            alert_sheets_reauth_required()
             sheets_helper.interactive_reauth(GOOGLE_OAUTH_CLIENT_FILE, GOOGLE_OAUTH_TOKEN_FILE)
             print(f"* Google Sheets authorization complete")
 
@@ -15942,6 +16240,7 @@ def main():
         signal.signal(signal.SIGABRT, decrease_inactivity_check_signal_handler)
         signal.signal(signal.SIGHUP, reload_secrets_signal_handler)
 
+    ADD_PLAYLISTS_TO_MONITOR = validate_add_playlists_to_monitor(ADD_PLAYLISTS_TO_MONITOR)
     for playlist in ADD_PLAYLISTS_TO_MONITOR:
         periodic_load_tracks_flexible(playlist)
 
