@@ -206,6 +206,43 @@ def test_track_change_is_recorded_for_an_active_friend(loop_environment, monkeyp
     assert all("Track Name" in row for row in rows[1:])
 
 
+# Regression: SPOTIFY_SUFFIX is part of the playlist's own identity - songstring() must embed it
+# inside the brackets ("[Playlist Name (by Spotify)]"), not append it after them
+# ("[Playlist Name] (by Spotify)"), which reads as if it were a separate trailing note. The
+# shuffle-tolerance icon stays outside the brackets either way, since it describes this song's
+# match, not the playlist.
+def test_alt_view_embeds_the_spotify_suffix_inside_the_playlist_brackets(loop_environment, monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(monitor, "ALT_VIEW", True)
+    monkeypatch.setattr(monitor, "SPOTIFY_SUFFIX", " (by Spotify)")
+    # ALT_VIEW reassigns sys.stdout to a file-only Logger partway through (see spotify_monitor.py,
+    # just before "Primary loop") - FINAL_LOG_PATH/log_logger are the real globals it reads/writes
+    # when doing so, normally only set up by main(), which this test bypasses by calling
+    # spotify_monitor_friend_uri() directly (print_to_screen() itself still reaches capsys, via the
+    # Logger's own captured terminal reference - see test_listening_activity.py for the same setup).
+    monkeypatch.setattr(monitor, "FINAL_LOG_PATH", str(tmp_path / "monitor.log"), raising=False)
+    monkeypatch.setattr(monitor, "log_logger", monitor.Logger(str(tmp_path / "screen.log"), mode="screen"), raising=False)
+    monkeypatch.setattr(monitor, "TOKEN_SOURCE", "cookie")
+    monkeypatch.setattr(monitor, "spotify_get_access_token_from_sp_dc", lambda cookie: "live-token")
+    started_at = int(time.time())
+    monkeypatch.setattr(monitor, "spotify_get_friends_json", lambda token: buddy_list(timestamp_ms=started_at * 1000))
+    monkeypatch.setattr(monitor, "spotify_get_track_info", lambda *arguments, **keywords: track_metadata())
+    monkeypatch.setattr(monitor, "spotify_get_playlist_owner_and_image", lambda *arguments, **keywords: ("Spotify", ""))
+    # The first poll only detects the friend as newly active; the per-song console line prints on
+    # the next check that confirms the same track is still playing - same two-poll shape as
+    # test_track_change_is_recorded_for_an_active_friend above.
+    loop_environment.stop_after = 2
+
+    run_one_iteration(loop_environment)
+
+    output = capsys.readouterr().out
+    # The ALT_VIEW console line ("[04] Track Name - Artist Name (Album Name) [...]"), not the
+    # verbose "Last played:\t\t\tArtist Name - Track Name" summary line printed alongside it - both
+    # contain "Track Name", only this one has the bracketed tag under test.
+    song_line = next(line for line in output.splitlines() if "] Track Name - Artist Name" in line)
+    assert "[Playlist Name (by Spotify)]" in song_line, f"expected the suffix inside the brackets, got: {song_line!r}"
+    assert "[Playlist Name] (by Spotify)" not in song_line
+
+
 # Verifies verbose stays quiet on an uneventful cycle instead of printing one line per check
 def test_a_quiet_cycle_stays_silent_in_verbose(loop_environment, monkeypatch, capsys):
     monkeypatch.setattr(monitor, "VERBOSE_MODE", True)
