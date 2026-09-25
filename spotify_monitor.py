@@ -14552,7 +14552,17 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                     tracker.body_text, tracker.body_html, tracker.message, tracker.screen_message = monitored_playlist_detected(
                         tracker.current, songstring(), time_diff_str(), True, sp_track, sp_artist, sp_album)
 
-                print_to_screen(f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}")
+                # SPOTIFY_SUFFIX is part of the playlist's own identity, so ALT_VIEW's console line
+                # puts it inside the brackets ([Party Mix (by Spotify)]) rather than after them - the
+                # way songstring() itself still builds it for email/ntfy. The shuffle-tolerance icon
+                # stays outside the brackets, since it describes this song's match, not the playlist.
+                print_to_screen(
+                    (f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {sp_track.strip()} - {sp_artist.strip()} "
+                     f"({sp_album.strip()}) [{sp_playlist.strip()}{SPOTIFY_SUFFIX if sp_playlist_owner == 'Spotify' else ''}]"
+                     f"{ICON_SONG_MISSING_FROM_PLAYLIST if icon_add else ''}")
+                    if (sp_playlist and is_playlist) else
+                    f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}"
+                )
                 send_notification("song", f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}", sp_album_image_url, sp_track, sp_artist, sp_album, (sp_playlist+iconstring()) if is_playlist else '', time_diff_str(), listened_songs)
 
             disappeared_counter = 0
@@ -14952,7 +14962,17 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                             if tracker.screen_message:
                                 print_debug(f"PLAYLIST_SCREEN_MESSAGE: {tracker.screen_message}")
                                 print_to_screen(tracker.screen_message)
-                            print_to_screen(f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}")
+                            # SPOTIFY_SUFFIX is part of the playlist's own identity, so ALT_VIEW's console line
+                            # puts it inside the brackets ([Party Mix (by Spotify)]) rather than after them - the
+                            # way songstring() itself still builds it for email/ntfy. The shuffle-tolerance icon
+                            # stays outside the brackets, since it describes this song's match, not the playlist.
+                            print_to_screen(
+                                (f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {sp_track.strip()} - {sp_artist.strip()} "
+                                 f"({sp_album.strip()}) [{sp_playlist.strip()}{SPOTIFY_SUFFIX if sp_playlist_owner == 'Spotify' else ''}]"
+                                 f"{ICON_SONG_MISSING_FROM_PLAYLIST if icon_add else ''}")
+                                if (sp_playlist and is_playlist) else
+                                f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}"
+                            )
                             send_notification("song", f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}", sp_album_image_url, sp_track, sp_artist, sp_album, (sp_playlist+iconstring()) if is_playlist else '', time_diff_str(), listened_songs)
 
                     print(f"Spotify user:\t\t\t{sp_username}")
@@ -15162,7 +15182,17 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                                 # restore to avoid adding 'icon' twice (in code processing all tracks)
                                 sp_track = save_track
 
-                            print_to_screen(f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}")
+                            # SPOTIFY_SUFFIX is part of the playlist's own identity, so ALT_VIEW's console line
+                            # puts it inside the brackets ([Party Mix (by Spotify)]) rather than after them - the
+                            # way songstring() itself still builds it for email/ntfy. The shuffle-tolerance icon
+                            # stays outside the brackets, since it describes this song's match, not the playlist.
+                            print_to_screen(
+                                (f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {sp_track.strip()} - {sp_artist.strip()} "
+                                 f"({sp_album.strip()}) [{sp_playlist.strip()}{SPOTIFY_SUFFIX if sp_playlist_owner == 'Spotify' else ''}]"
+                                 f"{ICON_SONG_MISSING_FROM_PLAYLIST if icon_add else ''}")
+                                if (sp_playlist and is_playlist) else
+                                f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}"
+                            )
                             send_notification("song", f"{timestring()}: {ERR_CODE}, [{time_diff_str()}] {songstring()}", sp_album_image_url, sp_track, sp_artist, sp_album, (sp_playlist+iconstring()) if is_playlist else '', time_diff_str(), listened_songs)
 
                         music_urls_text = format_music_urls_email_text(apple_search_url, youtube_music_search_url, amazon_music_search_url, deezer_search_url, tidal_search_url)
