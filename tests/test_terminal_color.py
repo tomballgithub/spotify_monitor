@@ -822,6 +822,74 @@ def test_every_summary_row_is_recognised_by_its_value_column():
     assert not monitor.is_startup_summary_row("* Warning: a timeout was hit")
 
 
+# ALT_VIEW's own song-line colouriser (colorize_alt_view_line) - separate rule set from
+# _colorize_line() above, dispatched by apply_color_to_text() only while ALT_VIEW is on. These call
+# it directly, so they don't need ALT_VIEW itself set.
+_ALT_VIEW_PREFIX = "09/24, 12:00:00: JMK, "
+
+
+# Regression: songstring() appends a Spotify-curated playlist's optional marker (SPOTIFY_SUFFIX,
+# " (by Spotify)" by default but user-configurable to anything) *outside* the "[Playlist]" brackets,
+# e.g. "... [Feel Good Dinner] (by Spotify)". The colouriser's own regex required the closing "]" to
+# be the literal end of the line, so any line with this suffix silently fell all the way through to
+# "no playlist match at all" - no playlist highlighting whatsoever, not even on the name inside the
+# brackets, exactly the case a curated-playlist listener would see on every single song. The suffix
+# itself stays uncoloured either way - it isn't part of the playlist's name.
+def test_alt_view_colors_the_playlist_name_before_a_trailing_spotify_suffix(colored):
+    line = _ALT_VIEW_PREFIX + "[00] Take 3 - Inner Wave (Apoptosis) [Feel Good Dinner] (by Spotify)"
+
+    rendered = monitor.colorize_alt_view_line(line)
+
+    assert rendered.endswith(f"[{colored['playlist']}Feel Good Dinner{monitor.ANSI_RESET}] (by Spotify)")
+    assert monitor.ANSI_ESCAPE_RE.sub("", rendered) == line
+
+
+# A playlist with no trailing suffix must colour exactly as before this fix - the suffix group is
+# optional and must not add stray text when there's nothing there
+def test_alt_view_colors_a_playlist_without_a_suffix_unchanged(colored):
+    line = _ALT_VIEW_PREFIX + "[00] Take 3 - Inner Wave (Apoptosis) [Feel Good Dinner]"
+
+    rendered = monitor.colorize_alt_view_line(line)
+
+    assert rendered.endswith(f"[{colored['playlist']}Feel Good Dinner{monitor.ANSI_RESET}]")
+    assert monitor.ANSI_ESCAPE_RE.sub("", rendered) == line
+
+
+# The shuffle-tolerance icon is captured separately (by _ALT_VIEW_SONG_LINE_RE, before the playlist
+# suffix rule ever runs) and keeps its own "warning" colour, appended after the suffix - the two
+# must not interfere with each other now that a suffix can sit between the playlist name and the icon
+def test_alt_view_colors_a_suffixed_playlist_with_a_shuffle_icon(colored):
+    line = _ALT_VIEW_PREFIX + "[00] Take 3 - Inner Wave (Apoptosis) [Feel Good Dinner] (by Spotify)*"
+
+    rendered = monitor.colorize_alt_view_line(line)
+
+    assert rendered.endswith(f"] (by Spotify){colored['warning']}*{monitor.ANSI_RESET}")
+    assert monitor.ANSI_ESCAPE_RE.sub("", rendered) == line
+
+
+# A suffix truncated mid-way (Logger truncates to the terminal width *before* this colouriser runs)
+# must still leave the playlist name coloured - the suffix group matches any non-bracket text after
+# "]" to end of line, complete or not, so this needs no separate rule from the full-suffix case
+def test_alt_view_colors_a_playlist_with_a_truncated_suffix(colored):
+    line = _ALT_VIEW_PREFIX + "[00] Take 3 - Inner Wave (Apoptosis) [Feel Good Dinner] (by Sp"
+
+    rendered = monitor.colorize_alt_view_line(line)
+
+    assert rendered.endswith(f"[{colored['playlist']}Feel Good Dinner{monitor.ANSI_RESET}] (by Sp")
+    assert monitor.ANSI_ESCAPE_RE.sub("", rendered) == line
+
+
+# A playlist name truncated before its own closing "]" (the bracket itself never completes) must
+# keep falling back to the truncated-name rule, unaffected by the new suffix group existing
+def test_alt_view_colors_a_playlist_name_truncated_before_its_closing_bracket(colored):
+    line = _ALT_VIEW_PREFIX + "[00] Take 3 - Inner Wave (Apoptosis) [Feel Good Din"
+
+    rendered = monitor.colorize_alt_view_line(line)
+
+    assert rendered.endswith(f"[{colored['playlist']}Feel Good Din{monitor.ANSI_RESET}")
+    assert monitor.ANSI_ESCAPE_RE.sub("", rendered) == line
+
+
 # Verifies a date does not reach back over a padded gap and read the word in front of it as a weekday
 def test_a_wide_gap_before_a_date_is_not_read_as_a_weekday():
     padded = monitor._LONG_DATE_RE.search("A padded column end     07 Feb 26, 00:05:42")

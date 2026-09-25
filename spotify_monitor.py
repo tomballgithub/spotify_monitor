@@ -4805,7 +4805,7 @@ def colorize_fix_line(line):
 
 _ALT_VIEW_LINE_RE = re.compile(r"^(?P<prefix>\d{2}/\d{2}, \d{2}:\d{2}:\d{2}: [^,\n]*, )(?P<rest>.*)$")
 _ALT_VIEW_SONG_LINE_RE = re.compile(r"^\[(?P<offset>\d+)\] (?P<body>.*?)(?P<shuffle>\*)?$")
-_ALT_VIEW_TRAILING_PLAYLIST_RE = re.compile(r"^(?P<song>.*) \[(?P<playlist>[^\[\]]+)\]$")
+_ALT_VIEW_TRAILING_PLAYLIST_RE = re.compile(r"^(?P<song>.*) \[(?P<playlist>[^\[\]]+)\](?P<playlist_suffix>[^\[\]]*)$")
 # TRUNCATE_CHARS cuts a line to the terminal width *before* this colouriser ever runs (Logger
 # truncates first, then colours - see Logger.write()/terminal_only()), so on a narrow or
 # split-screen terminal a playlist tag right at the edge often arrives with its closing "]"
@@ -4865,7 +4865,14 @@ def colorize_alt_view_line(line):
     truncated_match = None if full_match else _ALT_VIEW_TRUNCATED_PLAYLIST_RE.match(body)
     if full_match:
         song_part = _colorize_alt_view_song_body(full_match.group("song"))
-        playlist_part = f" [{colorize('playlist', full_match.group('playlist'))}]"
+        # A Spotify-curated playlist's name carries an optional trailing marker outside the
+        # brackets (SPOTIFY_SUFFIX, e.g. " (by Spotify)" by default, but user-configurable to
+        # anything). Without this group, _ALT_VIEW_TRAILING_PLAYLIST_RE's required "]$" failed to
+        # match any line with that trailing text, so the whole tag fell through uncoloured - not
+        # just the suffix, the playlist name inside the brackets too. Left uncoloured itself (it's
+        # not part of the playlist's name), just appended as-is after the coloured bracket.
+        suffix = full_match.group("playlist_suffix")
+        playlist_part = f" [{colorize('playlist', full_match.group('playlist'))}]{suffix}"
     elif truncated_match:
         # No closing "]" here since the raw line didn't have one either - adding one would make the
         # coloured line one character longer than what Logger actually truncated it to.
