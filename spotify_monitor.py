@@ -14098,7 +14098,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
 
     def songstring():
         if sp_playlist and is_playlist:
-            return f"{sp_track.strip()} - {sp_artist.strip()} ({sp_album.strip()}) [{sp_playlist.strip()}{playlist_suffix}]{ICON_SONG_MISSING_FROM_PLAYLIST if icon_add else ''}"
+            return f"{sp_track.strip()} - {sp_artist.strip()} ({sp_album.strip()}) [{sp_playlist.strip()}]{iconstring()}"
         else:
             return f"{sp_track.strip()} - {sp_artist.strip()} ({sp_album.strip()})"
 
