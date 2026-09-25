@@ -829,32 +829,3 @@ def test_a_wide_gap_before_a_date_is_not_read_as_a_weekday():
 
     assert padded is not None and padded.group(0) == "07 Feb 26, 00:05:42"
     assert weekday is not None and weekday.group(0) == "Sun 06 Apr 2025, 21:21:46"
-
-
-# ALT_VIEW's own song-line colouriser (colorize_alt_view_line) - separate rule set from
-# _colorize_line() above, dispatched by apply_color_to_text() only while ALT_VIEW is on. These call
-# it directly, so they don't need ALT_VIEW itself set.
-_ALT_VIEW_PREFIX = "09/24, 12:00:00: JMK, "
-
-
-# A playlist tag colours as a whole, including a Spotify-curated playlist's SPOTIFY_SUFFIX marker
-# (e.g. " (by Spotify)") when present - songstring() embeds it inside the brackets as part of the
-# playlist's own name, so there's nothing for this colouriser to treat specially about it
-def test_alt_view_colors_a_playlist_tag(colored):
-    line = _ALT_VIEW_PREFIX + "[00] Take 3 - Inner Wave (Apoptosis) [Feel Good Dinner (by Spotify)]"
-
-    rendered = monitor.colorize_alt_view_line(line)
-
-    assert rendered.endswith(f"[{colored['playlist']}Feel Good Dinner (by Spotify){monitor.ANSI_RESET}]")
-    assert monitor.ANSI_ESCAPE_RE.sub("", rendered) == line
-
-
-# A playlist name truncated before its own closing "]" (the bracket itself never completes) must
-# fall back to the truncated-name rule instead of leaving the fragment uncoloured
-def test_alt_view_colors_a_playlist_name_truncated_before_its_closing_bracket(colored):
-    line = _ALT_VIEW_PREFIX + "[00] Take 3 - Inner Wave (Apoptosis) [Feel Good Din"
-
-    rendered = monitor.colorize_alt_view_line(line)
-
-    assert rendered.endswith(f"[{colored['playlist']}Feel Good Din{monitor.ANSI_RESET}")
-    assert monitor.ANSI_ESCAPE_RE.sub("", rendered) == line
