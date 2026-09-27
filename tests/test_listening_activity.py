@@ -572,8 +572,8 @@ def test_live_track_change_reports_partial_startup_track_without_skip(loop_envir
     assert output.index("User played the previous track for:") < output.index("Spotify user:")
 
 
-# The time that opens every compact view line, such as "09/27, 17:10:18"
-COMPACT_STAMP = r"\d{2}/\d{2}, \d{2}:\d{2}:\d{2}"
+# The time that opens every compact view line, such as "27 Sep, 17:10:18"
+COMPACT_STAMP = r"\d{2} [A-Z][a-z]{2}, \d{2}:\d{2}:\d{2}"
 
 
 # Compact view opens each session with a blank line and "Friend is Active..." and closes it with "Friend is Inactive..."
@@ -613,7 +613,7 @@ def test_compact_view_counts_minutes_from_the_active_banner(loop_environment, mo
 
     # The printed times carry no year. A leap year keeps 29 February parseable
     def parse(printed):
-        return datetime.strptime(f"2000/{printed}", "%Y/%m/%d, %H:%M:%S")
+        return datetime.strptime(f"2000 {printed}", "%Y %d %b, %H:%M:%S")
 
     assert [minutes for _, minutes in songs] == ["00", "02"], songs
     for printed, minutes in songs:
