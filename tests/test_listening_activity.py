@@ -2,6 +2,7 @@
 
 import copy
 import errno
+import re
 from datetime import datetime, timezone
 from unittest.mock import Mock
 
@@ -486,8 +487,8 @@ def test_live_inactivity_and_same_track_restart(loop_environment, monkeypatch, c
 # right below it, which already did this for the non-live-activity backend.
 def test_live_resume_after_being_offline_shows_a_fresh_offset_in_jmk_mode(loop_environment, monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(monitor, "JMK_MODE", True)
-    monkeypatch.setattr(monitor, "ALT_VIEW", True)
-    # ALT_VIEW makes the code under test reassign sys.stdout to a file-only Logger partway through
+    monkeypatch.setattr(monitor, "COMPACT_VIEW", True)
+    # COMPACT_VIEW makes the code under test reassign sys.stdout to a file-only Logger partway through
     # (see spotify_monitor.py, just before "Primary loop") - FINAL_LOG_PATH/log_logger are the real
     # globals it reads/writes when doing so, normally only set up by main(), which these tests bypass
     # entirely by calling spotify_monitor_friend_uri() directly (same setup as playlist_harness.py's
@@ -499,12 +500,115 @@ def test_live_resume_after_being_offline_shows_a_fresh_offset_in_jmk_mode(loop_e
     snapshots = [feed_entity(now), feed_entity(now, playing=False), feed_entity(now, playing=False), feed_entity(now, playing=False), feed_entity(now)]
     run_live_snapshots(monkeypatch, loop_environment, snapshots)
     output = capsys.readouterr().out
-    # "Friend got ACTIVE" is a bare print(), which ALT_VIEW routes to FINAL_LOG_PATH only once the
+    # "Friend got ACTIVE" is a bare print(), which COMPACT_VIEW routes to FINAL_LOG_PATH only once the
     # reassignment above kicks in (see the comment above) - not to stdout/capsys.
     assert "Friend got ACTIVE" in log_path.read_text(encoding="utf-8"), "the resume itself must actually fire"
     start_idx = output.rindex("Start notification sent")
     song_line = next(line for line in output[start_idx:].splitlines() if "First" in line)
     assert "[00]" in song_line, f"expected a fresh [00] offset right after resuming from being offline, got: {song_line!r}"
+
+
+# Regression: the per-song line printer decided "is this a resume?" with the buddylist timer
+# (SPOTIFY_INACTIVITY_CHECK) while the "Friend got ACTIVE after being offline" block decided it with
+# the live backend's own (SPOTIFY_LIVE_INACTIVITY_CHECK, via activity_inactivity_check()). With the
+# live timer shorter, a comeback between the two printed the resumed song twice - once right after
+# "End notification sent", once after the new "Start notification sent".
+def test_live_resume_prints_the_resumed_song_line_only_once(loop_environment, monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(monitor, "JMK_MODE", True)
+    monkeypatch.setattr(monitor, "COMPACT_VIEW", True)
+    monkeypatch.setattr(monitor, "SPOTIFY_INACTIVITY_CHECK", 3600)
+    monkeypatch.setattr(monitor, "FINAL_LOG_PATH", str(tmp_path / "monitor.log"), raising=False)
+    monkeypatch.setattr(monitor, "log_logger", monitor.Logger(str(tmp_path / "screen.log"), mode="screen"), raising=False)
+    now = loop_environment.now
+    snapshots = [feed_entity(now), feed_entity(now, playing=False), feed_entity(now, playing=False), feed_entity(now, playing=False), feed_entity(now)]
+    run_live_snapshots(monkeypatch, loop_environment, snapshots)
+    output = capsys.readouterr().out
+
+    end_idx = output.rindex("End notification sent")
+    start_idx = output.rindex("Start notification sent")
+    assert end_idx < start_idx
+    assert "] First - Artist" not in output[end_idx:start_idx], output[end_idx:start_idx]
+    assert output[start_idx:].count("] First - Artist") == 1, output[start_idx:]
+
+
+# Regression: when a friend comes back from offline, the comeback block already sends JMK's START ntfy
+# for the song that brought them back, plus its Sheets row and song email. The ordinary song alerts
+# that follow in the same check then repeated all three for that same song: a second ntfy (the song
+# webhook), a second Sheets row and a second email. The check meant to stop this compared
+# time_diff_str() (a string such as "00") with the number 0, so it never fired. Only that one song is
+# skipped - later songs in the session still alert.
+def test_resumed_song_skips_the_song_alerts_that_would_duplicate_the_comeback(loop_environment, monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(monitor, "JMK_MODE", True)
+    monkeypatch.setattr(monitor, "COMPACT_VIEW", True)
+    monkeypatch.setattr(monitor, "SEND_NOTIFY", True)
+    monkeypatch.setattr(monitor, "ACTIVE_NOTIFICATION", True)
+    monkeypatch.setattr(monitor, "SONG_NOTIFICATION", True)
+    monkeypatch.setattr(monitor, "WEBHOOK_ENABLED", True)
+    monkeypatch.setattr(monitor, "WEBHOOK_SONG_NOTIFICATION", True)
+    monkeypatch.setattr(monitor, "WEBHOOK_ACTIVE_NOTIFICATION", False)
+    monkeypatch.setattr(monitor, "FINAL_LOG_PATH", str(tmp_path / "monitor.log"), raising=False)
+    monkeypatch.setattr(monitor, "log_logger", monitor.Logger(str(tmp_path / "screen.log"), mode="screen"), raising=False)
+    # One ordered record of every alert-like side effect, so counts can be taken after the comeback
+    events = []
+    monkeypatch.setattr(monitor, "deliver_jmk_ntfy", lambda notification_type, message, *rest: events.append(("start", message)) if notification_type == "active" else None)
+    monkeypatch.setattr(monitor, "update_spreadsheet_row", lambda text, *rest, **keywords: events.append(("row", text)) or ("", ""))
+    monkeypatch.setattr(monitor, "send_email", lambda subject, *rest, **keywords: events.append(("email", subject)) or 0)
+    monkeypatch.setattr(monitor, "smtp_connect_and_login", lambda *rest, **keywords: None)
+
+    def channels(notification_type, subject, *rest, **keywords):
+        webhook = rest[3] if len(rest) > 3 else keywords.get("webhook_enabled")
+        events.append((f"channels:{notification_type}:{'webhook' if webhook else 'no-webhook'}", subject))
+        # The active email is delivered, as in the real run, which sets email_sent for this check
+        return notification_type == "active", False
+
+    monkeypatch.setattr(monitor, "send_notification_channels", channels)
+    now = loop_environment.now
+    # Active on First, idle long enough to go inactive, then back with First (the comeback song), then Second
+    snapshots = [feed_entity(now), feed_entity(now, playing=False), feed_entity(now, playing=False), feed_entity(now, playing=False), feed_entity(now), feed_entity(now + 400, track=OTHER_TRACK_URI)]
+    run_live_snapshots(monkeypatch, loop_environment, snapshots)
+
+    comeback = max(index for index, (kind, message) in enumerate(events) if kind == "start" and "First" in message)
+    after = events[comeback:]
+    assert [kind for kind, text in after if kind == "row" and "First" in text] == ["row"], after
+    assert [kind for kind, text in after if kind == "email" and "First" in text] == ["email"], after
+    assert not [kind for kind, text in after if kind.startswith("channels:song:webhook") and "First" in text], after
+    assert [kind for kind, text in after if kind == "channels:song:webhook" and "Second" in text], "later songs in the session still alert"
+
+
+# Regression: [NN] used to count from sp_active_ts_start - when the session's first song began -
+# which is earlier than the "Start notification sent" banner whenever monitoring starts (or a friend
+# comes back) mid-song, so every [NN] in that session ran ahead of the printed timestamps. It now
+# counts whole minutes since the banner, on the same clock as those timestamps.
+def test_compact_view_counts_minutes_from_the_start_banner(loop_environment, monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(monitor, "JMK_MODE", True)
+    monkeypatch.setattr(monitor, "COMPACT_VIEW", True)
+    monkeypatch.setattr(monitor, "FINAL_LOG_PATH", str(tmp_path / "monitor.log"), raising=False)
+    monkeypatch.setattr(monitor, "log_logger", monitor.Logger(str(tmp_path / "screen.log"), mode="screen"), raising=False)
+
+    class HarnessClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime.fromtimestamp(loop_environment.now, tz)
+
+    monkeypatch.setattr(monitor, "datetime", HarnessClock)
+    now = loop_environment.now
+    # Already two minutes into the first song when monitoring starts
+    snapshots = [feed_entity(now - 120)] * 6 + [feed_entity(now + 180, track=OTHER_TRACK_URI)] * 2
+    run_live_snapshots(monkeypatch, loop_environment, snapshots)
+    lines = capsys.readouterr().out.splitlines()
+
+    # The printed stamps carry no year; a fixed leap year keeps 29 February parseable
+    def parse(printed):
+        return datetime.strptime(f"2000/{printed}", "%Y/%m/%d, %H:%M:%S")
+
+    stamp = r"(\d{2}/\d{2}, \d{2}:\d{2}:\d{2})"
+    banners = [match for match in (re.match(stamp + r": [^,]*, \*\*\* Start notification sent$", line) for line in lines) if match]
+    banner = banners[0].group(1)
+    songs = [match.groups() for match in (re.match(stamp + r": [^,]*, \[(\d+)\] ", line) for line in lines) if match]
+    assert [minutes for _, minutes in songs] == ["00", "02"], songs
+    for printed, minutes in songs:
+        elapsed = (parse(printed) - parse(banner)).total_seconds()
+        assert int(minutes) == int(elapsed // 60), (printed, minutes)
 
 
 # Fresh paused timestamps and track changes cannot open a session without observed playback

@@ -300,7 +300,7 @@ def test_state_survives_going_idle_then_active_with_on_list_song(monkeypatch):
 
     # Proves the idle->active transition itself actually fired (the "went inactive" / "resumed
     # after offline" code paths), not just that nothing disruptive happened to the counters. Both
-    # print() bare, not via print_to_screen(), so they land in the log file, not session.output -
+    # print() bare, not via print_to_screen_and_log(), so they land in the log file, not session.output -
     # see the comment on PlaylistSession's log_output capture in playlist_harness.py.
     assert "got INACTIVE" in session.log_output, "the idle gap must actually trigger the inactivity check"
     assert "got ACTIVE after being offline" in session.log_output, "resuming must actually trigger the offline-resume check"
@@ -416,10 +416,10 @@ def test_notify_true_sends_real_notification(monkeypatch):
 class TestValidateAddPlaylistsToMonitor:
     @pytest.fixture(autouse=True)
     def _silence_error_output(self, monkeypatch):
-        # validate_add_playlists_to_monitor() reports errors via print_to_both(), which needs a
+        # validate_add_playlists_to_monitor() reports errors via print_to_screen_and_log(), which needs a
         # real log_logger (normally set up by main()/PlaylistSession) - not relevant to what these
         # tests check (the filtered return value), so just swallow the printed text.
-        monkeypatch.setattr(monitor, "print_to_both", lambda message: None)
+        monkeypatch.setattr(monitor, "print_to_screen_and_log", lambda message: None)
 
     def _base(self, **overrides):
         cfg = {"name": "P", "filename": "f.txt", "qty_start": 3, "qty_end": 2}

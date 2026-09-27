@@ -11,6 +11,7 @@ import contextlib
 import io
 import re
 import time as real_time
+from datetime import datetime as real_datetime
 
 import spotify_monitor as monitor
 
@@ -19,8 +20,10 @@ TARGET_USER_ID = "test-user"
 
 # Matches one "now playing" console line, e.g.:
 #   09/20, 12:00:00: , [03] SongB <3 - Artist (Album) [Test Playlist]*
-# The [NN] bracket is minutes elapsed since the session started (time_diff_str()), not seconds -
-# callers should build sequences with whole-minute spacing and assert against that same value.
+# The [NN] bracket is whole minutes since the session's "Start notification sent" banner
+# (time_diff_str()), not seconds - callers should build sequences with whole-minute spacing and
+# assert against that same value. PlaylistSession runs the monitor's datetime.now() on the synthetic
+# feed's own timestamps, so [NN] follows those rather than the barely-moving real clock.
 _SONG_LINE_RE = re.compile(
     r"\[(?P<offset>\d+)\] "
     r"(?P<track>.+?) - (?P<artist>.+?) \((?P<album>.+?)\)"
@@ -107,7 +110,7 @@ class PlaylistSession:
     """
 
     def __init__(self, monkeypatch, playlist_config, friends_sequence, iterations,
-                 inactivity_check_seconds=60, alt_view=True, search_playlist_result=False):
+                 inactivity_check_seconds=60, compact_view=True, search_playlist_result=False):
         """playlist_config: a single playlist config dict (most tests - the resulting session
         tracks by session.playlist_name), or a list/tuple of them for scenarios that need more than
         one monitored playlist at once (e.g. one playlist's own "still counting up, not yet cleared"
@@ -142,7 +145,7 @@ class PlaylistSession:
         monkeypatch.setattr(monitor, "search_playlist", lambda *a, **k: search_playlist_result)
 
         monkeypatch.setattr(monitor, "JMK_MODE", True)
-        monkeypatch.setattr(monitor, "ALT_VIEW", alt_view)
+        monkeypatch.setattr(monitor, "COMPACT_VIEW", compact_view)
         monkeypatch.setattr(monitor, "TOKEN_SOURCE", "cookie")
         monkeypatch.setattr(monitor, "SP_DC_COOKIE", "fake")
         # Our mocked friends-list data never carries "sp_is_playing", so it has the shape of the
@@ -165,16 +168,32 @@ class PlaylistSession:
         self._log_path = log_path
 
         index = [0]
+        # The monitor's wall clock (datetime.now(), behind the printed timestamps and [NN]) follows the
+        # feed timestamp of the latest entry served - the moment a real run would see that song - and
+        # holds through absent() polls. Real time barely advances while time.sleep is mocked, so
+        # without this every [NN] would read 00.
+        feed_now = [None]
+
+        class _FeedClock(real_datetime):
+            @classmethod
+            def now(cls, tz=None):
+                if feed_now[0] is None:
+                    return real_datetime.now(tz)
+                return real_datetime.fromtimestamp(feed_now[0], tz)
+
+        monkeypatch.setattr(monitor, "datetime", _FeedClock)
 
         def next_friends(access_token):
             i = min(index[0], len(friends_sequence) - 1)
             index[0] += 1
             item = friends_sequence[i]
+            entry = item
             if isinstance(item, tuple):
                 entry, clock_value = item
                 self.clock.value = clock_value
-                return entry
-            return item
+            if entry.get("friends"):
+                feed_now[0] = entry["friends"][0]["timestamp"] / 1000
+            return entry
 
         monkeypatch.setattr(monitor, "spotify_get_friends_json", next_friends)
 
@@ -195,16 +214,16 @@ class PlaylistSession:
             with contextlib.redirect_stdout(buf):
                 # Logger.__init__ captures sys.stdout at construction time (via
                 # unwrap_terminal_stream), so it must be built *after* redirect_stdout is active,
-                # or print_to_screen()'s output goes to the real terminal instead of `buf`.
+                # or print_to_screen_and_log()'s output goes to the real terminal instead of `buf`.
                 monkeypatch.setattr(monitor, "log_logger", monitor.Logger(log_path, mode="screen"), raising=False)
                 monitor.spotify_monitor_friend_uri(TARGET_USER_ID, [], None)
         except _StopTest:
             pass
         finally:
-            # ALT_VIEW makes the code under test reassign sys.stdout to a file-only Logger just
+            # COMPACT_VIEW makes the code under test reassign sys.stdout to a file-only Logger just
             # before the primary loop starts (so bare print() - e.g. "Friend got INACTIVE"/"Friend
             # got ACTIVE after being offline" - lands only in the log file, not in `buf`; only
-            # print_to_screen()/print_to_both() calls write to `buf`, via the original Logger's
+            # print_to_screen_and_log() calls write to `buf`, via the original Logger's
             # captured terminal reference). Read the log file before it's removed so those
             # log-only messages are still checkable via self.log_output.
             try:

@@ -77,12 +77,12 @@ calls mocked out.
   to `clock_value` right before serving that entry, so "how much time has passed" checks are exact
   and reproducible regardless of how fast the test actually executes.
 - **`session.output`** vs. **`session.log_output`** - this is the single most important gotcha in
-  this harness, and it's worth understanding before adding a new assertion. `ALT_VIEW` mode makes
+  this harness, and it's worth understanding before adding a new assertion. `COMPACT_VIEW` mode makes
   the code under test reassign `sys.stdout` to a **file-only** `Logger` right before the main
   polling loop starts (`spotify_monitor.py`, just before "Primary loop"). From that point on, bare
   `print(...)` calls - e.g. `*** Friend got INACTIVE after listening to music for ...` and
   `*** Friend got ACTIVE after being offline for ...` - land **only in the log file**, never in
-  `session.output`. Only `print_to_screen()` / `print_to_both()` calls (the song lines, `Detected`/
+  `session.output`. Only `print_to_screen_and_log()` calls (the song lines, `Detected`/
   `Cleared`) reach `session.output`, because they write straight to the *original* `Logger`'s
   captured terminal stream, bypassing whatever `sys.stdout` currently points at. If you need to
   assert on an idle/resume message, or anything else printed with a bare `print()` inside the main
@@ -553,7 +553,7 @@ symptom exactly, rather than merely firing at the wrong offset.
 **The fix:** `PlaylistTracker.advance()`'s "playlist not (newly) matched, or an exception to the one
 we were already tracking" branch now runs the same "did this increment just cross `qty_start`" check
 the main matching branch already had, immediately after incrementing the exception playlist's
-`count_start` - building and (eagerly, for `ALT_VIEW`) printing the `Detected` message right then,
+`count_start` - building and (eagerly, for `COMPACT_VIEW`) printing the `Detected` message right then,
 via the same `on_detected()` callback the main branch uses, rather than only ever checking that
 condition in the one branch this scenario never reaches. Verified identical in the pre-refactor
 original code too - not a refactor regression.
@@ -865,7 +865,7 @@ Fields it checks:
 | `url`, `icon` | optional | `str` if present |
 | anything else | ignored | logged via `print_debug`, entry still kept - config files can carry forward-compatible/future fields without being rejected |
 
-An autouse fixture (`_silence_error_output`) stubs `print_to_both` to a no-op for this whole class,
+An autouse fixture (`_silence_error_output`) stubs `print_to_screen_and_log` to a no-op for this whole class,
 since the real one requires a fully set-up `log_logger` that's irrelevant to what these tests check
 (the filtered return value, not the printed text).
 

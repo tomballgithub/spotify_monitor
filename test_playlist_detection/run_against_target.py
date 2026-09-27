@@ -79,7 +79,7 @@ sm.search_playlist = lambda *a, **k: False  # let PlaylistTracker's own matching
 
 # ---- Config: enable the custom monitored-playlist feature and seed one playlist ----
 sm.JMK_MODE = True
-sm.ALT_VIEW = True
+sm.COMPACT_VIEW = True
 sm.TOKEN_SOURCE = "cookie"
 sm.SP_DC_COOKIE = "fake"
 scratch_log_fd, sm.FINAL_LOG_PATH = tempfile.mkstemp(prefix="spotify_monitor_test_", suffix=".log")
