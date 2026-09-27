@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v3.5.1
+v3.6
 
 Tool implementing real-time tracking of Spotify friends music activity:
 https://github.com/misiektoja/spotify_monitor/
@@ -20,7 +20,7 @@ pycookiecheat (optional, used for Chrome, Brave and Chromium cookie import)
 colorama (optional, for better colours on Windows terminals)
 """
 
-VERSION = "3.5.1"
+VERSION = "3.6"
 
 # API 401 error means sp_dc cookie has expired. Lasts one year. 03/15/2025
 
@@ -1265,6 +1265,7 @@ SP_CACHED_CLIENT_ID = ""
 SPOTIFY_LISTENING_ACTIVITY_URL = "https://spclient.wg.spotify.com/listening-activity/v1/feed"  # unofficial endpoint behind Spotify's Listening Activity feature, found by @JoaoGabriel-Lima (issue #60)
 SPOTIFY_BUDDYLIST_URL = "https://guc-spclient.spotify.com/presence-view/v1/buddylist"
 SPOTIFY_PLAYLIST_METADATA_URL = "https://spclient.wg.spotify.com/playlist/v2/playlist"
+SPOTIFY_ENTITY_METADATA_URL = "https://spclient.wg.spotify.com/metadata/4"
 SPOTIFY_ACTIVITY_RESULT_LIMIT = 100
 
 # The feed sometimes reports one track start twice a few seconds apart, so a same-track timestamp this close to the previous one is not a position change
@@ -1275,6 +1276,10 @@ LIVE_REPEAT_TOLERANCE = 5
 
 # A finish this close to one track length after a position change proves that the change restarted the track, since a move landing further into it ends sooner
 LIVE_RESTART_TOLERANCE = 3
+
+# The feed sometimes republishes the playing track with a fresh timestamp every few seconds, so this many consecutive checks with a moved timestamp count as such a storm rather than as seeks
+LIVE_STORM_SAMPLES = 2
+
 # Absence after which the live backend prints the follow and sharing advice, long enough to outlast a private session
 LIVE_ABSENCE_ADVICE_AFTER = 6 * 3600
 
@@ -6859,6 +6864,18 @@ def validate_webhook_headers(provider: Any = None) -> Optional[str]:
     return None
 
 
+# Returns one text value as a base64 RFC 2047 UTF-8 encoded word
+def rfc2047_encoded_word(text: str) -> str:
+    return "=?UTF-8?B?" + base64.b64encode(text.encode("utf-8")).decode("ascii") + "?="
+
+
+# Encodes one HTTP header value as an RFC 2047 UTF-8 word when it contains non-ASCII text
+def encode_non_ascii_header_value(value: str) -> str:
+    text = str(value)
+    # HTTP clients send header values as Latin-1 or ASCII, which cannot carry emoji or most non-Latin letters
+    return text if text.isascii() else rfc2047_encoded_word(text)
+
+
 # Builds provider-specific headers while formatting placeholders and applying private ntfy authentication
 def build_webhook_headers(provider: str, payload: dict) -> dict:
     validation_error = validate_webhook_headers(provider)
@@ -6881,7 +6898,9 @@ def build_webhook_headers(provider: str, payload: dict) -> dict:
         if token:
             headers = {name: value for name, value in headers.items() if name.casefold() != "authorization"}
             headers["Authorization"] = f"Bearer {token}"
-    return headers
+    # Placeholders can expand to emoji or letters a raw header cannot carry. ASCII values stay as written,
+    # so a value already encoded as RFC 2047, as ntfy documents for emoji tags, is not encoded a second time
+    return {name: encode_non_ascii_header_value(value) for name, value in headers.items()}
 
 
 # Returns whether one image URL is a complete HTTPS URL on a Spotify CDN host
@@ -9346,6 +9365,13 @@ def spotify_get_access_token_from_oauth_app(sp_client_id, sp_client_secret, use_
     return access_token
 
 
+# Maps list contexts that stand for an artist page to that artist, as the Spotify web player does
+def spotify_normalize_activity_context_uri(context_uri: str) -> str:
+    # The live feed reports play from an artist's Popular section as this list instead of the artist URI the legacy feed used
+    match = re.fullmatch(r"spotify:list:popular-release-segments-main-roles:artist_([A-Za-z0-9]{22})", context_uri)
+    return f"spotify:artist:{match.group(1)}" if match else context_uri
+
+
 # Converts the live feed to the friend shape while preserving its playback state
 def spotify_normalize_listening_activity(payload):
     if not isinstance(payload, dict) or not isinstance(payload.get("entities"), list):
@@ -9391,6 +9417,7 @@ def spotify_normalize_listening_activity(payload):
         context_uri = activity.get("contextUri", "")
         if not isinstance(context_uri, str):
             raise ValueError("Spotify listening activity context URI is malformed")
+        context_uri = spotify_normalize_activity_context_uri(context_uri)
         friend = {"timestamp": timestamp_ms, "isPlaying": is_playing, "user": {"uri": uri, "name": user_id}, "track": {"uri": track_uri, "name": "", "artist": {"uri": "", "name": ""}, "album": {"uri": "", "name": ""}, "context": {"uri": context_uri, "name": ""}}}
         if uri not in friends or timestamp_ms > friends[uri]["timestamp"]:
             friends[uri] = friend
@@ -9457,6 +9484,29 @@ def activity_user_ids(friend_activity) -> set:
     return {str(friend["user"]["uri"]).split("spotify:user:", 1)[-1] for friend in friend_activity.get("friends", []) if isinstance(friend, dict) and isinstance(friend.get("user"), dict) and friend["user"].get("uri")}
 
 
+# Returns the display names that one activity response carries, keyed by user ID
+def activity_user_names(friend_activity) -> dict:
+    names = {}
+    for friend in friend_activity.get("friends", []):
+        user = friend.get("user") if isinstance(friend, dict) else None
+        if isinstance(user, dict) and user.get("uri") and isinstance(user.get("name"), str):
+            names[str(user["uri"]).split("spotify:user:", 1)[-1]] = user["name"].strip()
+    return names
+
+
+# Names a user as "Name (user ID)", looking up the profile name when the known one is missing or repeats the ID
+def spotify_user_label(user_id, access_token, name="") -> AlertTarget:
+    # The live feed carries no names, so a name equal to the ID usually means none was resolved yet
+    if access_token and (not name or name == user_id):
+        name = spotify_activity_metadata("user", "spotify:user:" + user_id, access_token)
+    return AlertTarget(user_id, name)
+
+
+# Formats users as a sorted list of "Name (user ID)" labels, or the user ID alone when the name is unknown or the same
+def format_activity_users(user_ids, names, access_token) -> str:
+    return ", ".join(sorted((str(spotify_user_label(user_id, access_token, names.get(user_id, ""))) for user_id in user_ids), key=str.casefold))
+
+
 # Prints the users that only one of the two Friend Activity backends lists, since each can show users the other omits
 def print_other_backend_friends(friend_activity, access_token) -> None:
     other_backend = other_activity_backend()
@@ -9473,11 +9523,12 @@ def print_other_backend_friends(friend_activity, access_token) -> None:
     if not only_other and not only_selected:
         print(f"* The {other_backend} backend lists the same users")
         return
+    names = {**activity_user_names(other_friends), **activity_user_names(friend_activity)}
     if only_other:
-        print(f"* {len(only_other)} {'user' if len(only_other) == 1 else 'users'} visible only through the {other_backend} backend: {', '.join(only_other)}")
+        print(f"* {len(only_other)} {'user' if len(only_other) == 1 else 'users'} visible only through the {other_backend} backend: {format_activity_users(only_other, names, access_token)}")
         print(f"* {backend_switch_hint(other_backend)} to monitor them")
     if only_selected:
-        print(f"* {len(only_selected)} {'user' if len(only_selected) == 1 else 'users'} visible only through the {FRIEND_ACTIVITY_BACKEND} backend: {', '.join(only_selected)}")
+        print(f"* {len(only_selected)} {'user' if len(only_selected) == 1 else 'users'} visible only through the {FRIEND_ACTIVITY_BACKEND} backend: {format_activity_users(only_selected, names, access_token)}")
 
 
 # Fetches and briefly caches optional names omitted from the live activity feed
@@ -9499,6 +9550,8 @@ def spotify_activity_metadata(kind, uri, access_token):
             response.raise_for_status()
             info = response.json()
             name = info.get("name") if isinstance(info, dict) else None
+        elif kind in ("album", "artist"):
+            name = spotify_get_entity_name_spclient(uri, access_token)
         else:
             # The playlist service resolves personalized playlists such as Liked Songs that the web-player query reports as not found
             name = spotify_get_playlist_name_spclient(uri, access_token) or spotify_get_playlist_info_web(uri).get("sp_playlist_name")
@@ -9541,6 +9594,34 @@ def spotify_get_playlist_name_spclient(playlist_uri, access_token):
     return name if isinstance(name, str) else ""
 
 
+# Converts a base62 Spotify ID to the hexadecimal ID the metadata service expects
+def spotify_id_to_gid(item_id: str) -> str:
+    alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    if not re.fullmatch(r"[A-Za-z0-9]{22}", item_id):
+        raise ValueError("Spotify ID must contain 22 letters or digits")
+    number = 0
+    for character in item_id:
+        number = number * 62 + alphabet.index(character)
+    return f"{number:032x}"
+
+
+# Returns an album or artist name from Spotify's metadata service
+def spotify_get_entity_name_spclient(uri, access_token):
+    parts = uri.split(":")
+    if len(parts) != 3 or parts[0] != "spotify" or parts[1] not in ("album", "artist"):
+        raise ValueError("Spotify activity metadata URI is malformed")
+    url = f"{SPOTIFY_ENTITY_METADATA_URL}/{parts[1]}/{spotify_id_to_gid(parts[2])}"
+    headers = {"Authorization": f"Bearer {access_token}", "User-Agent": USER_AGENT, "Accept": "application/json"}
+    if TOKEN_SOURCE == "cookie" and SP_CACHED_CLIENT_ID:
+        headers["Client-Id"] = SP_CACHED_CLIENT_ID
+    debug_print("HTTP GET", url=url, context=f"{parts[1]} metadata", headers=sanitize_debug_headers(headers))
+    response = SESSION.get(url, params={"market": "from_token"}, headers=headers, timeout=FUNCTION_TIMEOUT, verify=VERIFY_SSL, allow_redirects=False)
+    debug_print("HTTP GET", url=url, context=f"{parts[1]} metadata", status=response.status_code)
+    response.raise_for_status()
+    payload = response.json()
+    return payload.get("name") if isinstance(payload, dict) else None
+
+
 # Completes live activity names from existing metadata backends only when a track is displayed
 def spotify_complete_live_activity(info, access_token, track):
     if "sp_is_playing" not in info:
@@ -9555,6 +9636,12 @@ def spotify_complete_live_activity(info, access_token, track):
         info["sp_playlist"] = info["sp_album"]
     elif context == track.get("sp_artist_uri"):
         info["sp_playlist"] = info["sp_artist"]
+    elif context in (track.get("sp_artists") or {}):
+        # Artist pages also list tracks where that artist is not the first credited one
+        info["sp_playlist"] = track["sp_artists"][context]
+    elif context.startswith(("spotify:album:", "spotify:artist:")):
+        # An album or artist the track does not name is looked up, since its context line would otherwise show a URI
+        info["sp_playlist"] = spotify_activity_metadata(context.split(":")[1], context, access_token) or context
     else:
         info["sp_playlist"] = context
 
@@ -9590,6 +9677,10 @@ class LivePlaybackTiming:
     finishes: List[Tuple[float, float, str]] = field(default_factory=list)
     # Finishing update seen by the last sample with the start it matched, settled by the next sample
     pending_finish: Optional[Tuple[float, float, str]] = None
+    # Consecutive checks of the playing track whose timestamp moved without landing on a finish, kept across a track change seen during a storm because storms outlast tracks
+    storm_moves: int = 0
+    # Earliest and latest possible start of a track first seen at a change, kept until a steady timestamp confirms that the reported start was not a republish
+    start_window: Optional[Tuple[float, float]] = None
 
     # Reports whether the sample follows the previous one closely enough to treat the interval as observed
     def continuous(self, now: float, max_gap: float) -> bool:
@@ -9625,6 +9716,38 @@ class LivePlaybackTiming:
                 return finish, origin, kind
         return None
 
+    # Reports whether the feed keeps republishing the playing track, so its timestamps no longer mark playback changes
+    def storming(self) -> bool:
+        return self.storm_moves >= LIVE_STORM_SAMPLES
+
+    # Estimates when a track change seen during a storm happened, using the finish predicted by an observed start when it falls between the two checks and their midpoint otherwise
+    def _storm_change_time(self, now: float, source_ts: Optional[float]) -> Optional[float]:
+        # A timestamp this close to the previous one bounds the change as tightly as any estimate
+        if not self.storming() or source_ts is None or self.source_ts is None or not self.source_ts + LIVE_POSITION_JITTER < source_ts <= now:
+            return None
+        for finish, _, kind in self.finishes:
+            if kind == "start" and self.source_ts - LIVE_REPEAT_TOLERANCE <= finish <= source_ts + LIVE_REPEAT_TOLERANCE:
+                self.event_trusted = True
+                return min(max(finish, self.source_ts), source_ts)
+        # A skip or an early end during a storm is only known to lie between the checks, so neither track keeps a precise boundary
+        self.event_trusted = False
+        self.precise = False
+        return (self.source_ts + source_ts) / 2
+
+    # Moves a start that a storm showed to be a possible republish to the middle of its window and marks the track imprecise
+    def _reopen_start(self) -> None:
+        if self.start_window is None:
+            return
+        earliest, latest = self.start_window
+        self.start_window = None
+        start = (earliest + latest) / 2
+        if self.segment_started_at == latest:
+            self.segment_started_at = start
+        self.track_started_at = start
+        self.precise = False
+        # The finish keeps the latest possible start, so a republish near it cannot pass for a repeat before the track can have ended
+        self.finishes = [(finish, origin, "unobserved" if kind == "start" else kind) for finish, origin, kind in self.finishes]
+
     # Records a sample and reports pause or resume transitions with the playing or paused time they end
     def observe(self, now: float, playing: bool, max_gap: float, source_ts: Optional[float] = None, track_changed: bool = False) -> Tuple[str, float]:
         gap = not self.continuous(now, max_gap)
@@ -9640,7 +9763,11 @@ class LivePlaybackTiming:
             self.finishes = [(self.anchor_ts + self.duration, self.anchor_ts, "unobserved")] if self.anchor_ts is not None else []
             if was_playing:
                 self._close_segment(self.sampled_at if self.sampled_at is not None else now)
-        event, duration = "", 0.0
+        if gap or playing != was_playing:
+            # A storm is recognized only within one uninterrupted stretch of playback
+            self.storm_moves = 0
+            self.start_window = None
+        event, duration, storm_anchor = "", 0.0, None
         if was_playing and not playing:
             at = self._event_time(now, source_ts, self.sampled_at if self.sampled_at is not None else now)
             # A track that finished before the pause is credited up to its finish only
@@ -9662,7 +9789,11 @@ class LivePlaybackTiming:
                 # The playhead keeps its position through a pause, so every predicted finish moves by the paused time
                 self.finishes = [(finish + duration, origin, kind) for finish, origin, kind in self.finishes]
         elif playing and track_changed:
-            if pending is not None and source_ts is not None and 0 <= source_ts - pending[0] <= LIVE_POSITION_JITTER:
+            storm_at = self._storm_change_time(now, source_ts)
+            if storm_at is not None:
+                # The first timestamp of a track seen during a storm may be a republish up to one check late
+                at = storm_at
+            elif pending is not None and source_ts is not None and 0 <= source_ts - pending[0] <= LIVE_POSITION_JITTER:
                 # The sample settling a finish carries the finishing timestamp or one from the restart a moment later
                 at = source_ts
                 self.event_trusted = True
@@ -9672,6 +9803,14 @@ class LivePlaybackTiming:
             if pending is not None:
                 self.track_seconds = max(self.track_seconds, self.duration)
             self.segment_started_at = at
+            if storm_at is not None:
+                # A start taken from the predicted finish also predicts the next one, while an estimated start keeps the latest timestamp so its finish cannot come early
+                storm_anchor = at if self.event_trusted else None
+            else:
+                self.storm_moves = 0
+                # A storm that begins with the track turns its first timestamp into a possible republish, so the start stays open until a steady timestamp confirms it
+                earliest = max(self.source_ts, self.sampled_at - LIVE_POSITION_JITTER) if self.event_trusted and not gap and self.source_ts is not None and self.sampled_at is not None else None
+                self.start_window = (earliest, at) if earliest is not None and earliest < at else None
         elif playing and gap:
             self.segment_started_at = now
         elif playing and source_ts is not None and self.source_ts is not None and self.anchor_ts is not None and source_ts > self.source_ts and source_ts - self.anchor_ts > LIVE_POSITION_JITTER:
@@ -9680,9 +9819,21 @@ class LivePlaybackTiming:
                 # The track reached its end, but whether it started again or another track followed is known from the next sample
                 self.pending_finish = (source_ts, matched[1], matched[2])
             else:
-                # Any other moved timestamp on the same track is a seek or an update without a position change, and a finish one track length later proves it restarted the track
-                self.finishes.append((source_ts + self.duration, source_ts, "seek"))
-        if source_ts is not None and (self.anchor_ts is None or event or track_changed or gap or source_ts < self.anchor_ts or source_ts - self.anchor_ts > LIVE_POSITION_JITTER):
+                self.storm_moves += 1
+                if not self.storming():
+                    # Any other moved timestamp on the same track is a seek or an update without a position change, and a finish one track length later proves it restarted the track
+                    self.finishes.append((source_ts + self.duration, source_ts, "seek"))
+                else:
+                    # Republished timestamps do not move the playhead, so they cannot prove restarts, and a start taken from one is only known to lie in its window
+                    self.finishes = [entry for entry in self.finishes if entry[2] != "seek"]
+                    self._reopen_start()
+        elif playing and source_ts is not None and source_ts == self.source_ts:
+            # A steady timestamp ends a storm and confirms the reported start
+            self.storm_moves = 0
+            self.start_window = None
+        if storm_anchor is not None:
+            self.anchor_ts = storm_anchor
+        elif source_ts is not None and (self.anchor_ts is None or event or track_changed or gap or source_ts < self.anchor_ts or source_ts - self.anchor_ts > LIVE_POSITION_JITTER):
             self.anchor_ts = source_ts
         self.sampled_at = now
         self.source_ts = source_ts
@@ -9715,6 +9866,7 @@ class LivePlaybackTiming:
         self.segment_started_at = restart_ts
         self.track_started_at = restart_ts
         self.anchor_ts = restart_ts
+        self.start_window = None
         self.finishes = [(restart_ts + self.duration, restart_ts, "start")]
         if self.pending_finish is not None:
             self.pending_finish = (self.pending_finish[0], restart_ts, "start")
@@ -10433,6 +10585,11 @@ def spotify_select_largest_image_url(sources: Any) -> str:
     return str(selected["url"])
 
 
+# Maps each track artist URI to its name, skipping entries without both values
+def spotify_track_artist_names(pairs) -> dict:
+    return {uri: name for uri, name in pairs if isinstance(uri, str) and uri.startswith("spotify:artist:") and isinstance(name, str) and name}
+
+
 # Normalizes Spotify web-player track metadata to the existing monitoring shape
 def spotify_normalize_web_track(track):
     if not isinstance(track, dict) or track.get("__typename") != "Track":
@@ -10446,6 +10603,10 @@ def spotify_normalize_web_track(track):
     artist_items = (track.get("firstArtist") or {}).get("items") or []
     artist = artist_items[0] if artist_items and isinstance(artist_items[0], dict) else {}
     artist_profile = artist.get("profile") or {}
+    other_artists = track.get("otherArtists")
+    other_artist_items = other_artists.get("items") if isinstance(other_artists, dict) else None
+    all_artist_items = [*artist_items, *(other_artist_items if isinstance(other_artist_items, list) else [])]
+    artists = spotify_track_artist_names((item.get("uri"), item["profile"].get("name") if isinstance(item.get("profile"), dict) else None) for item in all_artist_items if isinstance(item, dict))
     album = track.get("albumOfTrack") or {}
     if not isinstance(album, dict):
         album = {}
@@ -10457,7 +10618,7 @@ def spotify_normalize_web_track(track):
     sources = coverart.get("sources") if isinstance(coverart, dict) else []
     album_image_url = spotify_select_largest_image_url(sources)
 
-    return {"sp_track_duration": int(int(duration_ms) / 1000), "sp_track_url": spotify_get_web_entity_url(track, track_uri), "sp_track_uri": track_uri, "sp_track_name": track.get("name"), "sp_artist_url": spotify_get_web_entity_url(artist, artist_uri), "sp_artist_uri": artist_uri, "sp_artist_name": artist_profile.get("name") if isinstance(artist_profile, dict) else None, "sp_album_url": spotify_get_web_entity_url(album, album_uri), "sp_album_uri": album_uri, "sp_album_name": album.get("name"), "sp_album_image_url": album_image_url}
+    return {"sp_track_duration": int(int(duration_ms) / 1000), "sp_track_url": spotify_get_web_entity_url(track, track_uri), "sp_track_uri": track_uri, "sp_track_name": track.get("name"), "sp_artist_url": spotify_get_web_entity_url(artist, artist_uri), "sp_artist_uri": artist_uri, "sp_artist_name": artist_profile.get("name") if isinstance(artist_profile, dict) else None, "sp_artists": artists, "sp_album_url": spotify_get_web_entity_url(album, album_uri), "sp_album_uri": album_uri, "sp_album_name": album.get("name"), "sp_album_image_url": album_image_url}
 
 
 # Fetches and normalizes public track metadata from the Spotify web-player service
@@ -10635,7 +10796,7 @@ def _spotify_get_track_info_api(access_token, track_uri, oauth_app=False):
     album_uri = album.get("uri", "")
     album_image_url = spotify_select_largest_image_url(album.get("images"))
 
-    return {"sp_track_duration": int(int(duration_ms) / 1000), "sp_track_url": ((json_response.get("external_urls") or {}).get("spotify") or spotify_convert_uri_to_url(track_uri_value)), "sp_track_uri": track_uri_value, "sp_track_name": json_response.get("name"), "sp_artist_url": ((artist.get("external_urls") or {}).get("spotify") or spotify_convert_uri_to_url(artist_uri)), "sp_artist_uri": artist_uri, "sp_artist_name": artist.get("name"), "sp_album_url": ((album.get("external_urls") or {}).get("spotify") or spotify_convert_uri_to_url(album_uri)), "sp_album_uri": album_uri, "sp_album_name": album.get("name"), "sp_album_image_url": album_image_url}
+    return {"sp_track_duration": int(int(duration_ms) / 1000), "sp_track_url": ((json_response.get("external_urls") or {}).get("spotify") or spotify_convert_uri_to_url(track_uri_value)), "sp_track_uri": track_uri_value, "sp_track_name": json_response.get("name"), "sp_artist_url": ((artist.get("external_urls") or {}).get("spotify") or spotify_convert_uri_to_url(artist_uri)), "sp_artist_uri": artist_uri, "sp_artist_name": artist.get("name"), "sp_artists": spotify_track_artist_names((item.get("uri"), item.get("name")) for item in artists if isinstance(item, dict)), "sp_album_url": ((album.get("external_urls") or {}).get("spotify") or spotify_convert_uri_to_url(album_uri)), "sp_album_uri": album_uri, "sp_album_name": album.get("name"), "sp_album_image_url": album_image_url}
 
 
 # Selects the legacy or web-player track backend and falls back automatically
@@ -11439,13 +11600,14 @@ def doctor_check_target(report: DoctorReport, target_value=None) -> List[DoctorC
     if report.buddy_list is None:
         return [make_doctor_check("Target", "SKIP", "The monitored profile was not checked", "Authentication did not succeed, so no lookup was attempted")]
     try:
-        found, _ = spotify_get_friend_info(report.buddy_list, target_id)
+        found, info = spotify_get_friend_info(report.buddy_list, target_id)
     except Exception as exc:
         advice = classify_recovery_error(exc, "target")
         return [make_doctor_check("Target", "FAIL", "The activity response could not be inspected", advice.detail, advice)]
+    target_label = spotify_user_label(target_id, report.access_token, info.get("sp_username") or "")
     if found:
-        return [make_doctor_check("Target", "PASS", f"Target '{target_id}' can be monitored", "The target is visible in the authenticated activity response")]
-    detail = f"Target '{target_id}' was absent from the authenticated {FRIEND_ACTIVITY_BACKEND} response"
+        return [make_doctor_check("Target", "PASS", f"Target '{target_label}' can be monitored", "The target is visible in the authenticated activity response")]
+    detail = f"Target '{target_label}' was absent from the authenticated {FRIEND_ACTIVITY_BACKEND} response"
     followed = doctor_target_follow_state(report, target_id)
     if followed is True:
         detail += ". The monitoring account follows the target, so the target is not sharing listening activity with it" + (" or is in a private session" if live_activity_backend() else "")
@@ -13028,6 +13190,10 @@ def _wizard_offer_target_follow(target_user_id: str) -> str:
         print("No follow request was sent. Run the doctor check below after fixing authentication.")
         return "unavailable"
     try:
+        target_label = spotify_user_label(normalize_spotify_user_id(target_user_id), report.access_token)
+    except ValueError:
+        target_label = AlertTarget(target_user_id)
+    try:
         is_followed = spotify_user_is_followed(report.access_token, target_user_id)
     except Exception as exc:
         print(f"Follow status could not be checked: {sanitize_error_text(exc)}")
@@ -13036,18 +13202,18 @@ def _wizard_offer_target_follow(target_user_id: str) -> str:
     if is_followed:
         # The target user ID is public profile data, the scanner conflates it with the token that fetched it
         # codeql[py/clear-text-logging-sensitive-data]
-        print(f"The monitoring account already follows '{target_user_id}'.")
+        print(f"The monitoring account already follows '{target_label}'.")
         return "already_followed"
     if _wizard_target_visible(report, target_user_id):
         # The target user ID is public profile data, the scanner conflates it with the token that fetched it
         # codeql[py/clear-text-logging-sensitive-data]
-        print(f"The monitoring account does not follow '{target_user_id}', but the target already shares listening activity with it, so following is not required.")
+        print(f"The monitoring account does not follow '{target_label}', but the target already shares listening activity with it, so following is not required.")
         return "visible"
     # The target user ID is public profile data, the scanner conflates it with the token that fetched it
     # codeql[py/clear-text-logging-sensitive-data]
-    print(f"The monitoring account does not follow '{target_user_id}'.")
+    print(f"The monitoring account does not follow '{target_label}'.")
     print()
-    if not _wizard_ask_yes_no(f"Follow '{target_user_id}' now using the configured Spotify account?", default=False):
+    if not _wizard_ask_yes_no(f"Follow '{target_label}' now using the configured Spotify account?", default=False):
         print("Follow skipped. Spotify Monitor will not change the account.")
         return "declined"
     mutation_error = ""
@@ -13064,7 +13230,7 @@ def _wizard_offer_target_follow(target_user_id: str) -> str:
     if verified:
         # The target user ID is public profile data, the scanner conflates it with the token that fetched it
         # codeql[py/clear-text-logging-sensitive-data]
-        print(f"Follow verified. The monitoring account now follows '{target_user_id}'.")
+        print(f"Follow verified. The monitoring account now follows '{target_label}'.")
         return "followed"
     if mutation_error:
         print(f"Spotify could not follow the target: {mutation_error}")
@@ -15502,7 +15668,7 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                     if recovery_hint_tracker.should_render(not_found_advice):
                         print(f"To fix: {not_found_advice.fix}")
                 else:
-                    print(f"User '{user_uri_id}' not found - make sure your friend is followed and has activity sharing enabled. Retrying in {display_time(activity_disappeared_interval())} intervals")
+                    print(f"User '{spotify_user_label(user_uri_id, sp_accessToken)}' not found - make sure your friend is followed and has activity sharing enabled. Retrying in {display_time(activity_disappeared_interval())} intervals")
                     other_backend = other_activity_backend()
                     if target_visible_in_other_backend(sp_accessToken, user_uri_id):
                         print(f"The target is visible through the {other_backend} backend. {backend_switch_hint(other_backend)}")
