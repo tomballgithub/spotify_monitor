@@ -23,7 +23,7 @@ def make_playlist(name="Test Playlist", qty_start=3, qty_end=2, icon="<3", notif
         "name": name, "filename": "", "qty_start": qty_start, "qty_end": qty_end,
         "url": "http://playlist", "icon": icon, "notify": notify, "override": override, "refresh": 0,
         "tracks_set": {f"ARTIST - {t}" for t in tracks},
-        "count_start": 0, "count_end": 0, "count_shuffle": 0,
+        "count_start": 0, "count_played": 0, "count_end": 0, "count_shuffle": 0,
     }
 
 
@@ -112,6 +112,31 @@ def test_custom_icon_shown_on_matched_songs_not_on_shuffle_songs(monkeypatch, ic
     assert records[9]["track"] == "OFFLIST1", "an off-list (shuffle-tolerance) song should NOT carry the custom icon"
     assert records[9]["icon_add"] is True, "the shuffle-tolerance song should carry the generic '*' instead"
     assert_events_exactly(session, detected_at=(6,), cleared_at=())
+
+
+# --- Regression: real production bug - "Cleared, Song Count: 3" after only one song. The count
+# reported count_start, the detection counter, which a playlist Spotify itself reports by name (or
+# one with 'override' on the first song of a session) jump-starts to qty_start for an instant
+# detection - so it read qty_start no matter how few songs were actually played. It now reports
+# count_played, which only counts songs really played ---
+def _cleared_lines(session):
+    return [line for line in session.output.splitlines() if "' Cleared" in line]
+
+
+def test_cleared_song_count_is_songs_played_after_a_reported_name_match(monkeypatch):
+    # SONGA is reported under the monitored playlist's own name -> detected on that one song
+    seq = build_sequence(["OFFLIST0", ("SONGA", "Test Playlist"), "OFFLIST1", "OFFLIST2"])  # offsets 0, 3, 6, 9
+    session = PlaylistSession(monkeypatch, make_playlist(), seq, iterations=6)
+    assert_events_exactly(session, detected_at=(3,), cleared_at=(9,))
+    assert [line.endswith("Cleared, Song Count: 1") for line in _cleared_lines(session)] == [True], _cleared_lines(session)
+    assert [message for kind, message in session.notifications if kind == "cleared"][0].endswith("Song Count: 1")
+
+
+def test_cleared_song_count_is_songs_played_after_an_override_start(monkeypatch):
+    # override: the song already playing when the session starts is trusted at once
+    seq = build_sequence(["SONGA", "OFFLIST1", "OFFLIST2"])  # offsets 0, 3, 6
+    session = PlaylistSession(monkeypatch, make_playlist(override=True), seq, iterations=6)
+    assert [line.endswith("Cleared, Song Count: 1") for line in _cleared_lines(session)] == [True], _cleared_lines(session)
 
 
 # --- Regression: a song can genuinely belong to both the playlist Spotify reports as current

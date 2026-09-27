@@ -33,6 +33,7 @@ here is that sheets_helper invokes exactly one of on_reauth_silent()/on_reauth_r
 pass (never both, always after on_checking()), based on real elapsed time against a patched grace
 period, and that every public entry point threads all three callbacks down to _get_credentials().
 """
+import io
 import time
 import webbrowser
 
@@ -389,28 +390,22 @@ def test_get_worksheet_sets_an_explicit_timeout_on_the_gspread_client(monkeypatc
 # DEBUG_JMK on-screen setting is for operationally meaningful state changes, not this level of
 # internal detail, so it must not affect whether this is shown live.
 def test_sheets_debug_log_only_writes_to_the_log_file_never_the_terminal(monkeypatch):
-    log_only_calls = []
-    terminal_only_calls = []
-
-    class FakeLogger:
-        def log_only(self, message):
-            log_only_calls.append(message)
-
-        def terminal_only(self, message):
-            terminal_only_calls.append(message)
-
-    monkeypatch.setattr(monitor, "log_logger", FakeLogger(), raising=False)
+    # A Logger over two in-memory buffers, built without __init__ so no real log file is opened
+    terminal, logfile = io.StringIO(), io.StringIO()
+    logger = monitor.Logger.__new__(monitor.Logger)
+    logger.__dict__["terminal"] = terminal
+    logger.__dict__["logfile"] = logfile
+    monkeypatch.setattr(monitor.sys, "stdout", logger)
 
     monitor.sheets_debug_log("worksheet() took 21.83s")
 
-    assert len(log_only_calls) == 1
-    assert "worksheet() took 21.83s" in log_only_calls[0]
-    assert terminal_only_calls == []
+    assert "worksheet() took 21.83s" in logfile.getvalue()
+    assert terminal.getvalue() == ""
 
 
-def test_sheets_debug_log_tolerates_a_missing_log_logger(monkeypatch):
-    """Pure diagnostic output - must not crash a real write just because log_logger isn't set up
-    yet (or, as in most tests, never is)."""
-    monkeypatch.setattr(monitor, "log_logger", None, raising=False)
+def test_sheets_debug_log_tolerates_output_without_a_log_file(monkeypatch):
+    """Pure diagnostic output - must not crash a real write just because stdout isn't a Logger
+    (logging disabled, or, as in most tests, never set up)."""
+    monkeypatch.setattr(monitor.sys, "stdout", io.StringIO())
 
     monitor.sheets_debug_log("this must not raise")

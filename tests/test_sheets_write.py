@@ -102,6 +102,64 @@ def test_write_row_still_retries_transient_errors_after_switching_to_append(monk
     assert next(iter(attempts[0]["requests"][0])) == "appendCells"
 
 
+# The append request is timed on its own (separately from opening the worksheet), with how long it's
+# been since the previous append, so slow writes can be told apart from a slow worksheet open and
+# matched against how long the connection sat idle
+def test_write_row_logs_how_long_the_append_itself_took(monkeypatch):
+    ws = FakeWorksheet()
+    clock = iter([1000.0, 1000.4, 1600.0, 1617.5])  # two appends: 0.4s, then 17.5s after 600s idle
+
+    monkeypatch.setattr(sheets_helper, "_get_worksheet", lambda *args, **kwargs: ws)
+    monkeypatch.setattr(sheets_helper, "_last_append_finished_at", None)
+    monkeypatch.setattr(sheets_helper.time, "time", lambda: next(clock))
+    lines = []
+
+    sheets_helper._write_row("sheet-id", "JMK", ["2026-01-01", "divider"], "client.json", "token.json", debug_log=lines.append)
+    sheets_helper._write_row("sheet-id", "JMK", ["2026-01-01", "song"], "client.json", "token.json", debug_log=lines.append)
+
+    assert lines == [
+        "sheets_helper: append to tab 'JMK' took 0.40s (attempt 1, first append this run)",
+        "sheets_helper: append to tab 'JMK' took 17.50s (attempt 1, 600s since the previous append)",
+    ]
+
+
+# A failed attempt is timed too, so a slow response that ends in an error still shows up
+def test_write_row_logs_a_failed_append_attempt_before_the_retry(monkeypatch):
+    ws = FakeWorksheet()
+
+    class FlakyResponse:
+        status_code = 503
+
+    class FlakyError(Exception):
+        def __init__(self):
+            self.response = FlakyResponse()
+
+    calls = []
+
+    def flaky_batch_update(body):
+        calls.append(body)
+        if len(calls) == 1:
+            raise FlakyError()
+        return {}
+
+    ws.spreadsheet.batch_update = flaky_batch_update
+    clock = iter([100.0, 115.0, 120.0, 120.5])
+    monkeypatch.setattr(sheets_helper, "_get_worksheet", lambda *args, **kwargs: ws)
+    monkeypatch.setattr(sheets_helper, "_last_append_finished_at", None)
+    monkeypatch.setattr(sheets_helper.time, "time", lambda: next(clock))
+    monkeypatch.setattr(sheets_helper.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr("builtins.print", lambda *args, **kwargs: None)
+    lines = []
+
+    ok, _ = sheets_helper._write_row("sheet-id", "JMK", ["2026-01-01", "song"], "client.json", "token.json", debug_log=lines.append)
+
+    assert ok is True
+    assert lines == [
+        "sheets_helper: append to tab 'JMK' failed after 15.00s (attempt 1, first append this run): FlakyError",
+        "sheets_helper: append to tab 'JMK' took 0.50s (attempt 2, first append this run)",
+    ]
+
+
 # Regression: gspread's own Client.open_by_key() (via Spreadsheet.__init__()) and
 # Spreadsheet.worksheet() each independently call fetch_sheet_metadata() to get the same workbook
 # metadata - confirmed by direct measurement that this single call alone can cost anywhere from a

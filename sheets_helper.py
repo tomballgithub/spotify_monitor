@@ -251,6 +251,11 @@ _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 _MAX_WRITE_ATTEMPTS = 3
 _RETRY_BACKOFF_SECONDS = 2  # 2s before the 2nd attempt, 4s before the 3rd
 
+# When the last append request finished, so each append's timing line can say how long the
+# connection sat idle before it - slow appends have been showing up mostly on the first write after
+# a quiet spell, and this is what shows whether that holds
+_last_append_finished_at = None
+
 
 def _is_retryable(e):
     """Whether e looks like one of the transient blips Google's API explicitly expects
@@ -258,6 +263,12 @@ def _is_retryable(e):
     fix (bad credentials, bad spreadsheet id, a malformed request, etc.)."""
     status_code = getattr(getattr(e, "response", None), "status_code", None)
     return status_code in _RETRYABLE_STATUS_CODES
+
+
+def _describe_idle(started_at):
+    if _last_append_finished_at is None:
+        return "first append this run"
+    return f"{started_at - _last_append_finished_at:.0f}s since the previous append"
 
 
 def _write_row(spreadsheet_id, tab_name, row, client_file, token_file, on_checking=None, on_reauth_silent=None, on_reauth_required=None, debug_log=None):
@@ -285,11 +296,14 @@ def _write_row(spreadsheet_id, tab_name, row, client_file, token_file, on_checki
     # specific to this being the first write of a run) are retried inline with a short backoff
     # before falling back to the queue, so a 2-6 second Google-side hiccup resolves silently
     # instead of triggering a full queue+alert+email cycle.
+    global _last_append_finished_at
     last_error = None
     for attempt in range(_MAX_WRITE_ATTEMPTS):
+        append_started_at = None
         try:
             ws = _get_worksheet(spreadsheet_id, tab_name, client_file, token_file, on_checking, on_reauth_silent, on_reauth_required, debug_log)
             date_serial = _date_to_serial(row[0])
+            append_started_at = time.time()
             ws.spreadsheet.batch_update({
                 "requests": [
                     {
@@ -312,9 +326,15 @@ def _write_row(spreadsheet_id, tab_name, row, client_file, token_file, on_checki
                     },
                 ]
             })
+            finished_at = time.time()
+            if debug_log:
+                debug_log(f"sheets_helper: append to tab '{tab_name}' took {finished_at - append_started_at:.2f}s (attempt {attempt + 1}, {_describe_idle(append_started_at)})")
+            _last_append_finished_at = finished_at
             return True, None
         except Exception as e:
             last_error = e
+            if debug_log and append_started_at is not None:
+                debug_log(f"sheets_helper: append to tab '{tab_name}' failed after {time.time() - append_started_at:.2f}s (attempt {attempt + 1}, {_describe_idle(append_started_at)}): {type(e).__name__}")
             if attempt < _MAX_WRITE_ATTEMPTS - 1 and _is_retryable(e):
                 delay = _RETRY_BACKOFF_SECONDS * (attempt + 1)
                 print(f"* Google Sheet write to tab '{tab_name}' hit a transient error ({e}) - retrying in {delay}s (attempt {attempt + 2}/{_MAX_WRITE_ATTEMPTS})...")

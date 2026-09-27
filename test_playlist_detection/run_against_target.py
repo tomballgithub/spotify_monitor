@@ -92,7 +92,7 @@ sm.monitored_playlists_data["Test Playlist"] = {
     'name': "Test Playlist", 'filename': "", 'qty_start': 3, 'qty_end': 2,
     'url': 'http://playlist', 'icon': ' <3', 'notify': True, 'override': False, 'refresh': 0,
     'tracks_set': {"RIHANNA - UMBRELLA", "RIHANNA - LOVE ON THE BRAIN"},
-    'count_start': 0, 'count_end': 0, 'count_shuffle': 0,
+    'count_start': 0, 'count_played': 0, 'count_end': 0, 'count_shuffle': 0,
 }
 sm.ADD_PLAYLISTS_TO_MONITOR = [sm.monitored_playlists_data["Test Playlist"]]
 

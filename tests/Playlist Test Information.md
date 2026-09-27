@@ -115,7 +115,7 @@ def make_playlist(name="Test Playlist", qty_start=3, qty_end=2, icon="<3", notif
         "name": name, "filename": "", "qty_start": qty_start, "qty_end": qty_end,
         "url": "http://playlist", "icon": icon, "notify": notify, "override": override,
         "refresh": 0, "tracks_set": {f"ARTIST - {t}" for t in tracks},
-        "count_start": 0, "count_end": 0, "count_shuffle": 0,
+        "count_start": 0, "count_played": 0, "count_end": 0, "count_shuffle": 0,
     }
 ```
 

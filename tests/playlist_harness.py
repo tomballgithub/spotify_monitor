@@ -12,6 +12,7 @@ import io
 import re
 import time as real_time
 from datetime import datetime as real_datetime
+from typing import TextIO, cast
 
 import spotify_monitor as monitor
 
@@ -93,9 +94,11 @@ class FakeClock:
 
     def __init__(self, start):
         self.value = start
+        # Feed timestamp of the latest friends-list entry served, which a real clock is never behind
+        self.feed = None
 
     def time(self):
-        return self.value
+        return self.value if self.feed is None else max(self.value, self.feed)
 
 
 class PlaylistSession:
@@ -143,6 +146,9 @@ class PlaylistSession:
         # it's reporting as context - used to test that a song genuinely being in the reported
         # playlist doesn't stop it from ALSO counting toward a monitored playlist it's also on.
         monkeypatch.setattr(monitor, "search_playlist", lambda *a, **k: search_playlist_result)
+        # A friend missing from the list triggers an account-deleted check, which would otherwise go to
+        # Spotify - the target is never deleted in these scenarios
+        monkeypatch.setattr(monitor, "is_user_removed", lambda *a, **k: False)
 
         monkeypatch.setattr(monitor, "JMK_MODE", True)
         monkeypatch.setattr(monitor, "COMPACT_VIEW", compact_view)
@@ -168,18 +174,16 @@ class PlaylistSession:
         self._log_path = log_path
 
         index = [0]
-        # The monitor's wall clock (datetime.now(), behind the printed timestamps and [NN]) follows the
-        # feed timestamp of the latest entry served - the moment a real run would see that song - and
-        # holds through absent() polls. Real time barely advances while time.sleep is mocked, so
-        # without this every [NN] would read 00.
-        feed_now = [None]
+        # The monitor's clock (time.time() behind [NN], datetime.now() behind the printed timestamps)
+        # follows the feed timestamp of the latest entry served - the moment a real run would see that
+        # song - and holds through absent() polls. Real time barely advances while time.sleep is
+        # mocked, so without this every [NN] would read 00.
+        clock = self.clock
 
         class _FeedClock(real_datetime):
             @classmethod
             def now(cls, tz=None):
-                if feed_now[0] is None:
-                    return real_datetime.now(tz)
-                return real_datetime.fromtimestamp(feed_now[0], tz)
+                return real_datetime.fromtimestamp(clock.time(), tz)
 
         monkeypatch.setattr(monitor, "datetime", _FeedClock)
 
@@ -192,7 +196,7 @@ class PlaylistSession:
                 entry, clock_value = item
                 self.clock.value = clock_value
             if entry.get("friends"):
-                feed_now[0] = entry["friends"][0]["timestamp"] / 1000
+                self.clock.feed = entry["friends"][0]["timestamp"] / 1000
             return entry
 
         monkeypatch.setattr(monitor, "spotify_get_friends_json", next_friends)
@@ -210,26 +214,24 @@ class PlaylistSession:
         monkeypatch.setattr(monitor.time, "sleep", controlled_sleep)
 
         buf = io.StringIO()
+        logger = None
         try:
             with contextlib.redirect_stdout(buf):
-                # Logger.__init__ captures sys.stdout at construction time (via
-                # unwrap_terminal_stream), so it must be built *after* redirect_stdout is active,
-                # or print_to_screen_and_log()'s output goes to the real terminal instead of `buf`.
-                monkeypatch.setattr(monitor, "log_logger", monitor.Logger(log_path, mode="screen"), raising=False)
-                monitor.spotify_monitor_friend_uri(TARGET_USER_ID, [], None)
+                # main() normally makes sys.stdout a Logger on FINAL_LOG_PATH. Built while `buf` is
+                # sys.stdout, so `buf` is its terminal: once COMPACT_VIEW quiets the screen, bare
+                # print() - e.g. "Friend got INACTIVE"/"Friend got ACTIVE after being offline" - lands
+                # only in the log file, and only print_to_screen_and_log() lines still reach `buf`
+                logger = monitor.Logger(log_path)
+                # cast: a Logger stands in for sys.stdout exactly as main() uses it, but is not typed as a TextIO
+                with contextlib.redirect_stdout(cast(TextIO, logger)):
+                    monitor.spotify_monitor_friend_uri(TARGET_USER_ID, [], None)
         except _StopTest:
             pass
         finally:
-            # COMPACT_VIEW makes the code under test reassign sys.stdout to a file-only Logger just
-            # before the primary loop starts (so bare print() - e.g. "Friend got INACTIVE"/"Friend
-            # got ACTIVE after being offline" - lands only in the log file, not in `buf`; only
-            # print_to_screen_and_log() calls write to `buf`, via the original Logger's
-            # captured terminal reference). Read the log file before it's removed so those
-            # log-only messages are still checkable via self.log_output.
-            try:
-                monitor.log_logger.logfile.close()
-            except OSError:
-                pass
+            # Read the log file before it's removed so those log-only messages are still checkable
+            # via self.log_output
+            if logger is not None:
+                logger.logfile.close()
             try:
                 with open(log_path, encoding="utf-8") as f:
                     self.log_output = f.read()
