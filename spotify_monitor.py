@@ -14909,7 +14909,8 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                         outage_lasted = outage.recovered()
                         if outage_lasted is not None:
                             if COMPACT_VIEW:
-                                print_compact_view_recovery(outage_lasted, "Activity checks")
+                                #jmk print_compact_view_recovery(outage_lasted, "Activity checks")
+                                pass #jmk
                             print_outage_recovery(AlertTarget(user_uri_id, sp_username), outage_lasted, error_alert)
                         recovery_hint_tracker.reset()
                         email_sent = False
@@ -14936,7 +14937,8 @@ def spotify_monitor_friend_uri(user_uri_id, tracks, csv_file_name):
                         # A failure is reported once, then left to the hourly reminder rather than repeated on every check
                         outage_outcome = outage.failed(advice)
                         if COMPACT_VIEW and outage_outcome in ("full", "changed"):
-                            print_compact_view_failure(advice.summary)
+                            #jmk print_compact_view_failure(advice.summary)
+                            pass #jmk
                         if outage_outcome == "full":
                             print(render_recovery_advice(advice, retry_note=f"retrying in {display_time(retry_seconds)}", with_fix=recovery_hint_tracker.should_render(advice)))
                         elif outage_outcome == "changed":
